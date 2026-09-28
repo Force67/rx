@@ -17,7 +17,7 @@
 #include "rxe/gpu/rhi/types.h"
 #include "rxe/ui/window/window.h"
 
-namespace rx::render {
+namespace rx::gpu {
 
 class Swapchain;
 
@@ -114,7 +114,7 @@ class Device {
  public:
   static constexpr u32 kMaxFramesInFlight = 2;
 
-  static base::UniquePointer<Device> Create(const DeviceDesc& desc, Window& window);
+  static base::UniquePointer<Device> Create(const DeviceDesc& desc, ui::Window& window);
 
   // Surfaceless device: a real GPU device with the same feature enablement and
   // caps as the windowed path, but with no presentation surface or swapchain.
@@ -140,7 +140,7 @@ class Device {
   // lost, for platforms that destroy and recreate the surface across the app
   // lifecycle (Android background/foreground). Adapter and queues are
   // unchanged. Returns false if the new surface could not be created.
-  virtual bool RecreateSurface(Window& window) = 0;
+  virtual bool RecreateSurface(ui::Window& window) = 0;
 
   // Destroys the presentation surface (its swapchain must already be gone).
   virtual void DestroySurface() = 0;
@@ -386,6 +386,6 @@ class Device {
   DeviceCaps caps_;
 };
 
-}  // namespace rx::render
+}  // namespace rx::gpu
 
 #endif  // RX_RENDER_RHI_DEVICE_H_

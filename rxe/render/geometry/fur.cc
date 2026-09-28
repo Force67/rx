@@ -31,17 +31,17 @@ struct FurPush {
 
 }  // namespace
 
-bool FurPass::Initialize(Device& device, Format color_format, Format depth_format) {
+bool FurPass::Initialize(gpu::Device& device, gpu::Format color_format, gpu::Format depth_format) {
   asset::Mesh sphere = asset::MakeSphere(radius_, 64, 96, asset::MakeAssetId("builtin/fur/sphere"));
   const asset::MeshLod& lod = sphere.lods[0];
   index_count_ = static_cast<u32>(lod.indices.size());
   vertices_ = device.CreateBufferWithData(
       ByteSpan(reinterpret_cast<const u8*>(lod.vertices.data()),
                lod.vertices.size() * sizeof(asset::Vertex)),
-      kBufferUsageVertex);
+      gpu::kBufferUsageVertex);
   indices_ = device.CreateBufferWithData(
       ByteSpan(reinterpret_cast<const u8*>(lod.indices.data()), lod.indices.size() * sizeof(u32)),
-      kBufferUsageIndex);
+      gpu::kBufferUsageIndex);
 
   // TODO(rhi): blend preset mismatch: old alpha factors were ZERO/ONE (dst alpha
   // preserved); kAlpha uses ONE/ONE_MINUS_SRC_ALPHA.
@@ -49,20 +49,20 @@ bool FurPass::Initialize(Device& device, Format color_format, Format depth_forma
       .vertex = RX_SHADER(k_fur_vs_hlsl),
       .fragment = RX_SHADER(k_fur_ps_hlsl),
       .vertex_buffers = {{.stride = sizeof(asset::Vertex),
-                          .attributes = {{0, Format::kRGB32Float,
+                          .attributes = {{0, gpu::Format::kRGB32Float,
                                           offsetof(asset::Vertex, position)},
-                                         {1, Format::kRGB32Float, offsetof(asset::Vertex, normal)},
-                                         {3, Format::kRG32Float, offsetof(asset::Vertex, uv)}}}},
-      .raster = {.cull = CullMode::kBack, .front = FrontFace::kCounterClockwise},
+                                         {1, gpu::Format::kRGB32Float, offsetof(asset::Vertex, normal)},
+                                         {3, gpu::Format::kRG32Float, offsetof(asset::Vertex, uv)}}}},
+      .raster = {.cull = gpu::CullMode::kBack, .front = gpu::FrontFace::kCounterClockwise},
       .depth = {.test = true,
                 .write = false,  // shells alpha-blend; the core owns the depth
-                .compare = CompareOp::kGreaterEqual,  // reversed z
+                .compare = gpu::CompareOp::kGreaterEqual,  // reversed z
                 .format = depth_format},
       .color_formats = {color_format},
-      .blend = {BlendMode::kAlpha},
-      .sets = {{.slots = {{0, BindingType::kUniformBuffer}},
-                .stages = kShaderStageVertex}},
-      .push_constant_size = PushSize<FurPush>(),
+      .blend = {gpu::BlendMode::kAlpha},
+      .sets = {{.slots = {{0, gpu::BindingType::kUniformBuffer}},
+                .stages = gpu::kShaderStageVertex}},
+      .push_constant_size = gpu::PushSize<FurPush>(),
       .debug_name = "fur",
   });
   if (!pipeline_) {
@@ -72,8 +72,8 @@ bool FurPass::Initialize(Device& device, Format color_format, Format depth_forma
 
   // One per in-flight frame: the pass rewrites it while the previous frame may
   // still be reading its own copy.
-  for (GpuBuffer& camera : camera_) {
-    camera = device.CreateBuffer(sizeof(FurCamera), kBufferUsageUniform, true);
+  for (gpu::GpuBuffer& camera : camera_) {
+    camera = device.CreateBuffer(sizeof(FurCamera), gpu::kBufferUsageUniform, true);
     if (!camera.mapped) {
       RX_ERROR("fur camera uniform allocation failed");
       return false;
@@ -95,16 +95,16 @@ void FurPass::AddToGraph(RenderGraph& graph, ResourceHandle color, ResourceHandl
       },
       [this, slot, color, depth, model, view_proj, sun_dir, sun_color, ambient,
        params](PassContext& ctx) {
-        const GpuImage& target = ctx.graph->image(color);
-        ColorAttachment col[] = {{.view = target.view, .load = LoadOp::kLoad}};
-        DepthAttachment dep{.view = ctx.graph->image(depth).view, .load = LoadOp::kLoad};
+        const gpu::GpuImage& target = ctx.graph->image(color);
+        gpu::ColorAttachment col[] = {{.view = target.view, .load = gpu::LoadOp::kLoad}};
+        gpu::DepthAttachment dep{.view = ctx.graph->image(depth).view, .load = gpu::LoadOp::kLoad};
         ctx.cmd->BeginRendering({.extent = target.extent, .colors = col, .depth = &dep});
 
         ctx.cmd->BindPipeline(pipeline_);
         const FurCamera camera{view_proj};
         base::MemCopy(camera_[slot].mapped, &camera, sizeof(camera));
         ctx.cmd->BindTransient(0,
-                               {Bind::Uniform(0, camera_[slot], 0, sizeof(FurCamera))});
+                               {gpu::Bind::Uniform(0, camera_[slot], 0, sizeof(FurCamera))});
 
         FurPush push{};
         push.model = model;
@@ -123,17 +123,17 @@ void FurPass::AddToGraph(RenderGraph& graph, ResourceHandle color, ResourceHandl
         ctx.cmd->Push(push);
 
         ctx.cmd->BindVertexBuffer(0, vertices_, 0);
-        ctx.cmd->BindIndexBuffer(indices_, 0, IndexType::kUint32);
+        ctx.cmd->BindIndexBuffer(indices_, 0, gpu::IndexType::kUint32);
         ctx.cmd->DrawIndexed(index_count_, params.shell_count, 0, 0, 0);
         ctx.cmd->EndRendering();
       });
 }
 
-void FurPass::Destroy(Device& device) {
+void FurPass::Destroy(gpu::Device& device) {
   device.DestroyPipeline(pipeline_);
   device.DestroyBuffer(vertices_);
   device.DestroyBuffer(indices_);
-  for (GpuBuffer& camera : camera_) {
+  for (gpu::GpuBuffer& camera : camera_) {
     if (camera) device.DestroyBuffer(camera);
     camera = {};
   }

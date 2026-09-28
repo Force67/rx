@@ -21,15 +21,15 @@ struct SsgiPush {
 
 }  // namespace
 
-bool SsgiPass::Initialize(Device& device) {
+bool SsgiPass::Initialize(gpu::Device& device) {
   // 0: output color (storage), 1: depth, 2: normals, 3: scene color (sampled).
   pipeline_ = device.CreateComputePipeline({
       .shader = RX_SHADER(k_ssgi_cs_hlsl),
-      .sets = {{.slots = {{0, BindingType::kStorageImage},
-                          {1, BindingType::kSampledImage},
-                          {2, BindingType::kSampledImage},
-                          {3, BindingType::kSampledImage}}}},
-      .push_constant_size = PushSize<SsgiPush>(),
+      .sets = {{.slots = {{0, gpu::BindingType::kStorageImage},
+                          {1, gpu::BindingType::kSampledImage},
+                          {2, gpu::BindingType::kSampledImage},
+                          {3, gpu::BindingType::kSampledImage}}}},
+      .push_constant_size = gpu::PushSize<SsgiPush>(),
       .debug_name = "ssgi",
   });
   if (!pipeline_) {
@@ -39,7 +39,7 @@ bool SsgiPass::Initialize(Device& device) {
   return true;
 }
 
-void SsgiPass::Destroy(Device& device) {
+void SsgiPass::Destroy(gpu::Device& device) {
   device.DestroyPipeline(pipeline_);
   pipeline_ = {};
 }
@@ -49,7 +49,7 @@ ResourceHandle SsgiPass::AddToGraph(RenderGraph& graph, ResourceHandle scene_col
                                     const Mat4& inv_view_proj, const f32 proj_scale[2],
                                     f32 near_plane, u32 frame_index) {
   ResourceHandle out = graph.CreateTexture({.name = "ssgi",
-                                            .format = Format::kRGBA16Float,
+                                            .format = gpu::Format::kRGBA16Float,
                                             .width = extent_.width,
                                             .height = extent_.height});
 
@@ -77,10 +77,10 @@ ResourceHandle SsgiPass::AddToGraph(RenderGraph& graph, ResourceHandle scene_col
         push.sample_count = settings_.sample_count;
 
         ctx.cmd->BindPipeline(pipeline_);
-        ctx.cmd->BindTransient(0, {Bind::Storage(0, ctx.graph->image(out)),
-                                   Bind::Sampled(1, ctx.graph->image(depth)),
-                                   Bind::Sampled(2, ctx.graph->image(normals)),
-                                   Bind::Sampled(3, ctx.graph->image(scene_color))});
+        ctx.cmd->BindTransient(0, {gpu::Bind::Storage(0, ctx.graph->image(out)),
+                                   gpu::Bind::Sampled(1, ctx.graph->image(depth)),
+                                   gpu::Bind::Sampled(2, ctx.graph->image(normals)),
+                                   gpu::Bind::Sampled(3, ctx.graph->image(scene_color))});
         ctx.cmd->Push(push);
         ctx.cmd->Dispatch2D(extent_);
       });

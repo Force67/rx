@@ -18,7 +18,7 @@ namespace rx::render {
 // sampler until a real upscaler owns it.
 class PostPass {
  public:
-  static base::UniquePointer<PostPass> Create(Device& device, Format output_format);
+  static base::UniquePointer<PostPass> Create(gpu::Device& device, gpu::Format output_format);
   ~PostPass();
 
   PostPass(const PostPass&) = delete;
@@ -57,12 +57,12 @@ class PostPass {
   // read; flare_intensity is zeroed alongside). `flare` is the tight 1/4-res
   // highlight snapshot from the bloom down chain that the ghost sampling
   // reads.
-  void Record(PassContext& ctx, TextureView input, TextureView bloom, TextureView flare,
-              const GpuBuffer& exposure, u64 exposure_size, TextureView output,
-              Extent2D output_extent, const Params& params);
+  void Record(PassContext& ctx, gpu::TextureView input, gpu::TextureView bloom, gpu::TextureView flare,
+              const gpu::GpuBuffer& exposure, u64 exposure_size, gpu::TextureView output,
+              gpu::Extent2D output_extent, const Params& params);
 
  private:
-  explicit PostPass(Device& device) : device_(device) {}
+  explicit PostPass(gpu::Device& device) : device_(device) {}
 
   // A 32^3 strip lut: blue slices laid out horizontally, 1024x32 rgba8.
   static constexpr u32 kLutSize = 32;
@@ -70,10 +70,10 @@ class PostPass {
   void UploadLut(ColorGrade grade);
   void UploadLutPixels(base::Vector<u8>& pixels);  // staging + copy of a 32^3 strip
 
-  Device& device_;
-  SamplerHandle sampler_;
-  PipelineHandle pipeline_;
-  GpuImage lut_;
+  gpu::Device& device_;
+  gpu::SamplerHandle sampler_;
+  gpu::PipelineHandle pipeline_;
+  gpu::GpuImage lut_;
   ColorGrade lut_grade_ = ColorGrade::kNeutral;
   bool lut_ready_ = false;  // false until the first upload transitions it
 };

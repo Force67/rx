@@ -13,15 +13,16 @@
 
 using namespace rx;
 using namespace rx::render;
+namespace gpu = rx::gpu;
 
 int main() {
-  DeviceDesc desc;
+  gpu::DeviceDesc desc;
   const char* backend = ::getenv("RX_RHI");
   desc.backend = backend && ::strcmp(backend, "d3d12") == 0
-                     ? Backend::kD3D12 : Backend::kVulkan;
+                     ? gpu::Backend::kD3D12 : gpu::Backend::kVulkan;
   desc.request_raytracing = true;
   desc.enable_validation = true;
-  auto device = Device::CreateOffscreen(desc);
+  auto device = gpu::Device::CreateOffscreen(desc);
   if (!device || device->is_stub() || !device->caps().ray_query) {
     ::printf("raytracing_test: SKIP, ray queries unavailable\n");
     return 77;
@@ -32,19 +33,19 @@ int main() {
   };
   auto rt = RayTracingContext::Create(*device);
   if (!rt) return 1;
-  PipelineHandle pipeline = device->CreateComputePipeline({
+  gpu::PipelineHandle pipeline = device->CreateComputePipeline({
       .shader = RX_SHADER(k_rt_query_cs_hlsl),
-      .sets = {{.slots = {{0, BindingType::kAccelStruct}, {1, BindingType::kStorageBuffer}}}},
+      .sets = {{.slots = {{0, gpu::BindingType::kAccelStruct}, {1, gpu::BindingType::kStorageBuffer}}}},
       .debug_name = "rt_query_test"});
-  GpuBuffer result = device->CreateBuffer(sizeof(f32), kBufferUsageStorage | kBufferUsageTransferSrc);
-  GpuBuffer readback = device->CreateBuffer(sizeof(f32), kBufferUsageTransferDst, true);
+  gpu::GpuBuffer result = device->CreateBuffer(sizeof(f32), gpu::kBufferUsageStorage | gpu::kBufferUsageTransferSrc);
+  gpu::GpuBuffer readback = device->CreateBuffer(sizeof(f32), gpu::kBufferUsageTransferDst, true);
   if (!pipeline || !result || !readback.mapped) return 1;
   auto trace = [&](u32 slot) {
-    device->ImmediateSubmit([&](CommandList& cmd) {
+    device->ImmediateSubmit([&](gpu::CommandList& cmd) {
       cmd.BindPipeline(pipeline);
-      cmd.BindTransient(0, {Bind::Accel(0, rt->tlas(slot)), Bind::StorageBuffer(1, result)});
+      cmd.BindTransient(0, {gpu::Bind::Accel(0, rt->tlas(slot)), gpu::Bind::StorageBuffer(1, result)});
       cmd.Dispatch(1, 1, 1);
-      cmd.MemoryBarrier(BarrierScope::kComputeWrite, BarrierScope::kTransferRead);
+      cmd.MemoryBarrier(gpu::BarrierScope::kComputeWrite, gpu::BarrierScope::kTransferRead);
       cmd.CopyBuffer(result, 0, readback, 0, sizeof(f32));
     });
     device->InvalidateBuffer(readback, 0, sizeof(f32));
@@ -58,13 +59,13 @@ int main() {
                               {.position = {1, -1, 0}},
                               {.position = {0, 1, 0}}};
   const u32 indices[3] = {0, 1, 2};
-  GpuMesh mesh;
+  gpu::GpuMesh mesh;
   mesh.vertices = device->CreateBufferWithData(
       ByteSpan(reinterpret_cast<const u8*>(vertices), sizeof(vertices)),
-      kBufferUsageAccelBuildInput | kBufferUsageDeviceAddress | kBufferUsageStorage);
+      gpu::kBufferUsageAccelBuildInput | gpu::kBufferUsageDeviceAddress | gpu::kBufferUsageStorage);
   mesh.indices = device->CreateBufferWithData(
       ByteSpan(reinterpret_cast<const u8*>(indices), sizeof(indices)),
-      kBufferUsageAccelBuildInput | kBufferUsageDeviceAddress | kBufferUsageStorage);
+      gpu::kBufferUsageAccelBuildInput | gpu::kBufferUsageDeviceAddress | gpu::kBufferUsageStorage);
   mesh.vertex_count = mesh.index_count = 3;
   mesh.submeshes.push_back({.index_count = 3});
   check(rt->BuildBlas(1, mesh), "build compacted mesh BLAS");
@@ -72,7 +73,7 @@ int main() {
   instances.push_back({.mesh_key = 1, .transform = Mat4::Identity()});
   auto build = [&](u32 frame) {
     check(rt->ReserveTlas(0, static_cast<u32>(instances.size())), "reserve TLAS");
-    device->ImmediateSubmit([&](CommandList& cmd) { rt->BuildTlas(cmd, 0, frame, instances); });
+    device->ImmediateSubmit([&](gpu::CommandList& cmd) { rt->BuildTlas(cmd, 0, frame, instances); });
   };
   build(0);
   check(::fabsf(trace(0) - 1.0f) < 1e-5f, "compacted triangle must hit at distance 1");
@@ -86,27 +87,27 @@ int main() {
   build(2);
   check(trace(0) == -1.0f, "removed instance must be omitted from rebuilt TLAS");
 
-  base::Vector<AccelTriangles> geometry;
+  base::Vector<gpu::AccelTriangles> geometry;
   geometry.push_back({.vertex_address = mesh.vertices.address,
                        .vertex_stride = sizeof(asset::Vertex), .vertex_count = 3,
-                       .vertex_format = Format::kRGB32Float,
+                       .vertex_format = gpu::Format::kRGB32Float,
                        .index_address = mesh.indices.address, .index_count = 3});
   check(rt->ReserveSkinnedBlas(2, geometry), "reserve unbuilt skinned BLAS");
   instances[0].mesh_key = 2;
   instances[0].skinned = true;
   build(3);
   check(trace(0) == -1.0f, "unbuilt skinned BLAS must not enter TLAS");
-  device->ImmediateSubmit([&](CommandList& cmd) {
+  device->ImmediateSubmit([&](gpu::CommandList& cmd) {
     rt->RecordSkinnedBlas(cmd, 2, 0);
-    cmd.MemoryBarrier(BarrierScope::kAccelBuildWrite, BarrierScope::kAccelBuildWrite);
+    cmd.MemoryBarrier(gpu::BarrierScope::kAccelBuildWrite, gpu::BarrierScope::kAccelBuildWrite);
     rt->BuildTlas(cmd, 0, 4, instances);
   });
   check(::fabsf(trace(0) - 1.0f) < 1e-5f, "built skinned BLAS must hit");
   check(rt->ReserveSkinnedBlas(3, geometry), "reserve refit target");
   instances[0].mesh_key = 3;
-  device->ImmediateSubmit([&](CommandList& cmd) {
+  device->ImmediateSubmit([&](gpu::CommandList& cmd) {
     rt->RecordSkinnedBlas(cmd, 3, 2);
-    cmd.MemoryBarrier(BarrierScope::kAccelBuildWrite, BarrierScope::kAccelBuildWrite);
+    cmd.MemoryBarrier(gpu::BarrierScope::kAccelBuildWrite, gpu::BarrierScope::kAccelBuildWrite);
     rt->BuildTlas(cmd, 0, 5, instances);
   });
   check(::fabsf(trace(0) - 1.0f) < 1e-5f, "refitted BLAS must hit");
@@ -120,11 +121,11 @@ int main() {
   asset::SkinnedVertexExtra weights[3]{};
   for (auto& weight : weights) weight.bone_weights[0] = 255;
   mesh.skinning = device->CreateBufferWithData(
-      ByteSpan(reinterpret_cast<const u8*>(weights), sizeof(weights)), kBufferUsageStorage);
+      ByteSpan(reinterpret_cast<const u8*>(weights), sizeof(weights)), gpu::kBufferUsageStorage);
   mesh.skinned = true;
-  GpuBuffer bones = device->CreateBuffer(sizeof(Mat4), kBufferUsageStorage, true);
+  gpu::GpuBuffer bones = device->CreateBuffer(sizeof(Mat4), gpu::kBufferUsageStorage, true);
   if (!mesh.skinning || !bones.mapped) return 1;
-  base::UnorderedMap<rx::u64, GpuMesh> meshes;
+  base::UnorderedMap<rx::u64, gpu::GpuMesh> meshes;
   meshes.emplace(7, mesh);
   const u32 actor = skin.Acquire();
   base::Vector<SkinnedRayTracing::Request> requests;
@@ -137,7 +138,7 @@ int main() {
           "prepare posed actor");
     instances[0].mesh_key = skin.blas_key(actor);
     instances[0].custom_index = skin.custom_index(actor);
-    device->ImmediateSubmit([&](CommandList& cmd) {
+    device->ImmediateSubmit([&](gpu::CommandList& cmd) {
       skin.Record(cmd, *rt, bones);
       rt->BuildTlas(cmd, 0, frame, instances);
     });

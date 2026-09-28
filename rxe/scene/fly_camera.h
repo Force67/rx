@@ -24,7 +24,7 @@ struct FlyCameraInput {
 // to go fast. The scroll wheel scales the base speed.
 class RX_SCENE_EXPORT FlyCamera {
  public:
-  void Update(const InputState& input, const FlyCameraInput& intent, bool allow_mouse,
+  void Update(const ui::InputState& input, const FlyCameraInput& intent, bool allow_mouse,
               bool allow_keyboard, f32 dt);
 
   Vec3 position() const { return position_; }

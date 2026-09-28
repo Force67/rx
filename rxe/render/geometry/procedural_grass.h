@@ -225,28 +225,28 @@ class ProceduralGrass {
   static constexpr u32 kFarIndices = kFarSegments * 6;
   static constexpr u32 kUltraIndices = kUltraSegments * 6;
 
-  bool Initialize(Device& device,
-                  Format scene_color,
-                  Format motion,
-                  Format normal,
-                  Format skin_diffuse,
-                  Format depth);
-  void Destroy(Device& device);
+  bool Initialize(gpu::Device& device,
+                  gpu::Format scene_color,
+                  gpu::Format motion,
+                  gpu::Format normal,
+                  gpu::Format skin_diffuse,
+                  gpu::Format depth);
+  void Destroy(gpu::Device& device);
   bool available() const {
     return static_cast<bool>(bend_pipeline_) && static_cast<bool>(generate_pipeline_);
   }
-  bool EnsureSampleCount(Device& device, u32 samples);
+  bool EnsureSampleCount(gpu::Device& device, u32 samples);
 
   bool Prepare(const GrassDomain& domain,
                base::Span<const GrassInteraction> interactions,
                const Frame& frame,
                u32 frame_slot);
   void AddGeneration(RenderGraph& graph, u32 frame_slot);
-  void DrawPrepass(CommandList& cmd, u32 frame_slot, u32 samples) const;
-  void DrawScene(CommandList& cmd, u32 frame_slot, u32 samples) const;
+  void DrawPrepass(gpu::CommandList& cmd, u32 frame_slot, u32 samples) const;
+  void DrawScene(gpu::CommandList& cmd, u32 frame_slot, u32 samples) const;
 
  private:
-  static constexpr u32 kFramesInFlight = Device::kMaxFramesInFlight;
+  static constexpr u32 kFramesInFlight = gpu::Device::kMaxFramesInFlight;
 
   // Phase-invariant half of the generation constants. Every phase of a frame
   // pushes the same domain description, and it alone is the whole 128 bytes
@@ -330,16 +330,16 @@ class ProceduralGrass {
   static constexpr u32 kMaxGenerationPhases = 9;
 
   struct Slot {
-    GpuBuffer field;
-    GpuBuffer types;
-    GpuBuffer surfaces;
-    GpuBuffer interactions;
-    GpuBuffer instances;
-    GpuBuffer args;
-    GpuBuffer counters;
+    gpu::GpuBuffer field;
+    gpu::GpuBuffer types;
+    gpu::GpuBuffer surfaces;
+    gpu::GpuBuffer interactions;
+    gpu::GpuBuffer instances;
+    gpu::GpuBuffer args;
+    gpu::GpuBuffer counters;
     // Per slot, so the previous in-flight frame keeps reading its own copy.
-    GpuBuffer generation_domain;
-    GpuBuffer draw_camera;
+    gpu::GpuBuffer generation_domain;
+    gpu::GpuBuffer draw_camera;
     BendPush bend{};
     u32 bend_write_index = 0;
     u32 bend_domain_seed = 0;
@@ -358,29 +358,29 @@ class ProceduralGrass {
   };
 
   static u32 PipelineIndex(u32 samples);
-  bool CreateDrawPipelines(Device& device, u32 samples);
+  bool CreateDrawPipelines(gpu::Device& device, u32 samples);
   bool EnsureBuffers();
-  void Draw(CommandList& cmd, u32 frame_slot, PipelineHandle pipeline) const;
+  void Draw(gpu::CommandList& cmd, u32 frame_slot, gpu::PipelineHandle pipeline) const;
 
-  Device* device_ = nullptr;
-  Format scene_color_format_ = Format::kUnknown;
-  Format motion_format_ = Format::kUnknown;
-  Format normal_format_ = Format::kUnknown;
-  Format skin_diffuse_format_ = Format::kUnknown;
-  Format depth_format_ = Format::kUnknown;
+  gpu::Device* device_ = nullptr;
+  gpu::Format scene_color_format_ = gpu::Format::kUnknown;
+  gpu::Format motion_format_ = gpu::Format::kUnknown;
+  gpu::Format normal_format_ = gpu::Format::kUnknown;
+  gpu::Format skin_diffuse_format_ = gpu::Format::kUnknown;
+  gpu::Format depth_format_ = gpu::Format::kUnknown;
   bool allocation_failed_ = false;
   u32 failed_sample_mask_ = 0;
-  PipelineHandle generate_pipeline_;
-  PipelineHandle bend_pipeline_;
-  PipelineHandle prepass_pipelines_[4] = {};
-  PipelineHandle scene_pipelines_[4] = {};
-  GpuImage bend_fields_[2];
-  GpuImage bend_metadata_[2];
-  GpuImage bend_confidence_[2];
+  gpu::PipelineHandle generate_pipeline_;
+  gpu::PipelineHandle bend_pipeline_;
+  gpu::PipelineHandle prepass_pipelines_[4] = {};
+  gpu::PipelineHandle scene_pipelines_[4] = {};
+  gpu::GpuImage bend_fields_[2];
+  gpu::GpuImage bend_metadata_[2];
+  gpu::GpuImage bend_confidence_[2];
   // Immutable u16 strip pattern shared by all blades; far/ultra draws use a
   // prefix of the near tier's indices.
-  GpuBuffer blade_indices_;
-  SamplerHandle bend_sampler_;
+  gpu::GpuBuffer blade_indices_;
+  gpu::SamplerHandle bend_sampler_;
   f32 bend_origin_[2] = {};
   f32 bend_extent_ = 1.0f;
   f32 bend_height_origin_ = 0.0f;

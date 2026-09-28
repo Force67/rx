@@ -37,7 +37,7 @@ bool SceneHookDemo::Init(render::Renderer& renderer) {
   renderer_ = &renderer;
   device_ = renderer.device();
   if (!device_) return false;
-  const render::VulkanHandles vk = render::GetVulkanHandles(*device_);
+  const gpu::VulkanHandles vk = gpu::GetVulkanHandles(*device_);
   if (vk.device == VK_NULL_HANDLE) {
     RX_WARN("scenehook demo: not on the vulkan backend, staying inert");
     return false;
@@ -52,12 +52,12 @@ bool SceneHookDemo::Init(render::Renderer& renderer) {
   lci.pPushConstantRanges = &range;
   if (vkCreatePipelineLayout(vk_, &lci, nullptr, &layout_) != VK_SUCCESS) return false;
 
-  VkShaderModule cs = render::CreateShaderModule(vk_, k_scenehook_cull_cs_hlsl,
+  VkShaderModule cs = gpu::CreateShaderModule(vk_, k_scenehook_cull_cs_hlsl,
                                                  sizeof(k_scenehook_cull_cs_hlsl));
   VkShaderModule vs =
-      render::CreateShaderModule(vk_, k_scenehook_vs_hlsl, sizeof(k_scenehook_vs_hlsl));
+      gpu::CreateShaderModule(vk_, k_scenehook_vs_hlsl, sizeof(k_scenehook_vs_hlsl));
   VkShaderModule ps =
-      render::CreateShaderModule(vk_, k_scenehook_ps_hlsl, sizeof(k_scenehook_ps_hlsl));
+      gpu::CreateShaderModule(vk_, k_scenehook_ps_hlsl, sizeof(k_scenehook_ps_hlsl));
   if (!cs || !vs || !ps) {
     if (cs) vkDestroyShaderModule(vk_, cs, nullptr);
     if (vs) vkDestroyShaderModule(vk_, vs, nullptr);
@@ -132,13 +132,13 @@ bool SceneHookDemo::Init(render::Renderer& renderer) {
 
     // Attachment formats match rx's scene_color (RGBA16F), depth_export (R32F)
     // and depth (D32) - stable transient targets the opaque hook exposes.
-    VkFormat color_formats[2] = {render::GetVkFormat(render::Format::kRGBA16Float),
-                                 render::GetVkFormat(render::Format::kR32Float)};
+    VkFormat color_formats[2] = {gpu::GetVkFormat(gpu::Format::kRGBA16Float),
+                                 gpu::GetVkFormat(gpu::Format::kR32Float)};
     VkPipelineRenderingCreateInfo rendering{
         .sType = VK_STRUCTURE_TYPE_PIPELINE_RENDERING_CREATE_INFO,
         .colorAttachmentCount = 2,
         .pColorAttachmentFormats = color_formats,
-        .depthAttachmentFormat = render::GetVkFormat(render::Format::kD32Float)};
+        .depthAttachmentFormat = gpu::GetVkFormat(gpu::Format::kD32Float)};
 
     VkGraphicsPipelineCreateInfo gpci{.sType = VK_STRUCTURE_TYPE_GRAPHICS_PIPELINE_CREATE_INFO};
     gpci.pNext = &rendering;
@@ -164,13 +164,13 @@ bool SceneHookDemo::Init(render::Renderer& renderer) {
   // A BDA arena per frame-in-flight: the compute pass rewrites the slot's arena
   // every frame before the draw reads it, and the slot only recycles once its
   // fence has fired, so no cross-frame hazard.
-  u32 frames = render::GetVulkanFramesInFlight(*device_);
+  u32 frames = gpu::GetVulkanFramesInFlight(*device_);
   if (frames == 0) frames = 1;
   const u64 arena_bytes = static_cast<u64>(instance_count_) * 32u;  // float4 pos + float4 colour
   for (u32 i = 0; i < frames; ++i) {
-    render::GpuBuffer arena = device_->CreateBuffer(
+    gpu::GpuBuffer arena = device_->CreateBuffer(
         arena_bytes,
-        render::kBufferUsageStorage | render::kBufferUsageDeviceAddress, /*host_visible=*/false);
+        gpu::kBufferUsageStorage | gpu::kBufferUsageDeviceAddress, /*host_visible=*/false);
     if (!arena.address) {
       RX_ERROR("scenehook demo: buffer-device-address unavailable");
       return false;
@@ -185,8 +185,8 @@ bool SceneHookDemo::Init(render::Renderer& renderer) {
 }
 
 void SceneHookDemo::Record(const render::SceneHookContext& ctx) {
-  VkCommandBuffer cb = render::GetVkCommandBuffer(*ctx.cmd);
-  const render::GpuBuffer& arena = arenas_[ctx.frame_slot % arenas_.size()];
+  VkCommandBuffer cb = gpu::GetVkCommandBuffer(*ctx.cmd);
+  const gpu::GpuBuffer& arena = arenas_[ctx.frame_slot % arenas_.size()];
 
   ScenePush push{};
   push.view_proj = ctx.view_proj;
@@ -201,15 +201,15 @@ void SceneHookDemo::Record(const render::SceneHookContext& ctx) {
   vkCmdPushConstants(cb, layout_, kPushStages, 0, sizeof(push), &push);
   vkCmdDispatch(cb, (instance_count_ + 63) / 64, 1, 1);
   // Compute storage write -> vertex-stage BDA read hazard.
-  ctx.cmd->MemoryBarrier(render::BarrierScope::kComputeWrite, render::BarrierScope::kGraphicsRead);
+  ctx.cmd->MemoryBarrier(gpu::BarrierScope::kComputeWrite, gpu::BarrierScope::kGraphicsRead);
 
   // 2) Open a dynamic-rendering section on rx's scene targets and draw. LoadOp
   // kLoad preserves rx's opaque + sky; the graph already put the images in their
   // attachment layouts.
-  render::ColorAttachment colors[2];
-  colors[0] = {.view = ctx.color_view, .load = render::LoadOp::kLoad};
-  colors[1] = {.view = ctx.depth_export_view, .load = render::LoadOp::kLoad};
-  render::DepthAttachment depth{.view = ctx.depth_view, .load = render::LoadOp::kLoad};
+  gpu::ColorAttachment colors[2];
+  colors[0] = {.view = ctx.color_view, .load = gpu::LoadOp::kLoad};
+  colors[1] = {.view = ctx.depth_export_view, .load = gpu::LoadOp::kLoad};
+  gpu::DepthAttachment depth{.view = ctx.depth_view, .load = gpu::LoadOp::kLoad};
   ctx.cmd->BeginRendering(
       {.extent = ctx.extent, .colors = base::Span(colors, 2), .depth = &depth});
   vkCmdBindPipeline(cb, VK_PIPELINE_BIND_POINT_GRAPHICS, graphics_);
@@ -232,7 +232,7 @@ void SceneHookDemo::Shutdown() {
     if (compute_) vkDestroyPipeline(vk_, compute_, nullptr);
     if (layout_) vkDestroyPipelineLayout(vk_, layout_, nullptr);
   }
-  for (render::GpuBuffer& arena : arenas_) device_->DestroyBuffer(arena);
+  for (gpu::GpuBuffer& arena : arenas_) device_->DestroyBuffer(arena);
   arenas_.clear();
   graphics_ = compute_ = VK_NULL_HANDLE;
   layout_ = VK_NULL_HANDLE;

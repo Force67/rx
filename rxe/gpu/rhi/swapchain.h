@@ -5,7 +5,7 @@
 #include "rxe/gpu/rhi/resources.h"
 #include "rxe/gpu/rhi/types.h"
 
-namespace rx::render {
+namespace rx::gpu {
 
 // Transfer function + primaries of the presented image. The engine renders
 // linear Rec.709 internally; the tonemap pass encodes for whichever of these
@@ -57,6 +57,6 @@ class Swapchain {
   Swapchain() = default;
 };
 
-}  // namespace rx::render
+}  // namespace rx::gpu
 
 #endif  // RX_RENDER_RHI_SWAPCHAIN_H_

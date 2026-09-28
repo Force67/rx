@@ -18,9 +18,9 @@ namespace rx::render {
 
 class RestirDi {
  public:
-  bool Initialize(Device& device);
-  void Destroy(Device& device);
-  bool Resize(Device& device, Extent2D extent);
+  bool Initialize(gpu::Device& device);
+  void Destroy(gpu::Device& device);
+  bool Resize(gpu::Device& device, gpu::Extent2D extent);
   bool available() const {
     return temporal_pipeline_ && spatial_pipeline_ && reservoir_[0] && reservoir_[1] &&
            prev_depth_ && prev_normal_;
@@ -31,7 +31,7 @@ class RestirDi {
     Vec3 camera_pos;
     u32 frame_index = 0;
     u32 light_count = 0;
-    GpuBuffer lights;
+    gpu::GpuBuffer lights;
     u32 tlas_slot = 0;
   };
 
@@ -44,18 +44,18 @@ class RestirDi {
   // stages; the returned graph textures are ready for fragment sampling by
   // the scene pass.
   Outputs AddToGraph(RenderGraph& graph, ResourceHandle depth_export, ResourceHandle normals,
-                     ResourceHandle motion, RayTracingContext& raytracing, Extent2D extent,
+                     ResourceHandle motion, RayTracingContext& raytracing, gpu::Extent2D extent,
                      const Frame& frame);
 
  private:
-  PipelineHandle temporal_pipeline_;
-  PipelineHandle spatial_pipeline_;
+  gpu::PipelineHandle temporal_pipeline_;
+  gpu::PipelineHandle spatial_pipeline_;
   // reservoir_[0]: temporal output (scratch), reservoir_[1]: spatial output =
   // next frame's history. Fixed roles, no swap.
-  GpuImage reservoir_[2];
-  GpuImage prev_depth_;   // R32F snapshot for reprojection validation
-  GpuImage prev_normal_;  // RGBA16F oct+roughness snapshot
-  Extent2D extent_ = {0, 0};
+  gpu::GpuImage reservoir_[2];
+  gpu::GpuImage prev_depth_;   // R32F snapshot for reprojection validation
+  gpu::GpuImage prev_normal_;  // RGBA16F oct+roughness snapshot
+  gpu::Extent2D extent_ = {0, 0};
   bool reset_ = true;
   u32 previous_frame_ = 0;
 };

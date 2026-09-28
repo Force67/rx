@@ -100,7 +100,7 @@ struct EngineContext {
   base::Vector<app::HairStrandBinding>* hair_bindings = nullptr;
   // Resolved semantic input this frame (move/look axes); null before the first
   // pump. Demos read it to drive interactive behaviour (e.g. locomotion speed).
-  const ActionState* actions = nullptr;
+  const ui::ActionState* actions = nullptr;
 
   // Late-built services, null until the engine creates them.
   asset::AssetDatabase* assets = nullptr;

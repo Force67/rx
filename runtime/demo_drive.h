@@ -43,7 +43,7 @@ class DriveDemo {
   // Render-cadence input + camera + audio. Captures this frame's driver input
   // into members the fixed-step StepVehicles consumes, drives the chase / free
   // camera, and pushes telemetry to the three VehicleAudio voices.
-  void Update(f32 dt, const InputState& input, const ActionState& actions, bool allow_keyboard,
+  void Update(f32 dt, const ui::InputState& input, const ui::ActionState& actions, bool allow_keyboard,
               bool allow_mouse);
 
   // Writes the resolved camera, the vehicle + showcase draws (car/plane models,
@@ -100,7 +100,7 @@ class DriveDemo {
   // Applies cargo `frac` (of the profile's max_cargo_kg; > 1 overloads) to the
   // live boat via Boat::SetCargo, so it visibly settles deeper. Key L cycles it.
   void SetBoatCargo(f32 frac);
-  void UpdateChaseCamera(f32 dt, const InputState& input, const ActionState& actions,
+  void UpdateChaseCamera(f32 dt, const ui::InputState& input, const ui::ActionState& actions,
                          bool allow_keyboard, bool allow_mouse);
   void DrawPanel();
 

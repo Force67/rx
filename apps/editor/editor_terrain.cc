@@ -312,8 +312,8 @@ void Editor::SetEditorMode(EditorMode mode) {
 }
 
 void Editor::UpdateModeInteraction(bool lmb_down, bool lmb_edge) {
-  const InputState& input = window_->input();
-  if (input.button(MouseButton::kRight) || camera_.looking()) {
+  const ui::InputState& input = window_->input();
+  if (input.button(ui::MouseButton::kRight) || camera_.looking()) {
     FinishTerrainStroke();
     FinishPlacementDrag();
     return;
@@ -342,7 +342,7 @@ void Editor::UpdateModeInteraction(bool lmb_down, bool lmb_edge) {
     base::Vector<terrain::TerrainTileKey> dirty_tiles;
     auto apply_dab = [&](const Vec3& position) {
       terrain::TerrainBrushMode mode = terrain_brush_mode_;
-      if (input.key(Key::kLeftShift)) {
+      if (input.key(ui::Key::kLeftShift)) {
         if (mode == terrain::TerrainBrushMode::kRaise)
           mode = terrain::TerrainBrushMode::kLower;
         else if (mode == terrain::TerrainBrushMode::kLower)
@@ -490,7 +490,7 @@ void Editor::AppendInteractionPreview(base::Vector<render::DebugLine>* lines) co
     center = terrain_cursor_hit_->position;
     radius = terrain_brush_radius_;
     terrain::TerrainBrushMode mode = terrain_brush_mode_;
-    if (window_->input().key(Key::kLeftShift)) {
+    if (window_->input().key(ui::Key::kLeftShift)) {
       if (mode == terrain::TerrainBrushMode::kRaise) mode = terrain::TerrainBrushMode::kLower;
       else if (mode == terrain::TerrainBrushMode::kLower) mode = terrain::TerrainBrushMode::kRaise;
     }

@@ -7,9 +7,12 @@
 #include "rxe/render/core/render_graph.h"
 #include "rxe/gpu/rhi/device.h"
 
+namespace rx::gpu {
+class Device;
+}  // namespace rx::gpu
+
 namespace rx::render {
 
-class Device;
 
 // One simulated particle, filled by the engine each frame and handed to the
 // renderer through FrameView. Matches the Particle struct in particle.vs.
@@ -32,8 +35,8 @@ class ParticleSystem {
   // bindless_layout binds the engine's bindless texture table as set 1 so the
   // billboards can sample their authored effect texture; pass a null handle to
   // keep the procedural sprites (no bindless device).
-  bool Initialize(Device& device, Format color_format, BindingLayoutHandle bindless_layout = {});
-  void Destroy(Device& device);
+  bool Initialize(gpu::Device& device, gpu::Format color_format, gpu::BindingLayoutHandle bindless_layout = {});
+  void Destroy(gpu::Device& device);
 
   struct Frame {
     Mat4 view_proj;
@@ -59,14 +62,14 @@ class ParticleSystem {
     f32 froxel_near = 0.1f;
     f32 froxel_far = 64.0f;
     bool froxel_enabled = false;
-    GpuBuffer lights;
-    GpuBuffer cluster_counts;
-    GpuBuffer cluster_indices;
-    GpuBuffer local_shadow_faces;
-    TextureView local_shadow_atlas;
-    SamplerHandle comparison_sampler;
-    TextureView froxel_volume;
-    SamplerHandle froxel_sampler;
+    gpu::GpuBuffer lights;
+    gpu::GpuBuffer cluster_counts;
+    gpu::GpuBuffer cluster_indices;
+    gpu::GpuBuffer local_shadow_faces;
+    gpu::TextureView local_shadow_atlas;
+    gpu::SamplerHandle comparison_sampler;
+    gpu::TextureView froxel_volume;
+    gpu::SamplerHandle froxel_sampler;
   };
 
   // Uploads both billboard sets into the frame slot's buffer and adds one draw
@@ -79,7 +82,7 @@ class ParticleSystem {
   void AddToGraph(RenderGraph& graph, ResourceHandle color, ResourceHandle depth,
                   ResourceHandle motion, const base::Vector<ParticleInstance>& particles,
                   const base::Vector<ParticleInstance>& additive, const Frame& frame,
-                  u32 frame_slot, BindingSetHandle bindless = {});
+                  u32 frame_slot, gpu::BindingSetHandle bindless = {});
 
   // Fountain emitter parameters for the gpu simulation.
   struct Sim {
@@ -103,27 +106,27 @@ class ParticleSystem {
   // state buffer) and draws the resulting billboards, in a single pass.
   void SimulateAndDraw(RenderGraph& graph, ResourceHandle color, ResourceHandle depth,
                        ResourceHandle motion, const Sim& sim, const Frame& frame, u32 frame_slot,
-                       BindingSetHandle bindless = {});
+                       gpu::BindingSetHandle bindless = {});
 
  private:
   static constexpr u32 kFramesInFlight = 2;
   void RecordDraw(PassContext& ctx, ResourceHandle color, ResourceHandle depth,
-                  ResourceHandle motion, const GpuBuffer& instances, const GpuBuffer& camera,
-                  u32 count, const Frame& frame, BindingSetHandle bindless);
+                  ResourceHandle motion, const gpu::GpuBuffer& instances, const gpu::GpuBuffer& camera,
+                  u32 count, const Frame& frame, gpu::BindingSetHandle bindless);
   // One pipeline + bind + draw inside an open rendering pass; offset is the
   // byte offset of this set's instances in the shared buffer.
-  void RecordSet(PassContext& ctx, ResourceHandle depth, const GpuBuffer& instances,
-                 const GpuBuffer& camera, u64 offset, u32 count, const Frame& frame, bool emissive,
-                 BindingSetHandle bindless);
+  void RecordSet(PassContext& ctx, ResourceHandle depth, const gpu::GpuBuffer& instances,
+                 const gpu::GpuBuffer& camera, u64 offset, u32 count, const Frame& frame, bool emissive,
+                 gpu::BindingSetHandle bindless);
 
-  Device* device_ = nullptr;
-  BindingLayoutHandle bindless_layout_;  // engine bindless texture table (set 1)
-  PipelineHandle pipeline_;
-  PipelineHandle pipeline_additive_;
-  PipelineHandle sim_pipeline_;
-  GpuBuffer buffers_[kFramesInFlight];  // host-visible billboard storage
-  GpuBuffer camera_[kFramesInFlight];   // draw matrices, too big for the push block
-  GpuBuffer sim_state_;                 // persistent gpu particle state
+  gpu::Device* device_ = nullptr;
+  gpu::BindingLayoutHandle bindless_layout_;  // engine bindless texture table (set 1)
+  gpu::PipelineHandle pipeline_;
+  gpu::PipelineHandle pipeline_additive_;
+  gpu::PipelineHandle sim_pipeline_;
+  gpu::GpuBuffer buffers_[kFramesInFlight];  // host-visible billboard storage
+  gpu::GpuBuffer camera_[kFramesInFlight];   // draw matrices, too big for the push block
+  gpu::GpuBuffer sim_state_;                 // persistent gpu particle state
 };
 
 }  // namespace rx::render

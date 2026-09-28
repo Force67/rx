@@ -16,9 +16,12 @@ struct Instance;
 struct DispatchDesc;
 }  // namespace nrd
 
+namespace rx::gpu {
+class Device;
+}  // namespace rx::gpu
+
 namespace rx::render {
 
-class Device;
 
 // NVIDIA NRD real time denoiser, driven through its direct compute path: NRD
 // hands back a list of compute dispatches each frame and this class records
@@ -31,9 +34,9 @@ class Device;
 // imported into the render graph so later passes can sample them.
 class NrdDenoiser {
  public:
-  bool Initialize(Device& device, Extent2D extent);
-  void Resize(Device& device, Extent2D extent);
-  void Destroy(Device& device);
+  bool Initialize(gpu::Device& device, gpu::Extent2D extent);
+  void Resize(gpu::Device& device, gpu::Extent2D extent);
+  void Destroy(gpu::Device& device);
 
   bool available() const { return instance_ != nullptr; }
 
@@ -92,13 +95,13 @@ class NrdDenoiser {
                                 ResourceHandle in_radiance_hitdist);
 
   // NRD encodings the engine shaders must match.
-  static constexpr Format kNormalRoughnessFormat = Format::kRGB10A2Unorm;
-  static constexpr Format kViewZFormat = Format::kR16Float;
-  static constexpr Format kHitDistFormat = Format::kR8Unorm;
-  static constexpr Format kPenumbraFormat = Format::kR16Float;
-  static constexpr Format kShadowFormat = Format::kR8Unorm;
+  static constexpr gpu::Format kNormalRoughnessFormat = gpu::Format::kRGB10A2Unorm;
+  static constexpr gpu::Format kViewZFormat = gpu::Format::kR16Float;
+  static constexpr gpu::Format kHitDistFormat = gpu::Format::kR8Unorm;
+  static constexpr gpu::Format kPenumbraFormat = gpu::Format::kR16Float;
+  static constexpr gpu::Format kShadowFormat = gpu::Format::kR8Unorm;
   // Diffuse radiance + normalized hit distance, in and out (RGBA16f).
-  static constexpr Format kDiffuseRadianceFormat = Format::kRGBA16Float;
+  static constexpr gpu::Format kDiffuseRadianceFormat = gpu::Format::kRGBA16Float;
   // REBLUR hit distance normalization params (A, B, C), shared with the shader.
   static constexpr f32 kHitDistParams[3] = {3.0f, 0.1f, 20.0f};
 
@@ -113,7 +116,7 @@ class NrdDenoiser {
   };
 
   struct PoolTexture {
-    GpuImage image;
+    gpu::GpuImage image;
     VkImageLayout layout = VK_IMAGE_LAYOUT_UNDEFINED;
   };
 
@@ -124,11 +127,11 @@ class NrdDenoiser {
     PoolTexture* tracked = nullptr;  // non-null for owned (pool/output) textures
   };
 
-  bool CreatePipelines(Device& device);
-  bool CreatePackPipeline(Device& device);
+  bool CreatePipelines(gpu::Device& device);
+  bool CreatePackPipeline(gpu::Device& device);
   bool CreateDescriptorPools();
-  void CreatePools(Device& device, Extent2D extent);
-  void DestroyPools(Device& device);
+  void CreatePools(gpu::Device& device, gpu::Extent2D extent);
+  void DestroyPools(gpu::Device& device);
   // Per-dispatch descriptor sets, from the frame-parity pool reset in SetFrame.
   VkDescriptorSet AllocateSet(VkDescriptorSetLayout layout);
   // noisy_type / output_type carry an nrd::ResourceType value as an int so this
@@ -137,13 +140,13 @@ class NrdDenoiser {
                                 ResourceHandle normal_roughness, ResourceHandle view_z,
                                 ResourceHandle motion, ResourceHandle noisy, int noisy_type,
                                 PoolTexture& output, int output_type, const char* output_name,
-                                ResourceState* output_state);
+                                gpu::ResourceState* output_state);
   void RecordDispatches(PassContext& ctx, u32 identifier);
 
-  Device* device_ = nullptr;
+  gpu::Device* device_ = nullptr;
   VkDevice vk_device_ = VK_NULL_HANDLE;  // raw handle via GetVulkanHandles
   nrd::Instance* instance_ = nullptr;
-  Extent2D extent_{};
+  gpu::Extent2D extent_{};
 
   base::Vector<Pipeline> pipelines_;
   base::Vector<PoolTexture> permanent_;
@@ -154,10 +157,10 @@ class NrdDenoiser {
   PoolTexture out_specular_;
   // Render-graph import states for the denoised outputs (the graph reads the
   // starting state and writes the post-pass state back each frame).
-  ResourceState out_ao_state_ = ResourceState::kUndefined;
-  ResourceState out_shadow_state_ = ResourceState::kUndefined;
-  ResourceState out_diffuse_state_ = ResourceState::kUndefined;
-  ResourceState out_specular_state_ = ResourceState::kUndefined;
+  gpu::ResourceState out_ao_state_ = gpu::ResourceState::kUndefined;
+  gpu::ResourceState out_shadow_state_ = gpu::ResourceState::kUndefined;
+  gpu::ResourceState out_diffuse_state_ = gpu::ResourceState::kUndefined;
+  gpu::ResourceState out_specular_state_ = gpu::ResourceState::kUndefined;
 
   // Engine-side input packing (g-buffer -> NRD guides), not part of NRD itself.
   VkPipeline pack_pipeline_ = VK_NULL_HANDLE;
@@ -170,7 +173,7 @@ class NrdDenoiser {
   // the constant ring; the active parity's pool is reset in SetFrame.
   VkDescriptorPool descriptor_pools_[2] = {VK_NULL_HANDLE, VK_NULL_HANDLE};
   u32 pool_parity_ = 0;
-  GpuBuffer constant_ring_;  // host visible, dynamic-offset uniform buffer
+  gpu::GpuBuffer constant_ring_;  // host visible, dynamic-offset uniform buffer
   u64 constant_slot_size_ = 0;
   u32 constant_slot_count_ = 0;
   u32 constant_cursor_ = 0;

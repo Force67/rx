@@ -6,11 +6,12 @@
 
 using namespace rx;
 using namespace rx::render;
+namespace gpu = rx::gpu;
 
 int main() {
   Renderer renderer;
   RendererDesc desc;
-  desc.backend = Backend::kVulkan;
+  desc.backend = gpu::Backend::kVulkan;
   desc.enable_validation = true;
   if (!renderer.InitializeOffscreen(desc, 32, 32)) return 1;
   if (!renderer.caps() || !renderer.caps()->ray_query) {

@@ -67,33 +67,33 @@ constexpr f32 kDriftSpeed = 1.6f;  // m/s
 
 }  // namespace
 
-bool WaterField::Initialize(Device& device) {
+bool WaterField::Initialize(gpu::Device& device) {
   pipeline_ = device.CreateComputePipeline({
       .shader = RX_SHADER(k_water_field_cs_hlsl),
-      .sets = {{.slots = {{0, BindingType::kCombinedTextureSampler},
-                          {1, BindingType::kStorageImage},
-                          {2, BindingType::kCombinedTextureSampler},
-                          {3, BindingType::kStorageBuffer},
-                          {4, BindingType::kSampledImage},
-                          {5, BindingType::kCombinedTextureSampler},
-                          {6, BindingType::kStorageImage},
-                          {7, BindingType::kCombinedTextureSampler},
-                          {8, BindingType::kUniformBuffer}}}},
-      .push_constant_size = PushSize<WaterFieldPush>(),
+      .sets = {{.slots = {{0, gpu::BindingType::kCombinedTextureSampler},
+                          {1, gpu::BindingType::kStorageImage},
+                          {2, gpu::BindingType::kCombinedTextureSampler},
+                          {3, gpu::BindingType::kStorageBuffer},
+                          {4, gpu::BindingType::kSampledImage},
+                          {5, gpu::BindingType::kCombinedTextureSampler},
+                          {6, gpu::BindingType::kStorageImage},
+                          {7, gpu::BindingType::kCombinedTextureSampler},
+                          {8, gpu::BindingType::kUniformBuffer}}}},
+      .push_constant_size = gpu::PushSize<WaterFieldPush>(),
       .debug_name = "water_field",
   });
   if (!pipeline_) return false;
 
-  sampler_ = device.GetSampler({.min_filter = Filter::kLinear,
-                                .mag_filter = Filter::kLinear,
-                                .address_u = AddressMode::kClampToEdge,
-                                .address_v = AddressMode::kClampToEdge,
-                                .address_w = AddressMode::kClampToEdge});
+  sampler_ = device.GetSampler({.min_filter = gpu::Filter::kLinear,
+                                .mag_filter = gpu::Filter::kLinear,
+                                .address_u = gpu::AddressMode::kClampToEdge,
+                                .address_v = gpu::AddressMode::kClampToEdge,
+                                .address_w = gpu::AddressMode::kClampToEdge});
 
   for (u32 r = 0; r < kRingCount; ++r) {
     for (u32 p = 0; p < 2; ++p) {
-      rings_[r][p] = device.CreateImage2D(Format::kRGBA16Float, {kSize, kSize},
-                                          kTextureUsageStorage | kTextureUsageSampled);
+      rings_[r][p] = device.CreateImage2D(gpu::Format::kRGBA16Float, {kSize, kSize},
+                                          gpu::kTextureUsageStorage | gpu::kTextureUsageSampled);
       if (!rings_[r][p]) {
         RX_WARN("water field allocation failed; foam field disabled");
         Destroy(device);
@@ -105,8 +105,8 @@ bool WaterField::Initialize(Device& device) {
   // with the camera). R32F: storage-writable everywhere and enough range for a
   // 0..1 mask. A no-op unless local interaction is enabled.
   for (u32 p = 0; p < 2; ++p) {
-    mask_[p] = device.CreateImage2D(Format::kR32Float, {kSize, kSize},
-                                    kTextureUsageStorage | kTextureUsageSampled);
+    mask_[p] = device.CreateImage2D(gpu::Format::kR32Float, {kSize, kSize},
+                                    gpu::kTextureUsageStorage | gpu::kTextureUsageSampled);
     if (!mask_[p]) {
       RX_WARN("water field mask allocation failed; foam field disabled");
       Destroy(device);
@@ -115,11 +115,11 @@ bool WaterField::Initialize(Device& device) {
   }
   // One camera CB per in-flight frame: the pass rewrites it while the previous
   // frame may still be reading its own copy.
-  for (u32 f = 0; f < Device::kMaxFramesInFlight; ++f) {
-    params_[f] = device.CreateBuffer(sizeof(GpuParams), kBufferUsageUniform, true);
-    camera_[f] = device.CreateBuffer(sizeof(WaterFieldCamera), kBufferUsageUniform, true);
+  for (u32 f = 0; f < gpu::Device::kMaxFramesInFlight; ++f) {
+    params_[f] = device.CreateBuffer(sizeof(GpuParams), gpu::kBufferUsageUniform, true);
+    camera_[f] = device.CreateBuffer(sizeof(WaterFieldCamera), gpu::kBufferUsageUniform, true);
     disturbances_[f] = device.CreateBuffer(kMaxDisturbances * sizeof(GpuDisturbance),
-                                           kBufferUsageStorage, true);
+                                           gpu::kBufferUsageStorage, true);
     if (!params_[f].mapped || !camera_[f].mapped || !disturbances_[f].mapped) {
       RX_WARN("water field buffer mapping failed; foam field disabled");
       Destroy(device);
@@ -129,21 +129,21 @@ bool WaterField::Initialize(Device& device) {
 
   // The ping-pong rings live in GENERAL, like the FFT ocean maps: compute keeps
   // writing them and the water shader samples them straight out of GENERAL.
-  device.ImmediateSubmit([&](CommandList& cmd) {
-    TextureBarrier to_general[kRingCount * 2 + 2];
+  device.ImmediateSubmit([&](gpu::CommandList& cmd) {
+    gpu::TextureBarrier to_general[kRingCount * 2 + 2];
     u32 n = 0;
     for (u32 r = 0; r < kRingCount; ++r)
       for (u32 p = 0; p < 2; ++p)
         to_general[n++] =
-            Transition(rings_[r][p], ResourceState::kUndefined, ResourceState::kGeneral);
+            gpu::Transition(rings_[r][p], gpu::ResourceState::kUndefined, gpu::ResourceState::kGeneral);
     for (u32 p = 0; p < 2; ++p)
-      to_general[n++] = Transition(mask_[p], ResourceState::kUndefined, ResourceState::kGeneral);
-    cmd.TextureBarriers(base::Span<const TextureBarrier>(to_general, n));
+      to_general[n++] = gpu::Transition(mask_[p], gpu::ResourceState::kUndefined, gpu::ResourceState::kGeneral);
+    cmd.TextureBarriers(base::Span<const gpu::TextureBarrier>(to_general, n));
   });
   return true;
 }
 
-void WaterField::Destroy(Device& device) {
+void WaterField::Destroy(gpu::Device& device) {
   if (pipeline_) device.DestroyPipeline(pipeline_);
   pipeline_ = {};
   for (u32 r = 0; r < kRingCount; ++r)
@@ -155,7 +155,7 @@ void WaterField::Destroy(Device& device) {
     if (mask_[p]) device.DestroyImage(mask_[p]);
     mask_[p] = {};
   }
-  for (u32 f = 0; f < Device::kMaxFramesInFlight; ++f) {
+  for (u32 f = 0; f < gpu::Device::kMaxFramesInFlight; ++f) {
     device.DestroyBuffer(params_[f]);
     device.DestroyBuffer(camera_[f]);
     device.DestroyBuffer(disturbances_[f]);
@@ -163,7 +163,7 @@ void WaterField::Destroy(Device& device) {
 }
 
 void WaterField::AddToGraph(RenderGraph& graph, const UpdateParams& params,
-                            TextureView ocean_normal_foam, TextureView ocean_displacement,
+                            gpu::TextureView ocean_normal_foam, gpu::TextureView ocean_displacement,
                             ResourceHandle opaque_depth) {
   if (!available()) return;
 
@@ -185,7 +185,7 @@ void WaterField::AddToGraph(RenderGraph& graph, const UpdateParams& params,
   centered_ = true;
   write_ ^= 1u;  // this frame writes the freshly flipped buffer, reads the other
 
-  const u32 slot = params.frame_slot % Device::kMaxFramesInFlight;
+  const u32 slot = params.frame_slot % gpu::Device::kMaxFramesInFlight;
 
   // Params CB the water shader uses to map world XZ into each ring.
   GpuParams gp{};
@@ -228,7 +228,7 @@ void WaterField::AddToGraph(RenderGraph& graph, const UpdateParams& params,
         (void)texel_world;
         // The FFT ocean writes its foam map just before us; make those writes
         // visible to our sampled read.
-        ctx.cmd->MemoryBarrier(BarrierScope::kComputeWrite, BarrierScope::kComputeRead);
+        ctx.cmd->MemoryBarrier(gpu::BarrierScope::kComputeWrite, gpu::BarrierScope::kComputeRead);
         ctx.cmd->BindPipeline(pipeline_);
 
         f32 inv = kDriftSpeed / ::sqrtf(kDriftDirX * kDriftDirX + kDriftDirZ * kDriftDirZ);
@@ -236,26 +236,26 @@ void WaterField::AddToGraph(RenderGraph& graph, const UpdateParams& params,
         f32 drift_z = kDriftDirZ * inv;
         // Depth for slot 4: the real prepass depth when available, else the ring
         // itself as a harmless in-layout placeholder (the flag keeps it unread).
-        TextureView depth_view =
-            (opaque_depth != kInvalidResource) ? ctx.graph->image(opaque_depth).view : TextureView{};
+        gpu::TextureView depth_view =
+            (opaque_depth != kInvalidResource) ? ctx.graph->image(opaque_depth).view : gpu::TextureView{};
 
         for (u32 r = 0; r < kRingCount; ++r) {
-          const GpuImage& cur = rings_[r][write];
-          const GpuImage& prev = rings_[r][write ^ 1u];
-          TextureView foam_view = ocean_normal_foam ? ocean_normal_foam : cur.view;
-          TextureView disp_view = ocean_displacement ? ocean_displacement : cur.view;
-          TextureView slot4 = depth_view ? depth_view : cur.view;
+          const gpu::GpuImage& cur = rings_[r][write];
+          const gpu::GpuImage& prev = rings_[r][write ^ 1u];
+          gpu::TextureView foam_view = ocean_normal_foam ? ocean_normal_foam : cur.view;
+          gpu::TextureView disp_view = ocean_displacement ? ocean_displacement : cur.view;
+          gpu::TextureView slot4 = depth_view ? depth_view : cur.view;
 
           ctx.cmd->BindTransient(
-              0, {InGeneral(Bind::Combined(0, prev.view, sampler_)),
-                  Bind::StorageView(1, cur.view),
-                  InGeneral(Bind::Combined(2, foam_view, sampler_)),
-                  Bind::StorageBuffer(3, disturbances_[slot]),
-                  depth_view ? Bind::SampledView(4, slot4) : InGeneral(Bind::SampledView(4, slot4)),
-                  InGeneral(Bind::Combined(5, mask_[write ^ 1u].view, sampler_)),
-                  Bind::StorageView(6, mask_[write].view),
-                  InGeneral(Bind::Combined(7, disp_view, sampler_)),
-                  Bind::Uniform(8, camera_[slot], 0, sizeof(WaterFieldCamera))});
+              0, {gpu::InGeneral(gpu::Bind::Combined(0, prev.view, sampler_)),
+                  gpu::Bind::StorageView(1, cur.view),
+                  gpu::InGeneral(gpu::Bind::Combined(2, foam_view, sampler_)),
+                  gpu::Bind::StorageBuffer(3, disturbances_[slot]),
+                  depth_view ? gpu::Bind::SampledView(4, slot4) : gpu::InGeneral(gpu::Bind::SampledView(4, slot4)),
+                  gpu::InGeneral(gpu::Bind::Combined(5, mask_[write ^ 1u].view, sampler_)),
+                  gpu::Bind::StorageView(6, mask_[write].view),
+                  gpu::InGeneral(gpu::Bind::Combined(7, disp_view, sampler_)),
+                  gpu::Bind::Uniform(8, camera_[slot], 0, sizeof(WaterFieldCamera))});
 
           WaterFieldPush push{};
           push.origin[0] = origin_[r][0];
@@ -288,13 +288,13 @@ void WaterField::AddToGraph(RenderGraph& graph, const UpdateParams& params,
           push.control[1] = 0u;  // recenter + advect + decay + ripple step
           ctx.cmd->Push(push);
           ctx.cmd->Dispatch(groups, groups, 1);
-          ctx.cmd->MemoryBarrier(BarrierScope::kComputeWrite, BarrierScope::kComputeRead);
+          ctx.cmd->MemoryBarrier(gpu::BarrierScope::kComputeWrite, gpu::BarrierScope::kComputeRead);
 
           push.control[1] = 1u;  // crest foam + object disturbance injection
           ctx.cmd->Push(push);
           ctx.cmd->Dispatch(groups, groups, 1);
           // The rings are sampled by the water pixel shader downstream.
-          ctx.cmd->MemoryBarrier(BarrierScope::kComputeWrite, BarrierScope::kGraphicsRead);
+          ctx.cmd->MemoryBarrier(gpu::BarrierScope::kComputeWrite, gpu::BarrierScope::kGraphicsRead);
         }
       });
 }

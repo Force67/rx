@@ -26,24 +26,24 @@ const Vec3 kFaceUps[6] = {{0, 1, 0}, {0, 1, 0}, {0, 0, -1}, {0, 0, 1}, {0, 1, 0}
 
 }  // namespace
 
-bool LocalShadows::Initialize(Device& device) {
-  atlas_ = device.CreateImage2D(Format::kD32Float, {kFacesX * kFaceRes, kFacesY * kFaceRes},
-                                kTextureUsageDepthTarget | kTextureUsageSampled);
+bool LocalShadows::Initialize(gpu::Device& device) {
+  atlas_ = device.CreateImage2D(gpu::Format::kD32Float, {kFacesX * kFaceRes, kFacesY * kFaceRes},
+                                gpu::kTextureUsageDepthTarget | gpu::kTextureUsageSampled);
   if (!atlas_) {
     RX_ERROR("local shadow atlas creation failed");
     return false;
   }
   for (u32 i = 0; i < kFramesInFlight; ++i) {
-    face_buffers_[i] = device.CreateBuffer(face_buffer_size(), kBufferUsageStorage, true);
+    face_buffers_[i] = device.CreateBuffer(face_buffer_size(), gpu::kBufferUsageStorage, true);
     if (!face_buffers_[i].mapped) return false;
   }
   return true;
 }
 
-void LocalShadows::Destroy(Device& device) {
+void LocalShadows::Destroy(gpu::Device& device) {
   if (atlas_) device.DestroyImage(atlas_);
   atlas_ = {};
-  for (GpuBuffer& buffer : face_buffers_) {
+  for (gpu::GpuBuffer& buffer : face_buffers_) {
     if (buffer) device.DestroyBuffer(buffer);
     buffer = {};
   }
@@ -124,17 +124,17 @@ void LocalShadows::Assign(PointLight* lights, u32 count, const Vec3& camera, u32
   }
 }
 
-void LocalShadows::Render(CommandList& cmd, PipelineHandle pipeline,
-                          const base::Function<void(CommandList&, const Face&)>& draw) {
+void LocalShadows::Render(gpu::CommandList& cmd, gpu::PipelineHandle pipeline,
+                          const base::Function<void(gpu::CommandList&, const Face&)>& draw) {
   // Persistent atlas: shader-read between frames, depth target while writing.
-  TextureBarrier to_write = Transition(
-      atlas_, atlas_initialized_ ? ResourceState::kShaderReadFragment : ResourceState::kUndefined,
-      ResourceState::kDepthTarget);
+  gpu::TextureBarrier to_write = gpu::Transition(
+      atlas_, atlas_initialized_ ? gpu::ResourceState::kShaderReadFragment : gpu::ResourceState::kUndefined,
+      gpu::ResourceState::kDepthTarget);
   atlas_initialized_ = true;
   cmd.TextureBarriers(base::Span(&to_write, 1));
 
-  DepthAttachment depth{
-      .view = atlas_.view, .load = LoadOp::kClear, .store = StoreOp::kStore, .clear = 1.0f};
+  gpu::DepthAttachment depth{
+      .view = atlas_.view, .load = gpu::LoadOp::kClear, .store = gpu::StoreOp::kStore, .clear = 1.0f};
   cmd.BeginRendering({.extent = atlas_.extent, .depth = &depth});
   cmd.BindPipeline(pipeline);  // push constants resolve against the bound pipeline
   for (u32 i = 0; i < face_count_; ++i) {
@@ -149,12 +149,12 @@ void LocalShadows::Render(CommandList& cmd, PipelineHandle pipeline,
   }
   cmd.EndRendering();
 
-  TextureBarrier to_read =
-      Transition(atlas_, ResourceState::kDepthTarget, ResourceState::kShaderReadFragment);
+  gpu::TextureBarrier to_read =
+      gpu::Transition(atlas_, gpu::ResourceState::kDepthTarget, gpu::ResourceState::kShaderReadFragment);
   cmd.TextureBarriers(base::Span(&to_read, 1));
   // The froxel volume samples the atlas from compute; widen visibility (the
   // layout above already suits any sampled read).
-  cmd.MemoryBarrier(BarrierScope::kAllCommands, BarrierScope::kComputeRead);
+  cmd.MemoryBarrier(gpu::BarrierScope::kAllCommands, gpu::BarrierScope::kComputeRead);
 }
 
 }  // namespace rx::render

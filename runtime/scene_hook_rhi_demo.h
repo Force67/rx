@@ -33,18 +33,18 @@ class SceneHookRhiDemo {
   bool CreateTextureArray();
 
   struct Slot {
-    render::GpuBuffer instances;  // BDA instance arena (pos/color/layer)
-    render::GpuBuffer args;       // indirect draw + mesh-task args
-    render::GpuBuffer count;      // draw count (for DrawIndirectCount)
+    gpu::GpuBuffer instances;  // BDA instance arena (pos/color/layer)
+    gpu::GpuBuffer args;       // indirect draw + mesh-task args
+    gpu::GpuBuffer count;      // draw count (for DrawIndirectCount)
   };
 
   render::Renderer* renderer_ = nullptr;
-  render::Device* device_ = nullptr;
-  render::PipelineHandle cull_pipeline_{};
-  render::PipelineHandle draw_pipeline_{};
-  render::PipelineHandle mesh_pipeline_{};  // null when mesh shaders unavailable
-  render::GpuImage tex_array_{};
-  render::SamplerHandle sampler_{};
+  gpu::Device* device_ = nullptr;
+  gpu::PipelineHandle cull_pipeline_{};
+  gpu::PipelineHandle draw_pipeline_{};
+  gpu::PipelineHandle mesh_pipeline_{};  // null when mesh shaders unavailable
+  gpu::GpuImage tex_array_{};
+  gpu::SamplerHandle sampler_{};
   base::Vector<Slot> slots_;  // one per frame-in-flight
   u32 instance_count_ = 12;
   u32 layer_count_ = 4;

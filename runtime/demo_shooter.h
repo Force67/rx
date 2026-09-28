@@ -45,7 +45,7 @@ class ShooterDemo {
   // Per-frame input + fixed-step simulation: look/move/fire intent, the
   // character + camera pipeline, the combat systems, target lifecycles and the
   // presentation queues drained from CombatEvents.
-  void Update(f32 dt, const InputState& input, const ActionState& actions, bool allow_keyboard,
+  void Update(f32 dt, const ui::InputState& input, const ui::ActionState& actions, bool allow_keyboard,
               bool allow_mouse);
 
   // Writes the resolved camera into the frame view, emits the range geometry,
@@ -101,7 +101,7 @@ class ShooterDemo {
   void BuildWeapons();
   void BuildPlayer();
   void SpawnTarget(const Vec3& feet, f32 strafe_span);
-  void FillLookAndMove(const InputState& input, const ActionState& actions, bool allow_keyboard,
+  void FillLookAndMove(const ui::InputState& input, const ui::ActionState& actions, bool allow_keyboard,
                        bool allow_mouse, f32 dt);
   void FillWeaponIntent();
   void StepTargets(f32 dt);

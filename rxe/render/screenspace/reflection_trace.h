@@ -59,19 +59,19 @@ class ReflectionTrace {
   // always complete; `active` alone gates the sampling. `in_general` marks the
   // atlases as living in kGeneral (true only for the real RCGI images).
   struct RcgiBinding {
-    TextureView irradiance{};
-    TextureView visibility{};
-    const GpuBuffer* globals = nullptr;
-    const GpuBuffer* probe_meta = nullptr;
-    const GpuBuffer* interior_vols = nullptr;
-    SamplerHandle sampler{};
+    gpu::TextureView irradiance{};
+    gpu::TextureView visibility{};
+    const gpu::GpuBuffer* globals = nullptr;
+    const gpu::GpuBuffer* probe_meta = nullptr;
+    const gpu::GpuBuffer* interior_vols = nullptr;
+    gpu::SamplerHandle sampler{};
     bool in_general = false;
     bool active = false;
   };
 
-  bool Initialize(Device& device, BindingLayoutHandle bindless_layout);
+  bool Initialize(gpu::Device& device, gpu::BindingLayoutHandle bindless_layout);
   bool available() const { return pipeline_ && upscale_pipeline_; }
-  void Destroy(Device& device);
+  void Destroy(gpu::Device& device);
 
   // Returns the full-res packed radiance+hitdist target (rgba16f) for
   // DenoiseSpecular. When frame.half_res the trace runs at half `extent` and an
@@ -79,18 +79,18 @@ class ReflectionTrace {
   // gather's denoised per-pixel SH (kInvalidResource when RCGI is off); sh_extent
   // is their (gather) resolution.
   ResourceHandle AddToGraph(RenderGraph& graph, RayTracingContext& raytracing, u32 tlas_slot,
-                            BindingSetHandle bindless_set, ResourceHandle depth,
-                            ResourceHandle normals, TextureView prefiltered,
-                            TextureView ddgi_irradiance, bool ddgi_in_general,
-                            const GpuBuffer& ddgi_volume, u64 ddgi_volume_size,
-                            SamplerHandle sampler, Extent2D extent, ResourceHandle sh_r,
-                            ResourceHandle sh_g, ResourceHandle sh_b, Extent2D sh_extent,
+                            gpu::BindingSetHandle bindless_set, ResourceHandle depth,
+                            ResourceHandle normals, gpu::TextureView prefiltered,
+                            gpu::TextureView ddgi_irradiance, bool ddgi_in_general,
+                            const gpu::GpuBuffer& ddgi_volume, u64 ddgi_volume_size,
+                            gpu::SamplerHandle sampler, gpu::Extent2D extent, ResourceHandle sh_r,
+                            ResourceHandle sh_g, ResourceHandle sh_b, gpu::Extent2D sh_extent,
                             const RcgiBinding& rcgi, const Frame& frame);
 
  private:
-  PipelineHandle pipeline_;
-  PipelineHandle upscale_pipeline_;  // half-res -> full-res bilateral upscale
-  GpuBuffer camera_[2];  // inv_view_proj + eye, too big for the push block
+  gpu::PipelineHandle pipeline_;
+  gpu::PipelineHandle upscale_pipeline_;  // half-res -> full-res bilateral upscale
+  gpu::GpuBuffer camera_[2];  // inv_view_proj + eye, too big for the push block
 };
 
 }  // namespace rx::render

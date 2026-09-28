@@ -69,7 +69,7 @@ QualityPreset DetectAndroidTier(const base::String& name) {
 
 }  // namespace
 
-RenderSettings PresetSettings(base::StringRef tier_ini, const DeviceCaps& caps) {
+RenderSettings PresetSettings(base::StringRef tier_ini, const gpu::DeviceCaps& caps) {
   RenderSettings s;
   ApplyIni(tier_ini, s);
 
@@ -97,7 +97,7 @@ RenderSettings PresetSettings(base::StringRef tier_ini, const DeviceCaps& caps) 
   return s;
 }
 
-QualityPreset DetectPreset(const DeviceCaps& caps) {
+QualityPreset DetectPreset(const gpu::DeviceCaps& caps) {
   // Known from the board rather than guessed from the gpu class, which is all
   // the integrated fallback below can do for other handhelds.
   if (IsSteamDeck()) return QualityPreset::kSteamDeck;

@@ -11,6 +11,7 @@
 
 using namespace rx;
 using namespace rx::render;
+namespace gpu = rx::gpu;
 
 namespace {
 constexpr u32 kW = 256, kH = 128;
@@ -31,28 +32,28 @@ struct TilePush {
 }
 
 int main() {
-  DeviceDesc desc;
+  gpu::DeviceDesc desc;
   const char* backend = ::getenv("RX_RHI");
-  desc.backend = backend && ::strcmp(backend, "d3d12") == 0 ? Backend::kD3D12 : Backend::kVulkan;
+  desc.backend = backend && ::strcmp(backend, "d3d12") == 0 ? gpu::Backend::kD3D12 : gpu::Backend::kVulkan;
   desc.request_raytracing = false;
   desc.enable_validation = true;
-  auto device = Device::CreateOffscreen(desc);
+  auto device = gpu::Device::CreateOffscreen(desc);
   if (!device || device->is_stub()) {
     ::printf("post_sampling_test: SKIP, GPU unavailable\n");
     return 77;
   }
   TransientPool pool(*device);
-  base::Vector<GpuImage> owned;
-  auto input = [&](Format format, Extent2D extent, const base::Vector<f32>& data) {
-    GpuImage image = device->CreateImage2D(format, extent, kTextureUsageSampled | kTextureUsageTransferDst);
-    GpuBuffer staging = device->CreateBufferWithData(
-        ByteSpan(reinterpret_cast<const u8*>(data.data()), data.size() * sizeof(f32)), kBufferUsageTransferSrc);
+  base::Vector<gpu::GpuImage> owned;
+  auto input = [&](gpu::Format format, gpu::Extent2D extent, const base::Vector<f32>& data) {
+    gpu::GpuImage image = device->CreateImage2D(format, extent, gpu::kTextureUsageSampled | gpu::kTextureUsageTransferDst);
+    gpu::GpuBuffer staging = device->CreateBufferWithData(
+        ByteSpan(reinterpret_cast<const u8*>(data.data()), data.size() * sizeof(f32)), gpu::kBufferUsageTransferSrc);
     if (!image || !staging) ::exit(1);
-    device->ImmediateSubmit([&](CommandList& cmd) {
-      cmd.Barrier(Transition(image, ResourceState::kUndefined, ResourceState::kCopyDst));
-      BufferTextureCopy copy{.extent = extent};
+    device->ImmediateSubmit([&](gpu::CommandList& cmd) {
+      cmd.Barrier(gpu::Transition(image, gpu::ResourceState::kUndefined, gpu::ResourceState::kCopyDst));
+      gpu::BufferTextureCopy copy{.extent = extent};
       cmd.CopyBufferToTexture(staging, image, base::Span(&copy, 1));
-      cmd.Barrier(Transition(image, ResourceState::kCopyDst, ResourceState::kShaderReadCompute));
+      cmd.Barrier(gpu::Transition(image, gpu::ResourceState::kCopyDst, gpu::ResourceState::kShaderReadCompute));
     });
     device->DestroyBuffer(staging);
     owned.push_back(image);
@@ -63,11 +64,11 @@ int main() {
     for (u32 c = 0; c < 3; ++c) colors[(y*kW+x)*4+c] = (x/4) % 2 ? 1 : 0;
     colors[(y*kW+x)*4+3] = 1;
   }
-  GpuImage color = input(Format::kRGBA32Float, {kW,kH}, colors);
-  GpuImage depths[3];
+  gpu::GpuImage color = input(gpu::Format::kRGBA32Float, {kW,kH}, colors);
+  gpu::GpuImage depths[3];
   for (u32 i = 0; i < 3; ++i) {
     const u32 divisor = i == 1 ? 2 : 1;
-    depths[i] = input(Format::kR32Float, {kW/divisor,kH/divisor},
+    depths[i] = input(gpu::Format::kR32Float, {kW/divisor,kH/divisor},
                       base::Vector<f32>(kW*kH/(divisor*divisor), i == 2 ? .025f : .05f));
   }
   int failures = 0;
@@ -75,10 +76,10 @@ int main() {
     ::printf("%s: %s, error=%g\n", name, ok ? "PASS" : "FAIL", error);
     if (!ok) ++failures;
   };
-  auto render = [&](auto& pass, GpuImage guide, const auto& frame) {
+  auto render = [&](auto& pass, gpu::GpuImage guide, const auto& frame) {
     pool.BeginFrame();
     RenderGraph graph;
-    ResourceState cs = ResourceState::kShaderReadCompute, gs = cs;
+    gpu::ResourceState cs = gpu::ResourceState::kShaderReadCompute, gs = cs;
     auto c = graph.ImportImage("color", color, &cs);
     auto g = graph.ImportImage("guide", guide, &gs);
     auto out = pass.AddToGraph(graph, c, g, {kW,kH}, frame);
@@ -86,12 +87,12 @@ int main() {
       b.Read(out, ResourceUsage::kResolveSrc);
     }, [](PassContext&) {});
     if (!graph.Compile(*device, pool)) ::exit(1);
-    device->ImmediateSubmit([&](CommandList& cmd) {
+    device->ImmediateSubmit([&](gpu::CommandList& cmd) {
       PassContext ctx{.cmd = &cmd, .device = device.Get_UseOnlyIfYouKnowWhatYouareDoing(), .graph = &graph};
       graph.Execute(ctx);
     });
     base::Vector<u16> bits(kW*kH*4);
-    if (!device->ReadbackImage(graph.image(out), ResourceState::kResolveSrc,
+    if (!device->ReadbackImage(graph.image(out), gpu::ResourceState::kResolveSrc,
                                bits.data(), bits.size()*sizeof(u16))) ::exit(1);
     base::Vector<f32> pixels(bits.size());
     for (u32 i = 0; i < bits.size(); ++i) pixels[i] = Half(bits[i]);
@@ -157,7 +158,7 @@ int main() {
     base::Vector<f32> velocities(w*h*2);
     for (u32 y = 32/divisor; y < 96/divisor; ++y)
       for (u32 x = 192/divisor; x < w; ++x) velocities[(y*w+x)*2] = -16.f/kW;
-    GpuImage motion = input(Format::kRG32Float, {w,h}, velocities);
+    gpu::GpuImage motion = input(gpu::Format::kRG32Float, {w,h}, velocities);
     auto pixels = render(blur, motion, frame);
     if (divisor == 1) {
       native = pixels;
@@ -170,16 +171,16 @@ int main() {
   }
   {
     base::Vector<f32> velocities(kW*kH*2);
-    auto pixels = render(blur, input(Format::kRG32Float, {kW,kH}, velocities), frame);
+    auto pixels = render(blur, input(gpu::Format::kRG32Float, {kW,kH}, velocities), frame);
     double error = difference(pixels, colors);
     check(error < .001, "Motion blur static frame", error);
     for (u32 p = 0; p < kW*kH; ++p) velocities[p*2] = -12.f/kW;
-    auto expected = render(blur, input(Format::kRG32Float, {kW,kH}, velocities), frame);
+    auto expected = render(blur, input(gpu::Format::kRG32Float, {kW,kH}, velocities), frame);
     for (u32 p = 0; p < kW*kH/2; ++p) {
       velocities[p*2] = 0;
       velocities[p*2+1] = -8.f/kH;
     }
-    pixels = render(blur, input(Format::kRG32Float, {kW,kH}, velocities), frame);
+    pixels = render(blur, input(gpu::Format::kRG32Float, {kW,kH}, velocities), frame);
     error = difference(pixels, expected, 64, 96, 64, 72);
     check(error < .001, "Motion blur aspect-correct neighborhood", error);
   }
@@ -187,23 +188,23 @@ int main() {
   // The longer screen-space vector must win, even on a non-square image.
   base::Vector<f32> velocities(kW*kH*2);
   for (u32 p = 0; p < kW*kH; ++p) velocities[p*2+(p%2)] = p%2 ? -8.f/kH : -12.f/kW;
-  GpuImage motion = input(Format::kRG32Float, {kW,kH}, velocities);
-  GpuImage tiles = device->CreateImage2D(Format::kRG16Float, {kW/16,kH/16},
-      kTextureUsageStorage | kTextureUsageTransferSrc);
-  PipelineHandle pipeline = device->CreateComputePipeline({
+  gpu::GpuImage motion = input(gpu::Format::kRG32Float, {kW,kH}, velocities);
+  gpu::GpuImage tiles = device->CreateImage2D(gpu::Format::kRG16Float, {kW/16,kH/16},
+      gpu::kTextureUsageStorage | gpu::kTextureUsageTransferSrc);
+  gpu::PipelineHandle pipeline = device->CreateComputePipeline({
       .shader = RX_SHADER(k_motion_tilemax_cs_hlsl),
-      .sets = {{.slots = {{0, BindingType::kStorageImage}, {1, BindingType::kSampledImage}}}},
-      .push_constant_size = PushSize<TilePush>()});
+      .sets = {{.slots = {{0, gpu::BindingType::kStorageImage}, {1, gpu::BindingType::kSampledImage}}}},
+      .push_constant_size = gpu::PushSize<TilePush>()});
   if (!tiles || !pipeline) return 1;
-  device->ImmediateSubmit([&](CommandList& cmd) {
-    cmd.Barrier(Transition(tiles, ResourceState::kUndefined, ResourceState::kGeneral));
+  device->ImmediateSubmit([&](gpu::CommandList& cmd) {
+    cmd.Barrier(gpu::Transition(tiles, gpu::ResourceState::kUndefined, gpu::ResourceState::kGeneral));
     cmd.BindPipeline(pipeline);
-    cmd.BindTransient(0, {Bind::Storage(0, tiles), Bind::Sampled(1, motion)});
+    cmd.BindTransient(0, {gpu::Bind::Storage(0, tiles), gpu::Bind::Sampled(1, motion)});
     cmd.Push(TilePush{});
     cmd.Dispatch2D({kW/16,kH/16});
   });
   base::Vector<u16> bits(kW/16*kH/16*2);
-  if (!device->ReadbackImage(tiles, ResourceState::kGeneral, bits.data(), bits.size()*sizeof(u16))) return 1;
+  if (!device->ReadbackImage(tiles, gpu::ResourceState::kGeneral, bits.data(), bits.size()*sizeof(u16))) return 1;
   double error = 0;
   for (u32 p = 0; p < bits.size()/2; ++p)
     error = rx::Max(error, double(::fabsf(Half(bits[p*2])-12.f/kW) + ::fabsf(Half(bits[p*2+1]))));

@@ -9,7 +9,7 @@
 // (vulkan/, d3d12/, ...). Interop escape hatches live in per-backend headers
 // (e.g. rhi/vulkan_interop.h) that only backend-aware modules include.
 
-namespace rx::render {
+namespace rx::gpu {
 
 // Texel formats actually used by the engine. One-to-one mappable to VkFormat
 // and DXGI_FORMAT; extend as needed, keeping the mapping tables in each
@@ -238,12 +238,12 @@ struct ShaderBlob {
 // array alongside the SPIR-V and both ride in the same blob.
 #if defined(RX_RHI_D3D12)
 #define RX_SHADER(sym)                                                       \
-  (::rx::render::ShaderBlob{sym, sizeof(sym),                                \
-                             ::rx::render::ShaderFormat::kSpirv, sym##_dxil, \
+  (::rx::gpu::ShaderBlob{sym, sizeof(sym),                                \
+                             ::rx::gpu::ShaderFormat::kSpirv, sym##_dxil, \
                              sizeof(sym##_dxil)})
 #else
 #define RX_SHADER(sym) \
-  (::rx::render::ShaderBlob{sym, sizeof(sym), ::rx::render::ShaderFormat::kSpirv})
+  (::rx::gpu::ShaderBlob{sym, sizeof(sym), ::rx::gpu::ShaderFormat::kSpirv})
 #endif
 
 // Type-safe opaque handles. The value is a backend-owned record pointer (or
@@ -265,6 +265,6 @@ using AccelStructHandle = RhiHandle<struct AccelStructTag>;
 using AccelCompactionQueryHandle = RhiHandle<struct AccelCompactionQueryTag>;
 using TimestampPoolHandle = RhiHandle<struct TimestampPoolTag>;
 
-}  // namespace rx::render
+}  // namespace rx::gpu
 
 #endif  // RX_RENDER_RHI_TYPES_H_

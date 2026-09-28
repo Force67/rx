@@ -18,6 +18,7 @@
 
 using namespace rx;
 using namespace rx::render;
+namespace gpu = rx::gpu;
 
 int main() {
   int failures = 0;
@@ -52,10 +53,10 @@ int main() {
   instances.clear();
   check(history.Update(instances, {}), "removed geometry resets reference accumulation");
 
-  DeviceDesc desc;
+  gpu::DeviceDesc desc;
   desc.enable_validation = true;
   desc.request_raytracing = true;
-  auto device = Device::CreateOffscreen(desc);
+  auto device = gpu::Device::CreateOffscreen(desc);
   if (!device || device->is_stub() || !device->caps().ray_query) {
     ::printf("path_motion_test: GPU checks SKIP, %d CPU failures\n", failures);
     return failures ? 1 : 77;
@@ -67,49 +68,49 @@ int main() {
                               {.position = {1, -1, 0}, .normal = {0, 0, -1}},
                               {.position = {0, 1, 0}, .normal = {0, 0, -1}}};
   const u32 indices[3] = {0, 1, 2};
-  GpuMesh mesh;
+  gpu::GpuMesh mesh;
   mesh.vertices = device->CreateBufferWithData(
       ByteSpan(reinterpret_cast<const u8*>(vertices), sizeof(vertices)),
-      kBufferUsageStorage | kBufferUsageDeviceAddress | kBufferUsageAccelBuildInput);
+      gpu::kBufferUsageStorage | gpu::kBufferUsageDeviceAddress | gpu::kBufferUsageAccelBuildInput);
   mesh.indices = device->CreateBufferWithData(
       ByteSpan(reinterpret_cast<const u8*>(indices), sizeof(indices)),
-      kBufferUsageStorage | kBufferUsageDeviceAddress | kBufferUsageAccelBuildInput);
+      gpu::kBufferUsageStorage | gpu::kBufferUsageDeviceAddress | gpu::kBufferUsageAccelBuildInput);
   mesh.vertex_count = mesh.index_count = 3;
   mesh.submeshes.push_back({.index_count = 3});
   BindlessRegistry::GeometryRecord geometry;
   geometry.material_index = bindless->RegisterMaterial({});
   const u32 current_mesh = bindless->RegisterMesh(mesh.vertices, mesh.indices, &geometry, 1);
   for (auto& vertex : vertices) vertex.position[0] -= .25f;
-  GpuBuffer previous_vertices = device->CreateBufferWithData(
-      ByteSpan(reinterpret_cast<const u8*>(vertices), sizeof(vertices)), kBufferUsageStorage | kBufferUsageDeviceAddress);
+  gpu::GpuBuffer previous_vertices = device->CreateBufferWithData(
+      ByteSpan(reinterpret_cast<const u8*>(vertices), sizeof(vertices)), gpu::kBufferUsageStorage | gpu::kBufferUsageDeviceAddress);
   const u32 previous_mesh = bindless->RegisterMesh(previous_vertices, mesh.indices, &geometry, 1);
   if (!rt->BuildBlas(1, mesh) || !rt->ReserveTlas(0, 2)) return 1;
-  GpuBuffer result = device->CreateBuffer(8 * sizeof(f32), kBufferUsageStorage | kBufferUsageTransferSrc);
-  GpuBuffer readback = device->CreateBuffer(8 * sizeof(f32), kBufferUsageTransferDst, true);
+  gpu::GpuBuffer result = device->CreateBuffer(8 * sizeof(f32), gpu::kBufferUsageStorage | gpu::kBufferUsageTransferSrc);
+  gpu::GpuBuffer readback = device->CreateBuffer(8 * sizeof(f32), gpu::kBufferUsageTransferDst, true);
   if (!result || !readback.mapped) return 1;
-  auto run = [&](ShaderBlob shader, u32 tlas_binding, u32 motion_binding, bool recon,
+  auto run = [&](gpu::ShaderBlob shader, u32 tlas_binding, u32 motion_binding, bool recon,
                  u32 previous, f32 expected_x, bool valid, f32 translation_x = -.25f) {
-    PipelineHandle pipeline = device->CreateComputePipeline({.shader = shader,
-        .sets = {{.slots = {{tlas_binding, BindingType::kAccelStruct},
-                            {motion_binding, BindingType::kStorageBuffer},
-                            {31, BindingType::kStorageBuffer}}}, {.shared = bindless->set_layout()}}});
+    gpu::PipelineHandle pipeline = device->CreateComputePipeline({.shader = shader,
+        .sets = {{.slots = {{tlas_binding, gpu::BindingType::kAccelStruct},
+                            {motion_binding, gpu::BindingType::kStorageBuffer},
+                            {31, gpu::BindingType::kStorageBuffer}}}, {.shared = bindless->set_layout()}}});
     if (!pipeline) { check(false, "motion pipeline creation"); return; }
     instances.resize(2);
     instances[0] = {.mesh_key = 999, .history_id = 123};
     instances[1] = {.mesh_key = 1, .custom_index = current_mesh,
                     .previous_transform = MakeTranslation({translation_x, .5f, 0}),
                     .previous_mesh = previous, .history_id = 42};
-    device->ImmediateSubmit([&](CommandList& cmd) {
+    device->ImmediateSubmit([&](gpu::CommandList& cmd) {
       rt->BuildTlas(cmd, 0, 0, instances);
       cmd.BindPipeline(pipeline);
-      cmd.BindTransient(0, {Bind::Accel(tlas_binding, rt->tlas(0)),
-                            Bind::StorageBuffer(motion_binding, rt->motion_buffer(0)),
-                            Bind::StorageBuffer(31, result)});
+      cmd.BindTransient(0, {gpu::Bind::Accel(tlas_binding, rt->tlas(0)),
+                            gpu::Bind::StorageBuffer(motion_binding, rt->motion_buffer(0)),
+                            gpu::Bind::StorageBuffer(31, result)});
       cmd.BindSet(1, bindless->set());
       cmd.Dispatch(1, 1, 1);
-      cmd.MemoryBarrier(BarrierScope::kComputeWrite, BarrierScope::kTransferRead);
+      cmd.MemoryBarrier(gpu::BarrierScope::kComputeWrite, gpu::BarrierScope::kTransferRead);
       cmd.CopyBuffer(result, 0, readback, 0, 8 * sizeof(f32));
-      cmd.MemoryBarrier(BarrierScope::kTransferRead, BarrierScope::kComputeWrite);
+      cmd.MemoryBarrier(gpu::BarrierScope::kTransferRead, gpu::BarrierScope::kComputeWrite);
     });
     device->InvalidateBuffer(readback, 0, 8 * sizeof(f32));
     f32 data[8];

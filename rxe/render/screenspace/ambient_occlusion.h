@@ -5,9 +5,12 @@
 #include "rxe/render/core/render_graph.h"
 #include "rxe/gpu/rhi/resources.h"
 
+namespace rx::gpu {
+class Device;
+}  // namespace rx::gpu
+
 namespace rx::render {
 
-class Device;
 class RayTracingContext;
 
 // Ray traced ambient occlusion: cosine hemisphere rays through the frame TLAS,
@@ -21,10 +24,10 @@ class RtaoPass {
     u32 ray_count = 2;
   };
 
-  bool Initialize(Device& device);
+  bool Initialize(gpu::Device& device);
   bool available() const { return static_cast<bool>(pipeline_); }
-  void Resize(Device& device, Extent2D extent) { extent_ = extent; }
-  void Destroy(Device& device);
+  void Resize(gpu::Device& device, gpu::Extent2D extent) { extent_ = extent; }
+  void Destroy(gpu::Device& device);
 
   void Configure(const Settings& settings) { settings_ = settings; }
 
@@ -34,12 +37,12 @@ class RtaoPass {
                             const Mat4& inv_view_proj, u32 frame_index, f32 near_plane,
                             const f32 hit_dist_params[3]);
 
-  static constexpr Format kHitDistFormat = Format::kR8Unorm;
+  static constexpr gpu::Format kHitDistFormat = gpu::Format::kR8Unorm;
 
  private:
   Settings settings_;
-  PipelineHandle pipeline_;
-  Extent2D extent_{};
+  gpu::PipelineHandle pipeline_;
+  gpu::Extent2D extent_{};
 };
 
 }  // namespace rx::render

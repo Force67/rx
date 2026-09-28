@@ -28,9 +28,12 @@
 struct ImDrawData;      // <imgui.h>, included only by the implementation
 struct ImTextureData;
 
-namespace rx::render {
-
+namespace rx::gpu {
 class CommandList;
+}  // namespace rx::gpu
+
+namespace rx::ui {
+
 
 class RX_IMGUI_RENDERER_EXPORT ImGuiRenderer {
  public:
@@ -44,21 +47,21 @@ class RX_IMGUI_RENDERER_EXPORT ImGuiRenderer {
   // the draws render into, e.g. the swapchain format), the shared sampler and
   // the per-frame vertex/index rings. Returns false on a stub device or when
   // the pipeline fails to build.
-  bool Initialize(Device& device, Format target_format);
+  bool Initialize(gpu::Device& device, gpu::Format target_format);
 
   // Frosted-glass backdrop: the pre-blurred copy of the scene behind the UI
   // (FrameView::blur_source / blur_sampler, produced by the renderer's ui_blur
   // pass when FrameView::needs_blur is set). Translucent widgets composite over
   // it instead of over the sharp frame. Call inside the ui_draw closure, before
   // Render; an invalid view turns the effect off for that frame.
-  void SetBackdrop(TextureView blur, SamplerHandle sampler);
+  void SetBackdrop(gpu::TextureView blur, gpu::SamplerHandle sampler);
 
   // Records draw_data into cmd. Call inside an open dynamic-rendering pass whose
   // single color attachment matches target_format, and between the device's
   // BeginFrame and SubmitFrame (per-draw texture binds use the frame's transient
   // pool). Texture create/update/destroy requests carried in draw_data are
   // serviced first.
-  void Render(ImDrawData* draw_data, CommandList& cmd);
+  void Render(ImDrawData* draw_data, gpu::CommandList& cmd);
 
   void Shutdown();
 
@@ -66,22 +69,22 @@ class RX_IMGUI_RENDERER_EXPORT ImGuiRenderer {
 
  private:
   struct FrameBuffers {
-    GpuBuffer vertices;
-    GpuBuffer indices;
+    gpu::GpuBuffer vertices;
+    gpu::GpuBuffer indices;
   };
 
   void UpdateTexture(ImTextureData* tex);
   void DestroyTexture(ImTextureData* tex);
 
-  Device* device_ = nullptr;
-  Format target_format_ = Format::kUnknown;
-  PipelineHandle pipeline_;
-  SamplerHandle sampler_;
+  gpu::Device* device_ = nullptr;
+  gpu::Format target_format_ = gpu::Format::kUnknown;
+  gpu::PipelineHandle pipeline_;
+  gpu::SamplerHandle sampler_;
   // Frosted backdrop for the next Render, which consumes it: a frame that sets
   // none falls back to plain alpha blending rather than reusing a stale one.
-  TextureView backdrop_;
-  SamplerHandle backdrop_sampler_;
-  FrameBuffers frames_[Device::kMaxFramesInFlight];
+  gpu::TextureView backdrop_;
+  gpu::SamplerHandle backdrop_sampler_;
+  FrameBuffers frames_[gpu::Device::kMaxFramesInFlight];
   u32 frame_index_ = 0;
   // Textures this backend created (owns the GPU backing behind BackendUserData),
   // tracked so Shutdown frees them without a global ImGui:: call (RX_SHARED keeps
@@ -89,6 +92,6 @@ class RX_IMGUI_RENDERER_EXPORT ImGuiRenderer {
   base::Vector<ImTextureData*> textures_;
 };
 
-}  // namespace rx::render
+}  // namespace rx::ui
 
 #endif  // RX_RENDER_UTIL_IMGUI_RENDERER_H_

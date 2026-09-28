@@ -13,6 +13,7 @@
 
 using namespace rx;
 using namespace rx::render;
+namespace gpu = rx::gpu;
 
 namespace {
 constexpr u32 kW = 96, kH = 64, kOutW = 192, kOutH = 128;
@@ -28,10 +29,10 @@ float Half(u16 bits) {
 }  // namespace
 
 int main() {
-  DeviceDesc desc;
+  gpu::DeviceDesc desc;
   desc.request_raytracing = false;
   desc.enable_validation = true;
-  auto device = Device::CreateOffscreen(desc);
+  auto device = gpu::Device::CreateOffscreen(desc);
   if (!device || device->is_stub()) {
     ::printf("upscaler_motion_test: SKIP, GPU unavailable\n");
     return 77;
@@ -51,25 +52,25 @@ int main() {
   }
 #endif
   TransientPool pool(*device);
-  auto make_image = [&](Format format) {
-    return device->CreateImage2D(format, {kW, kH}, kTextureUsageSampled | kTextureUsageTransferDst);
+  auto make_image = [&](gpu::Format format) {
+    return device->CreateImage2D(format, {kW, kH}, gpu::kTextureUsageSampled | gpu::kTextureUsageTransferDst);
   };
-  GpuImage color = make_image(Format::kRGBA32Float);
-  GpuImage depth = make_image(Format::kR32Float);
-  GpuImage motion = make_image(Format::kRG32Float);
+  gpu::GpuImage color = make_image(gpu::Format::kRGBA32Float);
+  gpu::GpuImage depth = make_image(gpu::Format::kR32Float);
+  gpu::GpuImage motion = make_image(gpu::Format::kRG32Float);
   if (!color || !depth || !motion) return 1;
-  ResourceState color_state = ResourceState::kUndefined, depth_state = ResourceState::kUndefined,
-                motion_state = ResourceState::kUndefined;
+  gpu::ResourceState color_state = gpu::ResourceState::kUndefined, depth_state = gpu::ResourceState::kUndefined,
+                motion_state = gpu::ResourceState::kUndefined;
   base::Vector<f32> colors(kW * kH * 4), depths(kW * kH, .1f), motions(kW * kH * 2, 0);
-  auto upload = [&](GpuImage image, ResourceState& state, const base::Vector<f32>& data) {
-    GpuBuffer staging = device->CreateBufferWithData(
-        ByteSpan(reinterpret_cast<const u8*>(data.data()), data.size() * sizeof(f32)), kBufferUsageTransferSrc);
-    device->ImmediateSubmit([&](CommandList& cmd) {
-      cmd.Barrier(Transition(image, state, ResourceState::kCopyDst));
-      BufferTextureCopy copy{.extent = {kW, kH}};
+  auto upload = [&](gpu::GpuImage image, gpu::ResourceState& state, const base::Vector<f32>& data) {
+    gpu::GpuBuffer staging = device->CreateBufferWithData(
+        ByteSpan(reinterpret_cast<const u8*>(data.data()), data.size() * sizeof(f32)), gpu::kBufferUsageTransferSrc);
+    device->ImmediateSubmit([&](gpu::CommandList& cmd) {
+      cmd.Barrier(gpu::Transition(image, state, gpu::ResourceState::kCopyDst));
+      gpu::BufferTextureCopy copy{.extent = {kW, kH}};
       cmd.CopyBufferToTexture(staging, image, base::Span(&copy, 1));
     });
-    state = ResourceState::kCopyDst;
+    state = gpu::ResourceState::kCopyDst;
     device->DestroyBuffer(staging);
   };
   upload(depth, depth_state, depths);
@@ -105,13 +106,13 @@ int main() {
         b.Read(output, ResourceUsage::kResolveSrc);
       }, [](PassContext&) {});
       if (!graph.Compile(*device, pool)) ::exit(1);
-      device->ImmediateSubmit([&](CommandList& cmd) {
+      device->ImmediateSubmit([&](gpu::CommandList& cmd) {
         PassContext ctx{.cmd = &cmd, .device = device.Get_UseOnlyIfYouKnowWhatYouareDoing(), .graph = &graph};
         graph.Execute(ctx);
       });
       if (frame >= 24) {
         base::Vector<u16> pixels(kOutW * kOutH * 4);
-        if (!device->ReadbackImage(graph.image(output), ResourceState::kResolveSrc,
+        if (!device->ReadbackImage(graph.image(output), gpu::ResourceState::kResolveSrc,
                                    pixels.data(), pixels.size() * sizeof(u16))) ::exit(1);
         for (u32 y = 16; y < kOutH - 16; ++y) for (u32 x = 16; x < kOutW - 16; ++x)
           for (u32 c = 0; c < 3; ++c) {

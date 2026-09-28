@@ -3,7 +3,7 @@
 #include "base/memory/unique_pointer.h"
 #include "foundation/logging/log.h"
 
-namespace rx {
+namespace rx::ui {
 namespace {
 
 // Fallback when SDL3 is not compiled in or window creation fails. Keeps the
@@ -36,4 +36,4 @@ base::UniquePointer<Window> Window::Create(const WindowDesc& desc) {
   return base::MakeUnique<HeadlessWindow>(desc);
 }
 
-}  // namespace rx
+}  // namespace rx::ui

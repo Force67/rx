@@ -3,7 +3,7 @@
 
 #include "foundation/build_config/types.h"
 
-namespace rx {
+namespace rx::ui {
 
 // Semantic, device-agnostic input. Gameplay queries resolved *actions* and
 // *axes* instead of raw keys, so the same code serves keyboard/mouse and
@@ -52,6 +52,6 @@ struct ActionState {
   }
 };
 
-}  // namespace rx
+}  // namespace rx::ui
 
 #endif  // RX_UI_EVENTS_INPUT_ACTIONS_H_

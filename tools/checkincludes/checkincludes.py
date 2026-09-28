@@ -4,7 +4,8 @@
 A quoted include must resolve to a file of the including target itself or of a
 target it can see through its links: its direct links, plus what those export
 through INTERFACE_LINK_LIBRARIES. On top of that come the layering rules from
-docs/STRUCTURE.md. A plugin is any module under plugins/.
+docs/STRUCTURE.md. A plugin is any module under plugins/. Every header under
+rxe/ and plugins/ must also open its module's namespace.
 
 Existing violations live in baseline.txt next to this script. The check fails on
 a violation that is not in the baseline, and on a baseline entry that no longer
@@ -198,13 +199,59 @@ def check(graph):
   return violations
 
 
+def module_namespace(rel_path):
+  """The namespace a header under rxe/ or plugins/ declares (docs/STRUCTURE.md)."""
+  parts = rel_path.split("/")
+  if parts[0] == "plugins":
+    return "rx::" + parts[1]
+  if parts[:3] == ["rxe", "net", "http"]:
+    return "rx::http"  # named for the protocol: http::Get, http::Url
+  return "rx::" + parts[1]
+
+
+FORWARD_ONLY = re.compile(r"^(\s*((class|struct) \w+;|//[^\n]*))*\s*$")
+
+
+def check_namespaces(root):
+  """A module's headers open its namespace; a block of another rx namespace may
+  only forward-declare that namespace's types."""
+  found = {}
+  for top in ("rxe", "plugins"):
+    for dirpath, _, filenames in os.walk(os.path.join(root, top)):
+      for fn in filenames:
+        if not fn.endswith(".h"):
+          continue
+        path = os.path.join(dirpath, fn)
+        rel = os.path.relpath(path, root)
+        want = module_namespace(rel)
+        with open(path, errors="replace") as f:
+          text = f.read()
+        for m in re.finditer(r"^namespace (rx(?:::\w+)*) \{", text, re.M):
+          ns = m.group(1)
+          if ns == want or ns.startswith(want + "::"):
+            continue
+          depth, i = 1, m.end()
+          while depth and i < len(text):
+            depth += {"{": 1, "}": -1}.get(text[i], 0)
+            i += 1
+          if not FORWARD_ONLY.match(text[m.end():i - 1]):
+            line = text.count("\n", 0, m.start()) + 1
+            found["namespace %s %s" % (rel, ns)] = (
+                "%s:%d: namespace: opens %s, but code under %s belongs in %s "
+                "(other namespaces may only be forward-declared)" % (
+                    rel, line, ns, os.path.dirname(rel), want))
+  return found
+
+
 def main(argv):
   update = "--update-baseline" in argv
   args = [a for a in argv[1:] if not a.startswith("--")]
   if len(args) != 1:
     print("usage: checkincludes.py [--update-baseline] <build>/modules.json")
     return 2
-  violations = check(Graph(args[0]))
+  graph = Graph(args[0])
+  violations = check(graph)
+  violations.update(check_namespaces(graph.root))
   if update:
     with open(BASELINE, "w") as f:
       f.write("# Include violations that existed when the lint landed. Fix one,\n"

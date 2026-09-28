@@ -13,14 +13,15 @@
 
 using namespace rx;
 using namespace rx::render;
+namespace gpu = rx::gpu;
 
 int main() {
-  DeviceDesc desc;
+  gpu::DeviceDesc desc;
   const char* backend = ::getenv("RX_RHI");
   desc.backend = backend && ::strcmp(backend, "d3d12") == 0
-                     ? Backend::kD3D12 : Backend::kVulkan;
+                     ? gpu::Backend::kD3D12 : gpu::Backend::kVulkan;
   desc.enable_validation = true;
-  auto device = Device::CreateOffscreen(desc);
+  auto device = gpu::Device::CreateOffscreen(desc);
   if (!device || device->is_stub()) {
     ::printf("path_alpha_test: SKIP, GPU unavailable\n");
     return 77;
@@ -31,12 +32,12 @@ int main() {
                               {.position = {1, 0, 0}},
                               {.position = {0, 1, 0}}};
   const u32 indices[3] = {0, 1, 2};
-  GpuBuffer vb = device->CreateBufferWithData(
+  gpu::GpuBuffer vb = device->CreateBufferWithData(
       ByteSpan(reinterpret_cast<const u8*>(vertices), sizeof(vertices)),
-      kBufferUsageStorage | kBufferUsageDeviceAddress);
-  GpuBuffer ib = device->CreateBufferWithData(
+      gpu::kBufferUsageStorage | gpu::kBufferUsageDeviceAddress);
+  gpu::GpuBuffer ib = device->CreateBufferWithData(
       ByteSpan(reinterpret_cast<const u8*>(indices), sizeof(indices)),
-      kBufferUsageStorage | kBufferUsageDeviceAddress);
+      gpu::kBufferUsageStorage | gpu::kBufferUsageDeviceAddress);
   const f32 alphas[8] = {0, .49f, .5f, 1, 0, 0, .75f, .75f};
   const f32 cutoffs[8] = {.5f, .5f, .5f, .5f, .5f, 0, .8f, .7f};
   const u32 expected[8] = {0, 0, 1, 1, 1, 1, 0, 1};
@@ -49,24 +50,24 @@ int main() {
     geometry[i].material_index = bindless->RegisterMaterial(material);
   }
   if (!vb || !ib || bindless->RegisterMesh(vb, ib, geometry, 8) != 0) return 1;
-  GpuBuffer result = device->CreateBuffer(sizeof(expected), kBufferUsageStorage | kBufferUsageTransferSrc);
-  GpuBuffer readback = device->CreateBuffer(sizeof(expected), kBufferUsageTransferDst, true);
+  gpu::GpuBuffer result = device->CreateBuffer(sizeof(expected), gpu::kBufferUsageStorage | gpu::kBufferUsageTransferSrc);
+  gpu::GpuBuffer readback = device->CreateBuffer(sizeof(expected), gpu::kBufferUsageTransferDst, true);
   if (!result || !readback.mapped) return 1;
   int failures = 0;
-  auto run = [&](ShaderBlob shader, const char* name) {
-    PipelineHandle pipeline = device->CreateComputePipeline({
+  auto run = [&](gpu::ShaderBlob shader, const char* name) {
+    gpu::PipelineHandle pipeline = device->CreateComputePipeline({
         .shader = shader,
-        .sets = {{.slots = {{31, BindingType::kStorageBuffer}}}, {.shared = bindless->set_layout()}},
+        .sets = {{.slots = {{31, gpu::BindingType::kStorageBuffer}}}, {.shared = bindless->set_layout()}},
         .debug_name = name});
     if (!pipeline) { ++failures; return; }
-    device->ImmediateSubmit([&](CommandList& cmd) {
+    device->ImmediateSubmit([&](gpu::CommandList& cmd) {
       cmd.BindPipeline(pipeline);
-      cmd.BindTransient(0, {Bind::StorageBuffer(31, result)});
+      cmd.BindTransient(0, {gpu::Bind::StorageBuffer(31, result)});
       cmd.BindSet(1, bindless->set());
       cmd.Dispatch(1, 1, 1);
-      cmd.MemoryBarrier(BarrierScope::kComputeWrite, BarrierScope::kTransferRead);
+      cmd.MemoryBarrier(gpu::BarrierScope::kComputeWrite, gpu::BarrierScope::kTransferRead);
       cmd.CopyBuffer(result, 0, readback, 0, sizeof(expected));
-      cmd.MemoryBarrier(BarrierScope::kTransferRead, BarrierScope::kComputeWrite);
+      cmd.MemoryBarrier(gpu::BarrierScope::kTransferRead, gpu::BarrierScope::kComputeWrite);
     });
     device->InvalidateBuffer(readback, 0, sizeof(expected));
     u32 actual[8];

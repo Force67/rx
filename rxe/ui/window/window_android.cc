@@ -6,7 +6,7 @@
 #include "foundation/logging/log.h"
 #include "rxe/ui/window/window.h"
 
-namespace rx {
+namespace rx::ui {
 namespace {
 
 // Wraps the ANativeWindow the activity hands us. Unlike the SDL3 backend this
@@ -81,4 +81,4 @@ base::UniquePointer<AndroidWindowBase> CreateAndroidWindow(ANativeWindow* window
   return base::MakeUnique<AndroidWindow>(window);
 }
 
-}  // namespace rx
+}  // namespace rx::ui

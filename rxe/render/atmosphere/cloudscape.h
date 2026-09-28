@@ -7,9 +7,12 @@
 #include "rxe/render/core/render_graph.h"
 #include "rxe/gpu/rhi/resources.h"
 
+namespace rx::gpu {
+class Device;
+}  // namespace rx::gpu
+
 namespace rx::render {
 
-class Device;
 
 // The opt-in textured cloud model (RenderSettings::cloudscape): a spherical
 // cloud shell driven by a world-space weather map and baked tileable noise,
@@ -43,28 +46,28 @@ public:
     u32 steps = 48; // potential full samples toward the zenith
     // The sky's transmittance LUT + its sampler (Environment), so the haze
     // reddens with exactly the atmosphere the sky renders.
-    TextureView transmittance_lut{};
-    SamplerHandle lut_sampler{};
+    gpu::TextureView transmittance_lut{};
+    gpu::SamplerHandle lut_sampler{};
     CloudscapeControls controls;
   };
 
-  bool Initialize(Device &device);
-  void Destroy(Device &device);
+  bool Initialize(gpu::Device &device);
+  void Destroy(gpu::Device &device);
   // Drop only the resolution-dependent temporal allocation. Static procedural
   // textures and pipelines stay warm so a quick off/on toggle does not rebake.
-  void ReleaseHistory(Device &device);
+  void ReleaseHistory(gpu::Device &device);
 
   // Appends the noise bakes / weather-map refresh, the half-res march and the
   // full-res composite. Returns the composited color.
   ResourceHandle AddToGraph(RenderGraph &graph, ResourceHandle color,
-                            ResourceHandle depth, Extent2D extent,
+                            ResourceHandle depth, gpu::Extent2D extent,
                             const Frame &frame);
 
   // Ground shadows from the same density field the march renders: darkens the
   // denoised sun-shadow buffer where the deck actually occludes the sun.
   // Replaces the legacy procedural cloud_shadow pass while the model is on.
   void AddShadowToGraph(RenderGraph &graph, ResourceHandle sun_shadow,
-                        ResourceHandle depth, Extent2D extent,
+                        ResourceHandle depth, gpu::Extent2D extent,
                         const Frame &frame, f32 strength);
 
   // Weather-driven ground haze: analytic height fog whose density, banks,
@@ -72,14 +75,14 @@ public:
   // Composites over `color` (call after AddToGraph so the fog veils the deck
   // too); no-op while the state's fog is effectively zero.
   ResourceHandle AddHazeToGraph(RenderGraph &graph, ResourceHandle color,
-                                ResourceHandle depth, Extent2D extent,
+                                ResourceHandle depth, gpu::Extent2D extent,
                                 const Frame &frame);
 
   // Tornado funnel between ground and cloud base, driven by the weather
   // layer's vortex lifecycle. Call between AddToGraph and AddHazeToGraph (the
   // funnel hangs from the deck, the haze veils both). No-op at strength 0.
   ResourceHandle AddFunnelToGraph(RenderGraph &graph, ResourceHandle color,
-                                  ResourceHandle depth, Extent2D extent,
+                                  ResourceHandle depth, gpu::Extent2D extent,
                                   const Frame &frame);
 
   bool available() const {
@@ -88,33 +91,33 @@ public:
   }
 
 private:
-  void EnsureBuffers(Device &device, Extent2D half);
-  void ReleaseBuffers(Device &device);
+  void EnsureBuffers(gpu::Device &device, gpu::Extent2D half);
+  void ReleaseBuffers(gpu::Device &device);
 
-  Device *device_ = nullptr;
+  gpu::Device *device_ = nullptr;
   CloudscapeTextures textures_;
-  PipelineHandle march_pipeline_;
-  PipelineHandle apply_pipeline_;
-  PipelineHandle shadow_pipeline_;
-  PipelineHandle haze_pipeline_;
-  PipelineHandle funnel_pipeline_;
-  SamplerHandle screen_sampler_;
+  gpu::PipelineHandle march_pipeline_;
+  gpu::PipelineHandle apply_pipeline_;
+  gpu::PipelineHandle shadow_pipeline_;
+  gpu::PipelineHandle haze_pipeline_;
+  gpu::PipelineHandle funnel_pipeline_;
+  gpu::SamplerHandle screen_sampler_;
 
   static constexpr u32 kFramesInFlight = 2;
-  GpuBuffer march_params_[kFramesInFlight];
-  GpuBuffer shadow_params_[kFramesInFlight];
-  GpuBuffer haze_params_[kFramesInFlight];
-  GpuBuffer funnel_params_[kFramesInFlight];
+  gpu::GpuBuffer march_params_[kFramesInFlight];
+  gpu::GpuBuffer shadow_params_[kFramesInFlight];
+  gpu::GpuBuffer haze_params_[kFramesInFlight];
+  gpu::GpuBuffer funnel_params_[kFramesInFlight];
 
   // Persistent half-res ping-pong: (scatter, transmittance) + marched mean
   // cloud distance, reprojected across the refresh cycle.
-  GpuImage cloud_[2];
-  GpuImage dist_[2];
-  ResourceState cloud_state_[2] = {ResourceState::kUndefined,
-                                   ResourceState::kUndefined};
-  ResourceState dist_state_[2] = {ResourceState::kUndefined,
-                                  ResourceState::kUndefined};
-  Extent2D half_extent_{};
+  gpu::GpuImage cloud_[2];
+  gpu::GpuImage dist_[2];
+  gpu::ResourceState cloud_state_[2] = {gpu::ResourceState::kUndefined,
+                                   gpu::ResourceState::kUndefined};
+  gpu::ResourceState dist_state_[2] = {gpu::ResourceState::kUndefined,
+                                  gpu::ResourceState::kUndefined};
+  gpu::Extent2D half_extent_{};
   u32 slot_ = 0;
   bool history_valid_ = false;
   u32 last_frame_index_ = 0;

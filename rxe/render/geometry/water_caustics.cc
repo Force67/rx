@@ -19,29 +19,29 @@ constexpr f32 kFixedPointScale = 4096.f;  // photon energy fixed-point quantum
 
 }  // namespace
 
-bool WaterCaustics::Initialize(Device& device) {
+bool WaterCaustics::Initialize(gpu::Device& device) {
   pipeline_ = device.CreateComputePipeline({
       .shader = RX_SHADER(k_water_caustics_cs_hlsl),
-      .sets = {{.slots = {{0, BindingType::kStorageBuffer},
-                          {1, BindingType::kStorageImage},
-                          {2, BindingType::kCombinedTextureSampler},
-                          {3, BindingType::kCombinedTextureSampler}}}},
-      .push_constant_size = PushSize<CausticPush>(),
+      .sets = {{.slots = {{0, gpu::BindingType::kStorageBuffer},
+                          {1, gpu::BindingType::kStorageImage},
+                          {2, gpu::BindingType::kCombinedTextureSampler},
+                          {3, gpu::BindingType::kCombinedTextureSampler}}}},
+      .push_constant_size = gpu::PushSize<CausticPush>(),
       .debug_name = "water_caustics",
   });
   if (!pipeline_) return false;
 
-  linear_wrap_ = device.GetSampler({.min_filter = Filter::kLinear,
-                                    .mag_filter = Filter::kLinear,
-                                    .address_u = AddressMode::kRepeat,
-                                    .address_v = AddressMode::kRepeat});
+  linear_wrap_ = device.GetSampler({.min_filter = gpu::Filter::kLinear,
+                                    .mag_filter = gpu::Filter::kLinear,
+                                    .address_u = gpu::AddressMode::kRepeat,
+                                    .address_v = gpu::AddressMode::kRepeat});
 
-  caustic_ = device.CreateImage2D(Format::kRG16Float, {kSize, kSize},
-                                  kTextureUsageSampled | kTextureUsageStorage);
+  caustic_ = device.CreateImage2D(gpu::Format::kRG16Float, {kSize, kSize},
+                                  gpu::kTextureUsageSampled | gpu::kTextureUsageStorage);
   accum_ = device.CreateBuffer(static_cast<u64>(kSize) * kSize * sizeof(u32),
-                               kBufferUsageStorage, false);
-  dummy_ocean_ = device.CreateImage2D(Format::kRGBA16Float, {1, 1},
-                                      kTextureUsageSampled | kTextureUsageTransferDst);
+                               gpu::kBufferUsageStorage, false);
+  dummy_ocean_ = device.CreateImage2D(gpu::Format::kRGBA16Float, {1, 1},
+                                      gpu::kTextureUsageSampled | gpu::kTextureUsageTransferDst);
   if (!caustic_ || !accum_ || !dummy_ocean_ || !linear_wrap_) {
     RX_WARN("water caustics allocation failed; feature disabled");
     Destroy(device);
@@ -51,17 +51,17 @@ bool WaterCaustics::Initialize(Device& device) {
   // Park the caustic map in GENERAL (storage-written each frame and sampled by
   // the scene pass) and leave the dummy ocean shader-readable for the Gerstner
   // path, mirroring the shoreline-wetting setup.
-  device.ImmediateSubmit([&](CommandList& cmd) {
+  device.ImmediateSubmit([&](gpu::CommandList& cmd) {
     const f32 zero[4] = {0.0f, 0.0f, 0.0f, 0.0f};
-    cmd.Barrier(Transition(caustic_, ResourceState::kUndefined, ResourceState::kGeneral));
-    cmd.Barrier(Transition(dummy_ocean_, ResourceState::kUndefined, ResourceState::kCopyDst));
+    cmd.Barrier(gpu::Transition(caustic_, gpu::ResourceState::kUndefined, gpu::ResourceState::kGeneral));
+    cmd.Barrier(gpu::Transition(dummy_ocean_, gpu::ResourceState::kUndefined, gpu::ResourceState::kCopyDst));
     cmd.ClearColor(dummy_ocean_, zero);
-    cmd.Barrier(Transition(dummy_ocean_, ResourceState::kCopyDst, ResourceState::kShaderReadAll));
+    cmd.Barrier(gpu::Transition(dummy_ocean_, gpu::ResourceState::kCopyDst, gpu::ResourceState::kShaderReadAll));
   });
   return true;
 }
 
-void WaterCaustics::Destroy(Device& device) {
+void WaterCaustics::Destroy(gpu::Device& device) {
   if (pipeline_) device.DestroyPipeline(pipeline_);
   pipeline_ = {};
   if (caustic_) device.DestroyImage(caustic_);
@@ -92,37 +92,37 @@ void WaterCaustics::AddToGraph(RenderGraph& graph, const Params& params) {
 
         // The FFT ocean writes its maps earlier this frame; make those writes
         // visible to our sampled reads.
-        if (fft) ctx.cmd->MemoryBarrier(BarrierScope::kComputeWrite, BarrierScope::kComputeRead);
+        if (fft) ctx.cmd->MemoryBarrier(gpu::BarrierScope::kComputeWrite, gpu::BarrierScope::kComputeRead);
 
-        TextureView disp = fft ? params.ocean_displacement : dummy_ocean_.view;
-        TextureView norm = fft ? params.ocean_normal : dummy_ocean_.view;
+        gpu::TextureView disp = fft ? params.ocean_displacement : dummy_ocean_.view;
+        gpu::TextureView norm = fft ? params.ocean_normal : dummy_ocean_.view;
         ctx.cmd->BindPipeline(pipeline_);
         ctx.cmd->BindTransient(
-            0, {Bind::StorageBuffer(0, accum_), Bind::Storage(1, caustic_),
-                fft ? InGeneral(Bind::Combined(2, disp, linear_wrap_))
-                    : Bind::Combined(2, disp, linear_wrap_),
-                fft ? InGeneral(Bind::Combined(3, norm, linear_wrap_))
-                    : Bind::Combined(3, norm, linear_wrap_)});
+            0, {gpu::Bind::StorageBuffer(0, accum_), gpu::Bind::Storage(1, caustic_),
+                fft ? gpu::InGeneral(gpu::Bind::Combined(2, disp, linear_wrap_))
+                    : gpu::Bind::Combined(2, disp, linear_wrap_),
+                fft ? gpu::InGeneral(gpu::Bind::Combined(3, norm, linear_wrap_))
+                    : gpu::Bind::Combined(3, norm, linear_wrap_)});
 
         const u32 groups = kSize / 8;
         // Phase 0: clear the accumulation buffer.
         push.control[0] = 0u;
         ctx.cmd->Push(push);
         ctx.cmd->Dispatch(groups, groups, 1);
-        ctx.cmd->MemoryBarrier(BarrierScope::kComputeWrite, BarrierScope::kComputeRead);
+        ctx.cmd->MemoryBarrier(gpu::BarrierScope::kComputeWrite, gpu::BarrierScope::kComputeRead);
 
         // Phase 1: scatter one photon per surface texel (atomic splat).
         push.control[0] = 1u;
         ctx.cmd->Push(push);
         ctx.cmd->Dispatch(groups, groups, 1);
-        ctx.cmd->MemoryBarrier(BarrierScope::kComputeWrite, BarrierScope::kComputeRead);
+        ctx.cmd->MemoryBarrier(gpu::BarrierScope::kComputeWrite, gpu::BarrierScope::kComputeRead);
 
         // Phase 2: normalize + write the RG16F map (+ wave shadow).
         push.control[0] = 2u;
         ctx.cmd->Push(push);
         ctx.cmd->Dispatch(groups, groups, 1);
         // Sampled by the opaque scene pass (mesh.ps/mesh_rt.ps, env slot 34).
-        ctx.cmd->MemoryBarrier(BarrierScope::kComputeWrite, BarrierScope::kGraphicsRead);
+        ctx.cmd->MemoryBarrier(gpu::BarrierScope::kComputeWrite, gpu::BarrierScope::kGraphicsRead);
       });
 }
 

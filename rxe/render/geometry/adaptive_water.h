@@ -24,18 +24,18 @@ class AdaptiveWaterMesh {
     u64 surface_key = 0;
   };
 
-  bool Initialize(Device& device);
-  void Destroy(Device& device);
+  bool Initialize(gpu::Device& device);
+  void Destroy(gpu::Device& device);
   bool available() const { return static_cast<bool>(pipeline_) && static_cast<bool>(vertices_); }
 
-  void Update(CommandList& cmd, const UpdateParams& params);
-  void Draw(CommandList& cmd) const;
+  void Update(gpu::CommandList& cmd, const UpdateParams& params);
+  void Draw(gpu::CommandList& cmd) const;
 
   // Persistent representation for GPU consumers such as spray/foam emission
   // or water queries. The compact indirect count is counters()[1].
-  const GpuBuffer& vertex_buffer() const { return vertices_; }
-  const GpuBuffer& indirect_buffer() const { return commands_; }
-  const GpuBuffer& counters() const { return counters_; }
+  const gpu::GpuBuffer& vertex_buffer() const { return vertices_; }
+  const gpu::GpuBuffer& indirect_buffer() const { return commands_; }
+  const gpu::GpuBuffer& counters() const { return counters_; }
   static constexpr u64 kIndirectCountOffset = sizeof(u32);
 
   static constexpr u32 kMaxDepth = 14;
@@ -55,11 +55,11 @@ class AdaptiveWaterMesh {
   static constexpr u32 kNodesPerTree = (1u << (kMaxDepth + 1)) - 1;
   static constexpr u32 kNodeCount = kNodesPerTree * 2;
 
-  PipelineHandle pipeline_;
-  GpuBuffer states_;
-  GpuBuffer counters_;
-  GpuBuffer vertices_;
-  GpuBuffer commands_;
+  gpu::PipelineHandle pipeline_;
+  gpu::GpuBuffer states_;
+  gpu::GpuBuffer counters_;
+  gpu::GpuBuffer vertices_;
+  gpu::GpuBuffer commands_;
   u64 surface_key_ = ~u64{0};
 };
 

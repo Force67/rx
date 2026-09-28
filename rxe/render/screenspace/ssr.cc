@@ -31,17 +31,17 @@ struct SsrPush {
 
 }  // namespace
 
-bool SsrPass::Initialize(Device& device) {
+bool SsrPass::Initialize(gpu::Device& device) {
   // 0: output color (storage), 1: depth, 2: normals, 3: scene color (all
   // sampled), 4: SsrCamera.
   pipeline_ = device.CreateComputePipeline({
       .shader = RX_SHADER(k_ssr_cs_hlsl),
-      .sets = {{.slots = {{0, BindingType::kStorageImage},
-                          {1, BindingType::kSampledImage},
-                          {2, BindingType::kSampledImage},
-                          {3, BindingType::kSampledImage},
-                          {4, BindingType::kUniformBuffer}}}},
-      .push_constant_size = PushSize<SsrPush>(),
+      .sets = {{.slots = {{0, gpu::BindingType::kStorageImage},
+                          {1, gpu::BindingType::kSampledImage},
+                          {2, gpu::BindingType::kSampledImage},
+                          {3, gpu::BindingType::kSampledImage},
+                          {4, gpu::BindingType::kUniformBuffer}}}},
+      .push_constant_size = gpu::PushSize<SsrPush>(),
       .debug_name = "ssr",
   });
   if (!pipeline_) {
@@ -50,17 +50,17 @@ bool SsrPass::Initialize(Device& device) {
   }
   // One per in-flight frame: the pass rewrites it while the previous frame may
   // still be reading its own copy.
-  for (GpuBuffer& camera : camera_) {
-    camera = device.CreateBuffer(sizeof(SsrCamera), kBufferUsageUniform, true);
+  for (gpu::GpuBuffer& camera : camera_) {
+    camera = device.CreateBuffer(sizeof(SsrCamera), gpu::kBufferUsageUniform, true);
     if (!camera.mapped) return false;
   }
   return true;
 }
 
-void SsrPass::Destroy(Device& device) {
+void SsrPass::Destroy(gpu::Device& device) {
   device.DestroyPipeline(pipeline_);
   pipeline_ = {};
-  for (GpuBuffer& camera : camera_) {
+  for (gpu::GpuBuffer& camera : camera_) {
     if (camera) device.DestroyBuffer(camera);
     camera = {};
   }
@@ -71,7 +71,7 @@ ResourceHandle SsrPass::AddToGraph(RenderGraph& graph, ResourceHandle scene_colo
                                    const Mat4& view_proj, const Mat4& inv_view_proj,
                                    const Vec3& camera_pos, u32 frame_index) {
   ResourceHandle out = graph.CreateTexture({.name = "ssr",
-                                            .format = Format::kRGBA16Float,
+                                            .format = gpu::Format::kRGBA16Float,
                                             .width = extent_.width,
                                             .height = extent_.height});
 
@@ -101,11 +101,11 @@ ResourceHandle SsrPass::AddToGraph(RenderGraph& graph, ResourceHandle scene_colo
         push.step_count = settings_.step_count;
 
         ctx.cmd->BindPipeline(pipeline_);
-        ctx.cmd->BindTransient(0, {Bind::Storage(0, ctx.graph->image(out)),
-                                   Bind::Sampled(1, ctx.graph->image(depth)),
-                                   Bind::Sampled(2, ctx.graph->image(normals)),
-                                   Bind::Sampled(3, ctx.graph->image(scene_color)),
-                                   Bind::Uniform(4, camera_[slot], 0, sizeof(SsrCamera))});
+        ctx.cmd->BindTransient(0, {gpu::Bind::Storage(0, ctx.graph->image(out)),
+                                   gpu::Bind::Sampled(1, ctx.graph->image(depth)),
+                                   gpu::Bind::Sampled(2, ctx.graph->image(normals)),
+                                   gpu::Bind::Sampled(3, ctx.graph->image(scene_color)),
+                                   gpu::Bind::Uniform(4, camera_[slot], 0, sizeof(SsrCamera))});
         ctx.cmd->Push(push);
         ctx.cmd->Dispatch2D(extent_);
       });

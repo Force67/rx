@@ -27,32 +27,32 @@ struct PackPush {
   f32 pad[2];
 };
 
-Format ToFormat(nrd::Format format) {
+gpu::Format ToFormat(nrd::Format format) {
   switch (format) {
-    case nrd::Format::R8_UNORM: return Format::kR8Unorm;
-    case nrd::Format::R8_SNORM: return Format::kR8Snorm;
-    case nrd::Format::R8_UINT: return Format::kR8Uint;
-    case nrd::Format::RG8_UNORM: return Format::kRG8Unorm;
-    case nrd::Format::RGBA8_UNORM: return Format::kRGBA8Unorm;
-    case nrd::Format::RGBA8_SNORM: return Format::kRGBA8Snorm;
-    case nrd::Format::R16_UNORM: return Format::kR16Unorm;
-    case nrd::Format::R16_SNORM: return Format::kR16Snorm;
-    case nrd::Format::R16_UINT: return Format::kR16Uint;
-    case nrd::Format::R16_SFLOAT: return Format::kR16Float;
-    case nrd::Format::RG16_UNORM: return Format::kRG16Unorm;
-    case nrd::Format::RG16_SNORM: return Format::kRG16Snorm;
-    case nrd::Format::RG16_SFLOAT: return Format::kRG16Float;
-    case nrd::Format::RGBA16_UNORM: return Format::kRGBA16Unorm;
-    case nrd::Format::RGBA16_SNORM: return Format::kRGBA16Snorm;
-    case nrd::Format::RGBA16_SFLOAT: return Format::kRGBA16Float;
-    case nrd::Format::R32_UINT: return Format::kR32Uint;
-    case nrd::Format::R32_SFLOAT: return Format::kR32Float;
-    case nrd::Format::RG32_SFLOAT: return Format::kRG32Float;
-    case nrd::Format::RGBA32_SFLOAT: return Format::kRGBA32Float;
-    case nrd::Format::R10_G10_B10_A2_UNORM: return Format::kRGB10A2Unorm;
-    case nrd::Format::R11_G11_B10_UFLOAT: return Format::kRG11B10Float;
-    case nrd::Format::R9_G9_B9_E5_UFLOAT: return Format::kRGB9E5Float;
-    default: return Format::kUnknown;
+    case nrd::Format::R8_UNORM: return gpu::Format::kR8Unorm;
+    case nrd::Format::R8_SNORM: return gpu::Format::kR8Snorm;
+    case nrd::Format::R8_UINT: return gpu::Format::kR8Uint;
+    case nrd::Format::RG8_UNORM: return gpu::Format::kRG8Unorm;
+    case nrd::Format::RGBA8_UNORM: return gpu::Format::kRGBA8Unorm;
+    case nrd::Format::RGBA8_SNORM: return gpu::Format::kRGBA8Snorm;
+    case nrd::Format::R16_UNORM: return gpu::Format::kR16Unorm;
+    case nrd::Format::R16_SNORM: return gpu::Format::kR16Snorm;
+    case nrd::Format::R16_UINT: return gpu::Format::kR16Uint;
+    case nrd::Format::R16_SFLOAT: return gpu::Format::kR16Float;
+    case nrd::Format::RG16_UNORM: return gpu::Format::kRG16Unorm;
+    case nrd::Format::RG16_SNORM: return gpu::Format::kRG16Snorm;
+    case nrd::Format::RG16_SFLOAT: return gpu::Format::kRG16Float;
+    case nrd::Format::RGBA16_UNORM: return gpu::Format::kRGBA16Unorm;
+    case nrd::Format::RGBA16_SNORM: return gpu::Format::kRGBA16Snorm;
+    case nrd::Format::RGBA16_SFLOAT: return gpu::Format::kRGBA16Float;
+    case nrd::Format::R32_UINT: return gpu::Format::kR32Uint;
+    case nrd::Format::R32_SFLOAT: return gpu::Format::kR32Float;
+    case nrd::Format::RG32_SFLOAT: return gpu::Format::kRG32Float;
+    case nrd::Format::RGBA32_SFLOAT: return gpu::Format::kRGBA32Float;
+    case nrd::Format::R10_G10_B10_A2_UNORM: return gpu::Format::kRGB10A2Unorm;
+    case nrd::Format::R11_G11_B10_UFLOAT: return gpu::Format::kRG11B10Float;
+    case nrd::Format::R9_G9_B9_E5_UFLOAT: return gpu::Format::kRGB9E5Float;
+    default: return gpu::Format::kUnknown;
   }
 }
 
@@ -62,9 +62,9 @@ void CopyMatrix(float (&dst)[16], const Mat4& m) {
 
 }  // namespace
 
-bool NrdDenoiser::Initialize(Device& device, Extent2D extent) {
+bool NrdDenoiser::Initialize(gpu::Device& device, gpu::Extent2D extent) {
   device_ = &device;
-  VulkanHandles h = GetVulkanHandles(device);
+  gpu::VulkanHandles h = gpu::GetVulkanHandles(device);
   if (h.device == VK_NULL_HANDLE) {
     RX_WARN("nrd: requires the vulkan backend, denoiser unavailable");
     return false;
@@ -107,7 +107,7 @@ bool NrdDenoiser::Initialize(Device& device, Extent2D extent) {
   return true;
 }
 
-bool NrdDenoiser::CreatePipelines(Device& device) {
+bool NrdDenoiser::CreatePipelines(gpu::Device& device) {
   const nrd::InstanceDesc& desc = *nrd::GetInstanceDesc(*instance_);
   const nrd::SPIRVBindingOffsets& off = nrd::GetLibraryDesc()->spirvBindingOffsets;
 
@@ -197,7 +197,7 @@ bool NrdDenoiser::CreatePipelines(Device& device) {
       return false;
     }
 
-    VkShaderModule module = CreateShaderModule(
+    VkShaderModule module = gpu::CreateShaderModule(
         vk_device_, static_cast<const unsigned char*>(pd.computeShaderSPIRV.bytecode),
         pd.computeShaderSPIRV.size);
     if (module == VK_NULL_HANDLE) return false;
@@ -220,11 +220,11 @@ bool NrdDenoiser::CreatePipelines(Device& device) {
   constant_slot_size_ = (d.constantBufferMaxDataSize + align - 1) & ~(align - 1);
   constant_slot_count_ = 64;
   constant_ring_ = device.CreateBuffer(constant_slot_size_ * constant_slot_count_ * 2,
-                                       kBufferUsageUniform, true);
+                                       gpu::kBufferUsageUniform, true);
   return static_cast<bool>(constant_ring_);
 }
 
-bool NrdDenoiser::CreatePackPipeline(Device& device) {
+bool NrdDenoiser::CreatePackPipeline(gpu::Device& device) {
   (void)device;
   // bindings: 0 = normal_roughness (UAV), 1 = viewZ (UAV), 2 = normals, 3 = depth.
   VkDescriptorSetLayoutBinding bindings[4]{};
@@ -253,7 +253,7 @@ bool NrdDenoiser::CreatePackPipeline(Device& device) {
     return false;
   }
   VkShaderModule module =
-      CreateShaderModule(vk_device_, k_nrd_pack_cs_hlsl, sizeof(k_nrd_pack_cs_hlsl));
+      gpu::CreateShaderModule(vk_device_, k_nrd_pack_cs_hlsl, sizeof(k_nrd_pack_cs_hlsl));
   if (module == VK_NULL_HANDLE) return false;
   VkComputePipelineCreateInfo info{.sType = VK_STRUCTURE_TYPE_COMPUTE_PIPELINE_CREATE_INFO};
   info.stage = {.sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO};
@@ -320,16 +320,16 @@ NrdDenoiser::Inputs NrdDenoiser::PrepareInputs(RenderGraph& graph, ResourceHandl
         builder.Write(inputs.view_z, ResourceUsage::kStorageWrite);
       },
       [this, depth, normals, inputs, near_plane](PassContext& ctx) {
-        VkCommandBuffer vk_cmd = GetVkCommandBuffer(*ctx.cmd);
+        VkCommandBuffer vk_cmd = gpu::GetVkCommandBuffer(*ctx.cmd);
         VkDescriptorSet set = AllocateSet(pack_set_layout_);
         VkDescriptorImageInfo images[4]{};
-        images[0] = {.imageView = GetVkImageView(ctx.graph->image(inputs.normal_roughness).view),
+        images[0] = {.imageView = gpu::GetVkImageView(ctx.graph->image(inputs.normal_roughness).view),
                      .imageLayout = VK_IMAGE_LAYOUT_GENERAL};
-        images[1] = {.imageView = GetVkImageView(ctx.graph->image(inputs.view_z).view),
+        images[1] = {.imageView = gpu::GetVkImageView(ctx.graph->image(inputs.view_z).view),
                      .imageLayout = VK_IMAGE_LAYOUT_GENERAL};
-        images[2] = {.imageView = GetVkImageView(ctx.graph->image(normals).view),
+        images[2] = {.imageView = gpu::GetVkImageView(ctx.graph->image(normals).view),
                      .imageLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL};
-        images[3] = {.imageView = GetVkImageView(ctx.graph->image(depth).view),
+        images[3] = {.imageView = gpu::GetVkImageView(ctx.graph->image(depth).view),
                      .imageLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL};
         VkWriteDescriptorSet writes[4];
         for (u32 i = 0; i < 4; ++i) {
@@ -354,28 +354,28 @@ NrdDenoiser::Inputs NrdDenoiser::PrepareInputs(RenderGraph& graph, ResourceHandl
   return inputs;
 }
 
-void NrdDenoiser::CreatePools(Device& device, Extent2D extent) {
+void NrdDenoiser::CreatePools(gpu::Device& device, gpu::Extent2D extent) {
   extent_ = extent;
   const nrd::InstanceDesc& desc = *nrd::GetInstanceDesc(*instance_);
 
   auto make_pool = [&](const nrd::TextureDesc* descs, u32 count, base::Vector<PoolTexture>& out) {
     out.resize(count);
     for (u32 i = 0; i < count; ++i) {
-      Extent2D e{extent.width / (descs[i].downsampleFactor ? descs[i].downsampleFactor : 1),
+      gpu::Extent2D e{extent.width / (descs[i].downsampleFactor ? descs[i].downsampleFactor : 1),
                  extent.height / (descs[i].downsampleFactor ? descs[i].downsampleFactor : 1)};
       if (e.width == 0) e.width = 1;
       if (e.height == 0) e.height = 1;
       out[i].image = device.CreateImage2D(ToFormat(descs[i].format), e,
-                                          kTextureUsageSampled | kTextureUsageStorage);
+                                          gpu::kTextureUsageSampled | gpu::kTextureUsageStorage);
       out[i].layout = VK_IMAGE_LAYOUT_UNDEFINED;
     }
   };
   make_pool(desc.permanentPool, desc.permanentPoolSize, permanent_);
   make_pool(desc.transientPool, desc.transientPoolSize, transient_);
 
-  auto make_output = [&](Format format) {
+  auto make_output = [&](gpu::Format format) {
     PoolTexture t{};
-    t.image = device.CreateImage2D(format, extent, kTextureUsageSampled | kTextureUsageStorage);
+    t.image = device.CreateImage2D(format, extent, gpu::kTextureUsageSampled | gpu::kTextureUsageStorage);
     t.layout = VK_IMAGE_LAYOUT_UNDEFINED;
     return t;
   };
@@ -383,17 +383,17 @@ void NrdDenoiser::CreatePools(Device& device, Extent2D extent) {
   out_shadow_ = make_output(kShadowFormat);
   out_diffuse_ = make_output(kDiffuseRadianceFormat);
   out_specular_ = make_output(kDiffuseRadianceFormat);
-  out_ao_state_ = ResourceState::kGeneral;
-  out_shadow_state_ = ResourceState::kGeneral;
-  out_diffuse_state_ = ResourceState::kGeneral;
-  out_specular_state_ = ResourceState::kGeneral;
+  out_ao_state_ = gpu::ResourceState::kGeneral;
+  out_shadow_state_ = gpu::ResourceState::kGeneral;
+  out_diffuse_state_ = gpu::ResourceState::kGeneral;
+  out_specular_state_ = gpu::ResourceState::kGeneral;
 
   // Prime every owned texture into GENERAL so the first dispatch barrier has a
   // defined source layout.
-  device.ImmediateSubmit([&](CommandList& cmd) {
-    base::Vector<TextureBarrier> barriers;
+  device.ImmediateSubmit([&](gpu::CommandList& cmd) {
+    base::Vector<gpu::TextureBarrier> barriers;
     auto add = [&](PoolTexture& t) {
-      barriers.push_back(Transition(t.image, ResourceState::kUndefined, ResourceState::kGeneral));
+      barriers.push_back(gpu::Transition(t.image, gpu::ResourceState::kUndefined, gpu::ResourceState::kGeneral));
       t.layout = VK_IMAGE_LAYOUT_GENERAL;
     };
     for (auto& t : permanent_) add(t);
@@ -406,7 +406,7 @@ void NrdDenoiser::CreatePools(Device& device, Extent2D extent) {
   });
 }
 
-void NrdDenoiser::DestroyPools(Device& device) {
+void NrdDenoiser::DestroyPools(gpu::Device& device) {
   for (auto& t : permanent_) if (t.image) device.DestroyImage(t.image);
   for (auto& t : transient_) if (t.image) device.DestroyImage(t.image);
   permanent_.clear();
@@ -417,12 +417,12 @@ void NrdDenoiser::DestroyPools(Device& device) {
   if (out_specular_.image) device.DestroyImage(out_specular_.image);
 }
 
-void NrdDenoiser::Resize(Device& device, Extent2D extent) {
+void NrdDenoiser::Resize(gpu::Device& device, gpu::Extent2D extent) {
   DestroyPools(device);
   CreatePools(device, extent);
 }
 
-void NrdDenoiser::Destroy(Device& device) {
+void NrdDenoiser::Destroy(gpu::Device& device) {
   DestroyPools(device);
   for (Pipeline& p : pipelines_) {
     if (p.pipeline) vkDestroyPipeline(vk_device_, p.pipeline, nullptr);
@@ -577,7 +577,7 @@ ResourceHandle NrdDenoiser::AddDenoisePass(RenderGraph& graph, u32 identifier, c
                                            ResourceHandle normal_roughness, ResourceHandle view_z,
                                            ResourceHandle motion, ResourceHandle noisy,
                                            int noisy_type, PoolTexture& output, int output_type,
-                                           const char* output_name, ResourceState* output_state) {
+                                           const char* output_name, gpu::ResourceState* output_state) {
   ResourceHandle out_handle = graph.ImportImage(output_name, output.image, output_state);
   graph.AddPass(
       pass_name,
@@ -602,15 +602,15 @@ ResourceHandle NrdDenoiser::AddDenoisePass(RenderGraph& graph, u32 identifier, c
             {ctx.graph->image(noisy), VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL},
         };
         bindings_[static_cast<int>(nrd::ResourceType::IN_MV)] = {
-            GetVkImageView(user_inputs[0].image.view), &user_inputs[0]};
+            gpu::GetVkImageView(user_inputs[0].image.view), &user_inputs[0]};
         bindings_[static_cast<int>(nrd::ResourceType::IN_NORMAL_ROUGHNESS)] = {
-            GetVkImageView(user_inputs[1].image.view), &user_inputs[1]};
+            gpu::GetVkImageView(user_inputs[1].image.view), &user_inputs[1]};
         bindings_[static_cast<int>(nrd::ResourceType::IN_VIEWZ)] = {
-            GetVkImageView(user_inputs[2].image.view), &user_inputs[2]};
-        bindings_[noisy_type] = {GetVkImageView(user_inputs[3].image.view), &user_inputs[3]};
+            gpu::GetVkImageView(user_inputs[2].image.view), &user_inputs[2]};
+        bindings_[noisy_type] = {gpu::GetVkImageView(user_inputs[3].image.view), &user_inputs[3]};
         // The graph leaves the imported output in GENERAL before the pass.
         output.layout = VK_IMAGE_LAYOUT_GENERAL;
-        bindings_[output_type] = {GetVkImageView(output.image.view), &output};
+        bindings_[output_type] = {gpu::GetVkImageView(output.image.view), &output};
         RecordDispatches(ctx, identifier);
         // Hand resources back in the layout the graph believes they hold:
         // the output in GENERAL (its kStorageWrite state), user inputs in
@@ -627,7 +627,7 @@ ResourceHandle NrdDenoiser::AddDenoisePass(RenderGraph& graph, u32 identifier, c
           b.dstAccessMask = VK_ACCESS_2_SHADER_READ_BIT | VK_ACCESS_2_SHADER_WRITE_BIT;
           b.oldLayout = t.layout;
           b.newLayout = want;
-          b.image = GetVkImage(t.image);
+          b.image = gpu::GetVkImage(t.image);
           b.subresourceRange = {VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 1};
           t.layout = want;
         };
@@ -639,7 +639,7 @@ ResourceHandle NrdDenoiser::AddDenoisePass(RenderGraph& graph, u32 identifier, c
           VkDependencyInfo dep{.sType = VK_STRUCTURE_TYPE_DEPENDENCY_INFO};
           dep.imageMemoryBarrierCount = barrier_count;
           dep.pImageMemoryBarriers = barriers;
-          VulkanApi().cmd_pipeline_barrier2(GetVkCommandBuffer(*ctx.cmd), &dep);
+          gpu::VulkanApi().cmd_pipeline_barrier2(gpu::GetVkCommandBuffer(*ctx.cmd), &dep);
         }
       });
   return out_handle;
@@ -656,13 +656,13 @@ void NrdDenoiser::RecordDispatches(PassContext& ctx, u32 identifier) {
   if (dispatch_num == 0) RX_WARN("nrd: identifier {} produced 0 dispatches", identifier);
 
   const nrd::SPIRVBindingOffsets& off = nrd::GetLibraryDesc()->spirvBindingOffsets;
-  VkCommandBuffer vk_cmd = GetVkCommandBuffer(*ctx.cmd);
+  VkCommandBuffer vk_cmd = gpu::GetVkCommandBuffer(*ctx.cmd);
   VkDevice dev = vk_device_;
 
   // One shared (constant + samplers) set for the whole denoiser, bound with a
   // per-dispatch dynamic offset into the constant ring.
   VkDescriptorSet const_set = AllocateSet(const_set_layout_);
-  VkDescriptorBufferInfo cb_info{GetVkBuffer(constant_ring_), 0, constant_slot_size_};
+  VkDescriptorBufferInfo cb_info{gpu::GetVkBuffer(constant_ring_), 0, constant_slot_size_};
   VkWriteDescriptorSet cb_write{.sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET};
   cb_write.dstSet = const_set;
   cb_write.dstBinding = off.constantBufferOffset + constant_register_;
@@ -702,10 +702,10 @@ void NrdDenoiser::RecordDispatches(PassContext& ctx, u32 identifier) {
       PoolTexture* tracked = nullptr;
       if (res.type == nrd::ResourceType::TRANSIENT_POOL) {
         tracked = &transient_[res.indexInPool];
-        view = GetVkImageView(tracked->image.view);
+        view = gpu::GetVkImageView(tracked->image.view);
       } else if (res.type == nrd::ResourceType::PERMANENT_POOL) {
         tracked = &permanent_[res.indexInPool];
-        view = GetVkImageView(tracked->image.view);
+        view = gpu::GetVkImageView(tracked->image.view);
       } else {
         const ResourceBinding& b = bindings_[static_cast<int>(res.type)];
         view = b.view;
@@ -723,7 +723,7 @@ void NrdDenoiser::RecordDispatches(PassContext& ctx, u32 identifier) {
                                      : VK_ACCESS_2_SHADER_READ_BIT;
         b.oldLayout = tracked->layout;
         b.newLayout = want;
-        b.image = GetVkImage(tracked->image);
+        b.image = gpu::GetVkImage(tracked->image);
         b.subresourceRange = {VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 1};
         tracked->layout = want;
       } else if (tracked && is_storage) {
@@ -734,7 +734,7 @@ void NrdDenoiser::RecordDispatches(PassContext& ctx, u32 identifier) {
         b.srcAccessMask = VK_ACCESS_2_SHADER_READ_BIT | VK_ACCESS_2_SHADER_WRITE_BIT;
         b.dstAccessMask = VK_ACCESS_2_SHADER_READ_BIT | VK_ACCESS_2_SHADER_WRITE_BIT;
         b.oldLayout = b.newLayout = VK_IMAGE_LAYOUT_GENERAL;
-        b.image = GetVkImage(tracked->image);
+        b.image = gpu::GetVkImage(tracked->image);
         b.subresourceRange = {VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 1};
       }
 
@@ -759,7 +759,7 @@ void NrdDenoiser::RecordDispatches(PassContext& ctx, u32 identifier) {
       VkDependencyInfo dep{.sType = VK_STRUCTURE_TYPE_DEPENDENCY_INFO};
       dep.imageMemoryBarrierCount = barrier_count;
       dep.pImageMemoryBarriers = barriers;
-      VulkanApi().cmd_pipeline_barrier2(vk_cmd, &dep);
+      gpu::VulkanApi().cmd_pipeline_barrier2(vk_cmd, &dep);
     }
     if (write_count) vkUpdateDescriptorSets(dev, write_count, writes, 0, nullptr);
 

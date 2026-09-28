@@ -4,7 +4,7 @@
 #include "base/memory/unique_pointer.h"
 
 
-namespace rx {
+namespace rx::ui {
 
 // Reads the per-output HDR toggle KWin exposes over the kde_output_device_v2
 // wayland protocol (the same source `kscreen-doctor -o` prints). This is the
@@ -37,6 +37,6 @@ class KdeOutputHdrMonitor {
   base::UniquePointer<Impl> impl_;
 };
 
-}  // namespace rx
+}  // namespace rx::ui
 
 #endif  // RX_UI_WINDOW_WAYLAND_KDE_HDR_H_

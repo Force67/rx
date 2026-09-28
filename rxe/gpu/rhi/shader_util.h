@@ -11,13 +11,13 @@
 
 #include "foundation/build_config/export.h"
 
-namespace rx::render {
+namespace rx::gpu {
 
 // Wraps an embedded spirv blob. The embedded arrays are byte aligned,
 // spirv wants words, so this copies. Returns VK_NULL_HANDLE on failure.
 RX_GPU_EXPORT VkShaderModule CreateShaderModule(VkDevice device, const unsigned char* code,
                                                    size_t size);
 
-}  // namespace rx::render
+}  // namespace rx::gpu
 
 #endif  // RX_RENDER_SHADER_UTIL_H_

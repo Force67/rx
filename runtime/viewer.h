@@ -96,13 +96,13 @@ class Viewer : public app::Application {
   // Engine services, cached from app::Services at OnInitialize. Owned by the
   // host; stable for its lifetime.
   app::Host* host_ = nullptr;
-  Window* window_ = nullptr;
+  ui::Window* window_ = nullptr;
   render::Renderer* renderer_ = nullptr;
   ecs::World* world_ = nullptr;
   physics::PhysicsWorld* physics_ = nullptr;
-  WorldClock* clock_ = nullptr;
-  InputMap* input_map_ = nullptr;
-  const ActionState* actions_ = nullptr;
+  app::WorldClock* clock_ = nullptr;
+  ui::InputMap* input_map_ = nullptr;
+  const ui::ActionState* actions_ = nullptr;
   base::Vector<PhysicsEntity>* physics_entities_ = nullptr;
 
   scene::FlyCamera camera_;

@@ -65,15 +65,15 @@ class ReferenceCompare {
     f64 coverage = 0.0;  // masked pixel count
   };
 
-  bool Initialize(Device& device);
-  void Destroy(Device& device);
+  bool Initialize(gpu::Device& device);
+  void Destroy(gpu::Device& device);
 
   // Loads a scene-linear reference. .hdr / .exr-style float sources load
   // as-is; 8-bit sources are de-gamma'd to linear on the way in. Returns false
   // and keeps the previous reference on a read error.
-  bool LoadReference(Device& device, const base::String& path);
+  bool LoadReference(gpu::Device& device, const base::String& path);
   // Loads the four-channel region mask (r skin, g eyes, b lips, a teeth).
-  bool LoadRegionMask(Device& device, const base::String& path);
+  bool LoadRegionMask(gpu::Device& device, const base::String& path);
   bool has_reference() const { return static_cast<bool>(reference_); }
 
   Settings& settings() { return settings_; }
@@ -81,7 +81,7 @@ class ReferenceCompare {
 
   // Returns the image to hand to the rest of post. Passing through unchanged
   // when the mode is off costs one copy, so the caller should skip the call.
-  ResourceHandle AddToGraph(RenderGraph& graph, ResourceHandle scene_color, Extent2D extent,
+  ResourceHandle AddToGraph(RenderGraph& graph, ResourceHandle scene_color, gpu::Extent2D extent,
                             u32 tonemap_op);
 
   // Reads back last frame's accumulated metric for one region.
@@ -95,18 +95,18 @@ class ReferenceCompare {
   static constexpr u32 kStatBuckets = 5;
   static constexpr u32 kStatAccumulators = 4;
   static constexpr u32 kStatWordsPerFrame = kStatBuckets * kStatAccumulators * 2;
-  static constexpr u32 kStatRing = Device::kMaxFramesInFlight + 1;
+  static constexpr u32 kStatRing = gpu::Device::kMaxFramesInFlight + 1;
 
   Settings settings_;
-  PipelineHandle pipeline_;
-  SamplerHandle sampler_;
-  GpuImage reference_;
-  GpuImage region_mask_;
-  GpuImage white_mask_;  // 1x1 all-channels-1, so "no mask loaded" means "all"
-  GpuBuffer stats_buffer_;
+  gpu::PipelineHandle pipeline_;
+  gpu::SamplerHandle sampler_;
+  gpu::GpuImage reference_;
+  gpu::GpuImage region_mask_;
+  gpu::GpuImage white_mask_;  // 1x1 all-channels-1, so "no mask loaded" means "all"
+  gpu::GpuBuffer stats_buffer_;
   u32 stats_frame_ = 0;       // frames recorded; picks the write slot
   u32 stats_read_slot_ = 0;   // the newest slot the GPU has certainly retired
-  Device* device_ = nullptr;
+  gpu::Device* device_ = nullptr;
 };
 
 }  // namespace rx::render

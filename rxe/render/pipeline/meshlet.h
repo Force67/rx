@@ -6,9 +6,12 @@
 #include "rxe/render/core/render_graph.h"
 #include "rxe/gpu/rhi/resources.h"
 
+namespace rx::gpu {
+class Device;
+}  // namespace rx::gpu
+
 namespace rx::render {
 
-class Device;
 
 // Mirrors the Meshlet struct in meshlet.ms / mesh_scene.ms (std430, 48 bytes).
 struct Meshlet {
@@ -50,12 +53,12 @@ class MeshletPass {
     f32 nx, ny, nz;
   };
 
-  bool Initialize(Device& device, Format color_format, Format depth_format);
-  void Destroy(Device& device);
+  bool Initialize(gpu::Device& device, gpu::Format color_format, gpu::Format depth_format);
+  void Destroy(gpu::Device& device);
 
   // Builds meshlets from the mesh's lod 0 and uploads the gpu buffers. Replaces
   // any previously uploaded mesh.
-  void Upload(Device& device, const asset::Mesh& mesh);
+  void Upload(gpu::Device& device, const asset::Mesh& mesh);
   bool active() const { return meshlet_count_ > 0; }
   u32 meshlet_count() const { return meshlet_count_; }
   // Survivors of last frame's cluster cull (one frame stale, fence-safe).
@@ -69,14 +72,14 @@ class MeshletPass {
  private:
   static constexpr u32 kFramesInFlight = 2;
   bool available_ = false;
-  PipelineHandle pipeline_;
+  gpu::PipelineHandle pipeline_;
 
-  GpuBuffer meshlets_;
-  GpuBuffer meshlet_vertices_;
-  GpuBuffer meshlet_triangles_;
-  GpuBuffer vertices_;
-  GpuBuffer counters_[kFramesInFlight];  // host-visible visible-meshlet counter
-  GpuBuffer camera_[kFramesInFlight];    // view_proj, too big for the push block
+  gpu::GpuBuffer meshlets_;
+  gpu::GpuBuffer meshlet_vertices_;
+  gpu::GpuBuffer meshlet_triangles_;
+  gpu::GpuBuffer vertices_;
+  gpu::GpuBuffer counters_[kFramesInFlight];  // host-visible visible-meshlet counter
+  gpu::GpuBuffer camera_[kFramesInFlight];    // view_proj, too big for the push block
   u32 meshlet_count_ = 0;
 };
 

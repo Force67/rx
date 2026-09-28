@@ -21,28 +21,28 @@
 namespace rx::render {
 namespace {
 
-Format ToFormat(FfxSurfaceFormat format) {
+gpu::Format ToFormat(FfxSurfaceFormat format) {
   switch (format) {
-    case FFX_SURFACE_FORMAT_R32_FLOAT: return Format::kR32Float;
-    case FFX_SURFACE_FORMAT_R16G16_FLOAT: return Format::kRG16Float;
-    case FFX_SURFACE_FORMAT_R32_UINT: return Format::kR32Uint;
-    default: return Format::kUnknown;
+    case FFX_SURFACE_FORMAT_R32_FLOAT: return gpu::Format::kR32Float;
+    case FFX_SURFACE_FORMAT_R16G16_FLOAT: return gpu::Format::kRG16Float;
+    case FFX_SURFACE_FORMAT_R32_UINT: return gpu::Format::kR32Uint;
+    default: return gpu::Format::kUnknown;
   }
 }
 
 // FfxResourceDescription for an engine image handed to the dispatch. The
 // backend creates its own views from the raw VkImage, the depth usage flag
 // makes it pick the depth aspect.
-FfxResourceDescription DescribeImage(const GpuImage& image, FfxResourceUsage usage) {
+FfxResourceDescription DescribeImage(const gpu::GpuImage& image, FfxResourceUsage usage) {
   FfxResourceDescription desc{};
   desc.type = FFX_RESOURCE_TYPE_TEXTURE2D;
-  desc.format = ffxGetSurfaceFormatVK(GetVkFormat(image.format));
+  desc.format = ffxGetSurfaceFormatVK(gpu::GetVkFormat(image.format));
   desc.width = image.extent.width;
   desc.height = image.extent.height;
   desc.depth = 1;
   desc.mipCount = 1;
   desc.flags = FFX_RESOURCE_FLAGS_NONE;
-  desc.usage = image.format == Format::kD32Float
+  desc.usage = image.format == gpu::Format::kD32Float
                    ? static_cast<FfxResourceUsage>(usage | FFX_RESOURCE_USAGE_DEPTHTARGET)
                    : usage;
   return desc;
@@ -77,13 +77,13 @@ void MessageCallback(FfxMsgType type, const wchar_t* message) {
 
 class Fsr3Upscaler final : public Upscaler {
  public:
-  explicit Fsr3Upscaler(Device& device) : device_(device) {}
+  explicit Fsr3Upscaler(gpu::Device& device) : device_(device) {}
   ~Fsr3Upscaler() override { Destroy(); }
 
   bool Initialize(const UpscalerDesc& desc) override {
     desc_ = desc;
 
-    VulkanHandles h = GetVulkanHandles(device_);
+    gpu::VulkanHandles h = gpu::GetVulkanHandles(device_);
     if (h.device == VK_NULL_HANDLE) {
       RX_WARN("fsr3: requires the vulkan backend, upscaler unavailable");
       return false;
@@ -148,7 +148,7 @@ class Fsr3Upscaler final : public Upscaler {
 
   ResourceHandle AddToGraph(RenderGraph& graph, const UpscalerInputs& inputs) override {
     ResourceHandle output = graph.CreateTexture({.name = "fsr3_output",
-                                                 .format = Format::kRGBA16Float,
+                                                 .format = gpu::Format::kRGBA16Float,
                                                  .width = desc_.output_width,
                                                  .height = desc_.output_height});
     graph.AddPass(
@@ -189,17 +189,17 @@ class Fsr3Upscaler final : public Upscaler {
         &shared.reconstructedPrevNearestDepth};
     for (u32 i = 0; i < kSharedCount; ++i) {
       const FfxResourceDescription& res = descs[i]->resourceDescription;
-      Format format = ToFormat(res.format);
-      if (format == Format::kUnknown) {
+      gpu::Format format = ToFormat(res.format);
+      if (format == gpu::Format::kUnknown) {
         RX_ERROR("fsr3: unexpected shared resource format ({})", static_cast<int>(res.format));
         return false;
       }
       // TRANSFER_DST because FSR clears these via vkCmdClearColorImage on
       // reset frames.
-      TextureUsageFlags usage =
-          kTextureUsageSampled | kTextureUsageStorage | kTextureUsageTransferDst;
+      gpu::TextureUsageFlags usage =
+          gpu::kTextureUsageSampled | gpu::kTextureUsageStorage | gpu::kTextureUsageTransferDst;
       if (res.usage & FFX_RESOURCE_USAGE_RENDERTARGET) {
-        usage |= kTextureUsageColorTarget;
+        usage |= gpu::kTextureUsageColorTarget;
       }
       shared_[i] = device_.CreateImage2D(format, {res.width, res.height}, usage);
       if (!shared_[i]) {
@@ -211,11 +211,11 @@ class Fsr3Upscaler final : public Upscaler {
 
     // The dispatch declares them as UNORDERED_ACCESS (= GENERAL), so leave
     // them there from the start instead of UNDEFINED.
-    device_.ImmediateSubmit([this](CommandList& cmd) {
-      TextureBarrier barriers[kSharedCount];
+    device_.ImmediateSubmit([this](gpu::CommandList& cmd) {
+      gpu::TextureBarrier barriers[kSharedCount];
       for (u32 i = 0; i < kSharedCount; ++i) {
         barriers[i] =
-            Transition(shared_[i], ResourceState::kUndefined, ResourceState::kGeneral);
+            gpu::Transition(shared_[i], gpu::ResourceState::kUndefined, gpu::ResourceState::kGeneral);
       }
       cmd.TextureBarriers(base::Span(barriers, kSharedCount));
     });
@@ -223,32 +223,32 @@ class Fsr3Upscaler final : public Upscaler {
   }
 
   void Dispatch(PassContext& ctx, const UpscalerInputs& inputs, ResourceHandle output) {
-    const GpuImage& color = ctx.graph->image(inputs.color);
-    const GpuImage& depth = ctx.graph->image(inputs.depth);
-    const GpuImage& motion = ctx.graph->image(inputs.motion_vectors);
-    const GpuImage& out = ctx.graph->image(output);
+    const gpu::GpuImage& color = ctx.graph->image(inputs.color);
+    const gpu::GpuImage& depth = ctx.graph->image(inputs.depth);
+    const gpu::GpuImage& motion = ctx.graph->image(inputs.motion_vectors);
+    const gpu::GpuImage& out = ctx.graph->image(output);
 
     FfxFsr3UpscalerDispatchDescription dispatch{};
-    dispatch.commandList = ffxGetCommandListVK(GetVkCommandBuffer(*ctx.cmd));
+    dispatch.commandList = ffxGetCommandListVK(gpu::GetVkCommandBuffer(*ctx.cmd));
     dispatch.color =
-        ffxGetResourceVK(GetVkImage(color), DescribeImage(color, FFX_RESOURCE_USAGE_READ_ONLY),
+        ffxGetResourceVK(gpu::GetVkImage(color), DescribeImage(color, FFX_RESOURCE_USAGE_READ_ONLY),
                          L"fsr3_color", FFX_RESOURCE_STATE_COMPUTE_READ);
     dispatch.depth =
-        ffxGetResourceVK(GetVkImage(depth), DescribeImage(depth, FFX_RESOURCE_USAGE_READ_ONLY),
+        ffxGetResourceVK(gpu::GetVkImage(depth), DescribeImage(depth, FFX_RESOURCE_USAGE_READ_ONLY),
                          L"fsr3_depth", FFX_RESOURCE_STATE_COMPUTE_READ);
     dispatch.motionVectors =
-        ffxGetResourceVK(GetVkImage(motion), DescribeImage(motion, FFX_RESOURCE_USAGE_READ_ONLY),
+        ffxGetResourceVK(gpu::GetVkImage(motion), DescribeImage(motion, FFX_RESOURCE_USAGE_READ_ONLY),
                          L"fsr3_motion", FFX_RESOURCE_STATE_COMPUTE_READ);
-    dispatch.dilatedDepth = ffxGetResourceVK(GetVkImage(shared_[0]), shared_descs_[0],
+    dispatch.dilatedDepth = ffxGetResourceVK(gpu::GetVkImage(shared_[0]), shared_descs_[0],
                                              L"fsr3_dilated_depth",
                                              FFX_RESOURCE_STATE_UNORDERED_ACCESS);
-    dispatch.dilatedMotionVectors = ffxGetResourceVK(GetVkImage(shared_[1]), shared_descs_[1],
+    dispatch.dilatedMotionVectors = ffxGetResourceVK(gpu::GetVkImage(shared_[1]), shared_descs_[1],
                                                      L"fsr3_dilated_motion",
                                                      FFX_RESOURCE_STATE_UNORDERED_ACCESS);
     dispatch.reconstructedPrevNearestDepth =
-        ffxGetResourceVK(GetVkImage(shared_[2]), shared_descs_[2], L"fsr3_recon_depth",
+        ffxGetResourceVK(gpu::GetVkImage(shared_[2]), shared_descs_[2], L"fsr3_recon_depth",
                          FFX_RESOURCE_STATE_UNORDERED_ACCESS);
-    dispatch.output = ffxGetResourceVK(GetVkImage(out), DescribeImage(out, FFX_RESOURCE_USAGE_UAV),
+    dispatch.output = ffxGetResourceVK(gpu::GetVkImage(out), DescribeImage(out, FFX_RESOURCE_USAGE_UAV),
                                        L"fsr3_output", FFX_RESOURCE_STATE_UNORDERED_ACCESS);
 
     // Same pixel-space values that were baked into the projection; the
@@ -287,7 +287,7 @@ class Fsr3Upscaler final : public Upscaler {
       ffxFsr3UpscalerContextDestroy(&context_);
       context_valid_ = false;
     }
-    for (GpuImage& image : shared_) {
+    for (gpu::GpuImage& image : shared_) {
       if (image) device_.DestroyImage(image);
     }
     if (scratch_) {
@@ -298,7 +298,7 @@ class Fsr3Upscaler final : public Upscaler {
 
   static constexpr u32 kSharedCount = 3;
 
-  Device& device_;
+  gpu::Device& device_;
   UpscalerDesc desc_;
   u32 previous_frame_ = 0;
   bool has_history_ = false;
@@ -307,13 +307,13 @@ class Fsr3Upscaler final : public Upscaler {
   FfxInterface interface_{};
   FfxFsr3UpscalerContext context_{};
   bool context_valid_ = false;
-  GpuImage shared_[kSharedCount];  // dilated depth, dilated motion, recon prev depth
+  gpu::GpuImage shared_[kSharedCount];  // dilated depth, dilated motion, recon prev depth
   FfxResourceDescription shared_descs_[kSharedCount]{};
 };
 
 }  // namespace
 
-base::UniquePointer<Upscaler> CreateFsr3Upscaler(const UpscalerDesc& desc, Device& device) {
+base::UniquePointer<Upscaler> CreateFsr3Upscaler(const UpscalerDesc& desc, gpu::Device& device) {
   auto upscaler = base::MakeUnique<Fsr3Upscaler>(device);
   if (!upscaler->Initialize(desc)) return nullptr;
   return upscaler;

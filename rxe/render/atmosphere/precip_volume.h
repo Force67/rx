@@ -5,9 +5,12 @@
 #include "rxe/render/core/render_graph.h"
 #include "rxe/gpu/rhi/device.h"
 
+namespace rx::gpu {
+class Device;
+}  // namespace rx::gpu
+
 namespace rx::render {
 
-class Device;
 class RayTracingContext;
 
 // True volumetric precipitation: stateless procedural GPU particles (position
@@ -45,19 +48,19 @@ class PrecipVolume {
     // Sky-occlusion map (PrecipOcclusion::Params / y_range / view / sampler).
     f32 occl[4] = {0, 0, 0, 0};
     f32 occl_range = 0.0f;
-    TextureView occlusion;
-    SamplerHandle occlusion_sampler;
+    gpu::TextureView occlusion;
+    gpu::SamplerHandle occlusion_sampler;
     // Froxel fog transmittance (dims particles with the fog in front).
     bool froxel_enabled = false;
-    TextureView froxel_volume;
-    SamplerHandle froxel_sampler;
+    gpu::TextureView froxel_volume;
+    gpu::SamplerHandle froxel_sampler;
     // Per-particle sun shadow rays; effective only when the rt pipeline exists.
     bool rt_shadows = false;
   };
 
   // ray_query builds the additional rt vertex variant.
-  bool Initialize(Device& device, Format color_format, bool ray_query);
-  void Destroy(Device& device);
+  bool Initialize(gpu::Device& device, gpu::Format color_format, bool ray_query);
+  void Destroy(gpu::Device& device);
   // Every mandatory pipeline; the rt variant stays optional (its absence just
   // falls back to the unshadowed vertex stage at draw time).
   bool available() const {
@@ -74,14 +77,14 @@ class PrecipVolume {
                   const Frame& frame);
 
  private:
-  PipelineHandle pipeline_;         // rain/snow, unshadowed vertex stage
-  PipelineHandle pipeline_rt_;      // + per-particle sun ray query in the vs
-  PipelineHandle splash_pipeline_;  // ripple rings + crown flashes
+  gpu::PipelineHandle pipeline_;         // rain/snow, unshadowed vertex stage
+  gpu::PipelineHandle pipeline_rt_;      // + per-particle sun ray query in the vs
+  gpu::PipelineHandle splash_pipeline_;  // ripple rings + crown flashes
   // 1x1x1 stand-in bound when froxel fog never initialized (its Initialize
   // failure is nonfatal), so the descriptor is always valid; the froxel flag
   // in the push already zeroes the term.
-  GpuImage froxel_dummy_;
-  GpuBuffer camera_[2];   // view_proj + prev_view_proj, too big for the push block
+  gpu::GpuImage froxel_dummy_;
+  gpu::GpuBuffer camera_[2];   // view_proj + prev_view_proj, too big for the push block
   u32 uniform_slot_ = 0;  // flips per pass; the other copy may still be in flight
 };
 

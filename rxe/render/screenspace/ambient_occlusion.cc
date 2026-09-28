@@ -22,14 +22,14 @@ struct TracePush {
 
 }  // namespace
 
-bool RtaoPass::Initialize(Device& device) {
+bool RtaoPass::Initialize(gpu::Device& device) {
   pipeline_ = device.CreateComputePipeline({
       .shader = RX_SHADER(k_rtao_cs_hlsl),
-      .sets = {{.slots = {{0, BindingType::kStorageImage},
-                          {1, BindingType::kSampledImage},
-                          {2, BindingType::kSampledImage},
-                          {3, BindingType::kAccelStruct}}}},
-      .push_constant_size = PushSize<TracePush>(),
+      .sets = {{.slots = {{0, gpu::BindingType::kStorageImage},
+                          {1, gpu::BindingType::kSampledImage},
+                          {2, gpu::BindingType::kSampledImage},
+                          {3, gpu::BindingType::kAccelStruct}}}},
+      .push_constant_size = gpu::PushSize<TracePush>(),
       .debug_name = "rtao_trace",
   });
   if (!pipeline_) {
@@ -39,7 +39,7 @@ bool RtaoPass::Initialize(Device& device) {
   return true;
 }
 
-void RtaoPass::Destroy(Device& device) {
+void RtaoPass::Destroy(gpu::Device& device) {
   device.DestroyPipeline(pipeline_);
   pipeline_ = {};
 }
@@ -75,10 +75,10 @@ ResourceHandle RtaoPass::AddToGraph(RenderGraph& graph, RayTracingContext& raytr
         push.ray_count = settings_.ray_count;
 
         ctx.cmd->BindPipeline(pipeline_);
-        ctx.cmd->BindTransient(0, {Bind::Storage(0, ctx.graph->image(hitdist)),
-                                   Bind::Sampled(1, ctx.graph->image(depth)),
-                                   Bind::Sampled(2, ctx.graph->image(normals)),
-                                   Bind::Accel(3, raytracing.tlas(tlas_slot))});
+        ctx.cmd->BindTransient(0, {gpu::Bind::Storage(0, ctx.graph->image(hitdist)),
+                                   gpu::Bind::Sampled(1, ctx.graph->image(depth)),
+                                   gpu::Bind::Sampled(2, ctx.graph->image(normals)),
+                                   gpu::Bind::Accel(3, raytracing.tlas(tlas_slot))});
         ctx.cmd->Push(push);
         ctx.cmd->Dispatch2D(extent_);
       });

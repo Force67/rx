@@ -14,7 +14,7 @@ namespace rx::render {
 // by the UI backend and sampled in screen space by frosted quads.
 class UiBlurPass {
  public:
-  static base::UniquePointer<UiBlurPass> Create(Device& device);
+  static base::UniquePointer<UiBlurPass> Create(gpu::Device& device);
   ~UiBlurPass();
 
   UiBlurPass(const UiBlurPass&) = delete;
@@ -25,16 +25,16 @@ class UiBlurPass {
   ResourceHandle AddToGraph(RenderGraph& graph, ResourceHandle src, u32 width, u32 height);
 
   // Linear clamp sampler the UI backend uses to read the blurred result.
-  SamplerHandle sampler() const { return sampler_; }
+  gpu::SamplerHandle sampler() const { return sampler_; }
 
  private:
-  explicit UiBlurPass(Device& device) : device_(device) {}
-  void Record(PassContext& ctx, TextureView input, TextureView output, Extent2D extent,
+  explicit UiBlurPass(gpu::Device& device) : device_(device) {}
+  void Record(PassContext& ctx, gpu::TextureView input, gpu::TextureView output, gpu::Extent2D extent,
               float dx, float dy);
 
-  Device& device_;
-  SamplerHandle sampler_;
-  PipelineHandle pipeline_;
+  gpu::Device& device_;
+  gpu::SamplerHandle sampler_;
+  gpu::PipelineHandle pipeline_;
 };
 
 }  // namespace rx::render

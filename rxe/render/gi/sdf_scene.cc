@@ -344,7 +344,7 @@ bool SdfScene::RegisterMesh(u64 mesh_key, const MeshInput& input) {
 
   out.sdf = device_.CreateBufferWithData(
       ByteSpan(reinterpret_cast<const u8*>(field.data()), field.size() * sizeof(f32)),
-      kBufferUsageStorage);
+      gpu::kBufferUsageStorage);
   if (!out.sdf) {
     RX_WARN("sdf: mesh buffer creation failed (key {:#x})", mesh_key);
     return false;

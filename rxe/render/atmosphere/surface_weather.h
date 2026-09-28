@@ -5,9 +5,12 @@
 #include "rxe/render/core/render_graph.h"
 #include "rxe/gpu/rhi/resources.h"
 
+namespace rx::gpu {
+class Device;
+}  // namespace rx::gpu
+
 namespace rx::render {
 
-class Device;
 
 // Surface weather: applies precipitation's effect on the world to the lit scene
 // (rain wetness = darken + sky-reflection sheen on up-faces; snow = white
@@ -29,21 +32,21 @@ class SurfaceWeather {
     // (everything counts as sky-visible).
     f32 occl[4] = {0, 0, 0, 0};
     f32 occl_range = 0.0f;
-    TextureView occlusion;
-    SamplerHandle occlusion_sampler;
+    gpu::TextureView occlusion;
+    gpu::SamplerHandle occlusion_sampler;
   };
 
-  bool Initialize(Device& device);
-  void Destroy(Device& device);
+  bool Initialize(gpu::Device& device);
+  void Destroy(gpu::Device& device);
 
   // `normals`/`depth` are the G-buffer; `sky_view`/`sky_sampler` the sky cubemap.
   ResourceHandle AddToGraph(RenderGraph& graph, ResourceHandle color, ResourceHandle normals,
-                            ResourceHandle depth, TextureView sky_view, SamplerHandle sky_sampler,
-                            Extent2D extent, const Frame& frame);
+                            ResourceHandle depth, gpu::TextureView sky_view, gpu::SamplerHandle sky_sampler,
+                            gpu::Extent2D extent, const Frame& frame);
 
  private:
-  PipelineHandle pipeline_;
-  GpuBuffer camera_[2];   // inv_view_proj, too big for the push block
+  gpu::PipelineHandle pipeline_;
+  gpu::GpuBuffer camera_[2];   // inv_view_proj, too big for the push block
   u32 uniform_slot_ = 0;  // flips per pass; the other copy may still be in flight
 };
 

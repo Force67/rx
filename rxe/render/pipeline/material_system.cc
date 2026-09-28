@@ -54,7 +54,7 @@ SkinCoeffs ComputeSkinCoeffs(const asset::Material::SkinParams& p) {
 }
 
 struct FormatInfo {
-  Format format = Format::kUnknown;
+  gpu::Format format = gpu::Format::kUnknown;
   u32 block_bytes = 0;
   u32 block_dim = 1;  // 1 for uncompressed, 4 for BCn
 };
@@ -62,19 +62,19 @@ struct FormatInfo {
 FormatInfo FormatFor(asset::TextureFormat format, bool srgb) {
   switch (format) {
     case asset::TextureFormat::kRgba8:
-      return {srgb ? Format::kRGBA8Srgb : Format::kRGBA8Unorm, 4, 1};
+      return {srgb ? gpu::Format::kRGBA8Srgb : gpu::Format::kRGBA8Unorm, 4, 1};
     case asset::TextureFormat::kBc1:
-      return {srgb ? Format::kBC1RgbSrgb : Format::kBC1RgbUnorm, 8, 4};
+      return {srgb ? gpu::Format::kBC1RgbSrgb : gpu::Format::kBC1RgbUnorm, 8, 4};
     case asset::TextureFormat::kBc2:
-      return {srgb ? Format::kBC2Srgb : Format::kBC2Unorm, 16, 4};
+      return {srgb ? gpu::Format::kBC2Srgb : gpu::Format::kBC2Unorm, 16, 4};
     case asset::TextureFormat::kBc3:
-      return {srgb ? Format::kBC3Srgb : Format::kBC3Unorm, 16, 4};
+      return {srgb ? gpu::Format::kBC3Srgb : gpu::Format::kBC3Unorm, 16, 4};
     case asset::TextureFormat::kBc4:
-      return {Format::kBC4Unorm, 8, 4};
+      return {gpu::Format::kBC4Unorm, 8, 4};
     case asset::TextureFormat::kBc5:
-      return {Format::kBC5Unorm, 16, 4};
+      return {gpu::Format::kBC5Unorm, 16, 4};
     case asset::TextureFormat::kBc7:
-      return {srgb ? Format::kBC7Srgb : Format::kBC7Unorm, 16, 4};
+      return {srgb ? gpu::Format::kBC7Srgb : gpu::Format::kBC7Unorm, 16, 4};
     case asset::TextureFormat::kUnknown:
       return {};
   }
@@ -244,14 +244,14 @@ bool DecodeAlphaGrid(const asset::Texture& tex, MaterialSystem::AlphaCoverage& o
 
 }  // namespace
 
-base::UniquePointer<MaterialSystem> MaterialSystem::Create(Device& device,
+base::UniquePointer<MaterialSystem> MaterialSystem::Create(gpu::Device& device,
                                                        BindlessRegistry* registry) {
   auto system = base::UniquePointer<MaterialSystem>(new MaterialSystem(device));
   system->registry_ = registry;
 
   // Trilinear repeat sampler, anisotropic when the device supports it. Cached
   // by the device, never destroyed here.
-  SamplerDesc sampler_desc{};
+  gpu::SamplerDesc sampler_desc{};
   if (device.caps().max_anisotropy > 1.0f) {
     sampler_desc.max_anisotropy = rx::Min(16.0f, device.caps().max_anisotropy);
   }
@@ -259,20 +259,20 @@ base::UniquePointer<MaterialSystem> MaterialSystem::Create(Device& device,
 
   system->set_layout_ = device.CreateBindingLayout({
       // Vertex too: the wind sway in mesh.vs reads the material flags.
-      .stages = kShaderStageVertex | kShaderStageFragment,
-      .slots = {{0, BindingType::kUniformBuffer},
-                {1, BindingType::kCombinedTextureSampler},
-                {2, BindingType::kCombinedTextureSampler},
-                {3, BindingType::kCombinedTextureSampler},
-                {4, BindingType::kCombinedTextureSampler},
-                {5, BindingType::kCombinedTextureSampler},
-                {6, BindingType::kCombinedTextureSampler},   // metallic (separate)
-                {7, BindingType::kCombinedTextureSampler},    // occlusion
-                {8, BindingType::kCombinedTextureSampler},    // env mask
-                {9, BindingType::kCombinedTextureSampler},    // specular normal (Ns)
-                {10, BindingType::kCombinedTextureSampler},   // local thickness
-                {11, BindingType::kCombinedTextureSampler},   // residual ambient
-                {12, BindingType::kCombinedTextureSampler}},  // residual directional
+      .stages = gpu::kShaderStageVertex | gpu::kShaderStageFragment,
+      .slots = {{0, gpu::BindingType::kUniformBuffer},
+                {1, gpu::BindingType::kCombinedTextureSampler},
+                {2, gpu::BindingType::kCombinedTextureSampler},
+                {3, gpu::BindingType::kCombinedTextureSampler},
+                {4, gpu::BindingType::kCombinedTextureSampler},
+                {5, gpu::BindingType::kCombinedTextureSampler},
+                {6, gpu::BindingType::kCombinedTextureSampler},   // metallic (separate)
+                {7, gpu::BindingType::kCombinedTextureSampler},    // occlusion
+                {8, gpu::BindingType::kCombinedTextureSampler},    // env mask
+                {9, gpu::BindingType::kCombinedTextureSampler},    // specular normal (Ns)
+                {10, gpu::BindingType::kCombinedTextureSampler},   // local thickness
+                {11, gpu::BindingType::kCombinedTextureSampler},   // residual ambient
+                {12, gpu::BindingType::kCombinedTextureSampler}},  // residual directional
   });
   if (!system->set_layout_) return nullptr;
 
@@ -323,9 +323,9 @@ bool MaterialSystem::CreateDefaults() {
                   sets_in_last_pool_ - 1, default_material, 0, map_keys);
 }
 
-GpuImage MaterialSystem::UploadTextureImage(const asset::Texture& texture, u32 first_mip) {
+gpu::GpuImage MaterialSystem::UploadTextureImage(const asset::Texture& texture, u32 first_mip) {
   FormatInfo info = FormatFor(texture.format, texture.is_srgb);
-  if (info.format == Format::kUnknown || texture.width == 0 || texture.height == 0) {
+  if (info.format == gpu::Format::kUnknown || texture.width == 0 || texture.height == 0) {
     RX_WARN("texture upload skipped, unsupported format");
     return {};
   }
@@ -375,9 +375,9 @@ GpuImage MaterialSystem::UploadTextureImage(const asset::Texture& texture, u32 f
     return {};
   }
 
-  TextureUsageFlags usage = kTextureUsageSampled | kTextureUsageTransferDst;
-  if (generate_mips) usage |= kTextureUsageTransferSrc;
-  GpuImage image =
+  gpu::TextureUsageFlags usage = gpu::kTextureUsageSampled | gpu::kTextureUsageTransferDst;
+  if (generate_mips) usage |= gpu::kTextureUsageTransferSrc;
+  gpu::GpuImage image =
       device_.CreateImage2D(info.format, {top_width, top_height}, usage, mip_count);
   if (!image) return {};
   // Inside an upload batch the copy is deferred to the flush, so the shared
@@ -385,10 +385,10 @@ GpuImage MaterialSystem::UploadTextureImage(const asset::Texture& texture, u32 f
   // fresh buffer parked with the batch instead. Outside a batch the pooled
   // staging is fine (ImmediateSubmit completes before the next call reuses it).
   const bool batched = device_.UploadBatchActive();
-  GpuBuffer fresh{};
-  GpuBuffer* staging;
+  gpu::GpuBuffer fresh{};
+  gpu::GpuBuffer* staging;
   if (batched) {
-    fresh = device_.CreateBuffer(upload_bytes, kBufferUsageTransferSrc, true);
+    fresh = device_.CreateBuffer(upload_bytes, gpu::kBufferUsageTransferSrc, true);
     if (!fresh.mapped) {
       if (fresh) device_.DestroyBuffer(fresh);
       device_.DestroyImage(image);
@@ -405,10 +405,10 @@ GpuImage MaterialSystem::UploadTextureImage(const asset::Texture& texture, u32 f
   base::MemCopy(staging->mapped, texture.data.data() + skip, upload_bytes);
   device_.FlushBuffer(*staging, 0, upload_bytes);
 
-  device_.RecordUpload([&](CommandList& cmd) {
-    cmd.Barrier(Transition(image, ResourceState::kUndefined, ResourceState::kCopyDst));
+  device_.RecordUpload([&](gpu::CommandList& cmd) {
+    cmd.Barrier(gpu::Transition(image, gpu::ResourceState::kUndefined, gpu::ResourceState::kCopyDst));
 
-    SmallVector<BufferTextureCopy, 16> regions;  // one per mip
+    SmallVector<gpu::BufferTextureCopy, 16> regions;  // one per mip
     u64 offset = 0;
     u32 width = top_width;
     u32 height = top_height;
@@ -425,8 +425,8 @@ GpuImage MaterialSystem::UploadTextureImage(const asset::Texture& texture, u32 f
       u32 src_height = texture.height;
       for (u32 mip = 1; mip < mip_count; ++mip) {
         cmd.Barrier({.texture = image.handle,
-                     .before = ResourceState::kCopyDst,
-                     .after = ResourceState::kCopySrc,
+                     .before = gpu::ResourceState::kCopyDst,
+                     .after = gpu::ResourceState::kCopySrc,
                      .base_mip = mip - 1,
                      .mip_count = 1});
         u32 dst_width = rx::Max(1u, src_width / 2);
@@ -437,22 +437,22 @@ GpuImage MaterialSystem::UploadTextureImage(const asset::Texture& texture, u32 f
       }
       // Mips 0..n-2 sit in kCopySrc after feeding the next level, the last one
       // still in kCopyDst.
-      TextureBarrier finals[2] = {
+      gpu::TextureBarrier finals[2] = {
           {.texture = image.handle,
-           .before = ResourceState::kCopySrc,
-           .after = ResourceState::kShaderReadAll,
+           .before = gpu::ResourceState::kCopySrc,
+           .after = gpu::ResourceState::kShaderReadAll,
            .base_mip = 0,
            .mip_count = mip_count - 1},
           {.texture = image.handle,
-           .before = ResourceState::kCopyDst,
-           .after = ResourceState::kShaderReadAll,
+           .before = gpu::ResourceState::kCopyDst,
+           .after = gpu::ResourceState::kShaderReadAll,
            .base_mip = mip_count - 1,
            .mip_count = 1}};
       cmd.TextureBarriers(base::Span(finals, 2));
     } else {
       cmd.Barrier({.texture = image.handle,
-                   .before = ResourceState::kCopyDst,
-                   .after = ResourceState::kShaderReadAll});
+                   .before = gpu::ResourceState::kCopyDst,
+                   .after = gpu::ResourceState::kShaderReadAll});
     }
   });
   // The batch reads this staging at flush, so hand it over to free then; the
@@ -461,7 +461,7 @@ GpuImage MaterialSystem::UploadTextureImage(const asset::Texture& texture, u32 f
   return image;
 }
 
-GpuBuffer* MaterialSystem::AcquireStaging(u64 bytes) {
+gpu::GpuBuffer* MaterialSystem::AcquireStaging(u64 bytes) {
   if (bytes == 0) return nullptr;
   if (bytes > staging_bytes_) {
     // Round up so a stream of slightly-growing textures re-creates the buffer
@@ -469,7 +469,7 @@ GpuBuffer* MaterialSystem::AcquireStaging(u64 bytes) {
     constexpr u64 kGranule = 4u << 20;
     if (bytes > base::MinMax<u64>::max() - (kGranule - 1)) return nullptr;
     const u64 grown_bytes = (bytes + kGranule - 1) / kGranule * kGranule;
-    GpuBuffer grown = device_.CreateBuffer(grown_bytes, kBufferUsageTransferSrc, true);
+    gpu::GpuBuffer grown = device_.CreateBuffer(grown_bytes, gpu::kBufferUsageTransferSrc, true);
     if (!grown.mapped) {
       if (grown) device_.DestroyBuffer(grown);
       return nullptr;
@@ -497,7 +497,7 @@ u64 MaterialSystem::BytesForMips(const asset::Texture& texture, u32 first_mip) c
 bool MaterialSystem::UploadTexture(const asset::Texture& texture, u64 id_salt) {
   u64 key = texture.id.hash ^ id_salt;
   if (textures_.find(key)) return true;
-  GpuImage image = UploadTextureImage(texture);
+  gpu::GpuImage image = UploadTextureImage(texture);
   if (!image) return false;
 
   auto record = base::MakeUnique<TextureRecord>();
@@ -541,19 +541,19 @@ bool MaterialSystem::UploadTexture(const asset::Texture& texture, u64 id_salt) {
 }
 
 bool MaterialSystem::AddPool() {
-  GpuBuffer params = device_.CreateBuffer(static_cast<u64>(kParamStride) * kMaterialsPerPool,
-                                          kBufferUsageUniform, true);
+  gpu::GpuBuffer params = device_.CreateBuffer(static_cast<u64>(kParamStride) * kMaterialsPerPool,
+                                          gpu::kBufferUsageUniform, true);
   if (!params.mapped) return false;
   param_buffers_.push_back(params);
   sets_in_last_pool_ = 0;
   return true;
 }
 
-BindingSetHandle MaterialSystem::AllocateSet() {
+gpu::BindingSetHandle MaterialSystem::AllocateSet() {
   if (param_buffers_.empty() || sets_in_last_pool_ == kMaterialsPerPool) {
     if (!AddPool()) return {};
   }
-  BindingSetHandle set = device_.CreateBindingSet(set_layout_);
+  gpu::BindingSetHandle set = device_.CreateBindingSet(set_layout_);
   if (!set) return {};
   ++sets_in_last_pool_;
   return set;
@@ -565,7 +565,7 @@ MaterialSystem::TextureRecord* MaterialSystem::record_for(u64 hash) {
   return index ? texture_records_[*index].Get_UseOnlyIfYouKnowWhatYouareDoing() : nullptr;
 }
 
-const GpuImage* MaterialSystem::texture_or(u64 hash, const GpuImage& fallback) const {
+const gpu::GpuImage* MaterialSystem::texture_or(u64 hash, const gpu::GpuImage& fallback) const {
   if (hash != 0) {
     if (const u32* index = textures_.find(hash)) return &texture_records_[*index]->image;
   }
@@ -581,8 +581,8 @@ u32 MaterialSystem::EnsureBindless(u64 key) {
   return record->bindless;
 }
 
-void MaterialSystem::WriteSetBindings(BindingSetHandle set, const MaterialRuntime& runtime) {
-  const GpuImage* maps[12] = {
+void MaterialSystem::WriteSetBindings(gpu::BindingSetHandle set, const MaterialRuntime& runtime) {
+  const gpu::GpuImage* maps[12] = {
       texture_or(runtime.map_keys[0], white_),
       texture_or(runtime.map_keys[1], flat_normal_),
       texture_or(runtime.map_keys[2], white_),
@@ -596,21 +596,21 @@ void MaterialSystem::WriteSetBindings(BindingSetHandle set, const MaterialRuntim
       texture_or(runtime.map_keys[10], black_),       // black residual = analytic only
       texture_or(runtime.map_keys[11], black_),
   };
-  GpuBuffer& buffer = param_buffers_[runtime.pool];
+  gpu::GpuBuffer& buffer = param_buffers_[runtime.pool];
   u64 offset = static_cast<u64>(runtime.param_index) * kParamStride;
-  device_.UpdateBindingSet(set, {Bind::Uniform(0, buffer, offset, sizeof(Params)),
-                                 Bind::Combined(1, maps[0]->view, sampler_),
-                                 Bind::Combined(2, maps[1]->view, sampler_),
-                                 Bind::Combined(3, maps[2]->view, sampler_),
-                                 Bind::Combined(4, maps[3]->view, sampler_),
-                                 Bind::Combined(5, maps[4]->view, sampler_),
-                                 Bind::Combined(6, maps[5]->view, sampler_),
-                                 Bind::Combined(7, maps[6]->view, sampler_),
-                                 Bind::Combined(8, maps[7]->view, sampler_),
-                                 Bind::Combined(9, maps[8]->view, sampler_),
-                                 Bind::Combined(10, maps[9]->view, sampler_),
-                                 Bind::Combined(11, maps[10]->view, sampler_),
-                                 Bind::Combined(12, maps[11]->view, sampler_)});
+  device_.UpdateBindingSet(set, {gpu::Bind::Uniform(0, buffer, offset, sizeof(Params)),
+                                 gpu::Bind::Combined(1, maps[0]->view, sampler_),
+                                 gpu::Bind::Combined(2, maps[1]->view, sampler_),
+                                 gpu::Bind::Combined(3, maps[2]->view, sampler_),
+                                 gpu::Bind::Combined(4, maps[3]->view, sampler_),
+                                 gpu::Bind::Combined(5, maps[4]->view, sampler_),
+                                 gpu::Bind::Combined(6, maps[5]->view, sampler_),
+                                 gpu::Bind::Combined(7, maps[6]->view, sampler_),
+                                 gpu::Bind::Combined(8, maps[7]->view, sampler_),
+                                 gpu::Bind::Combined(9, maps[8]->view, sampler_),
+                                 gpu::Bind::Combined(10, maps[9]->view, sampler_),
+                                 gpu::Bind::Combined(11, maps[10]->view, sampler_),
+                                 gpu::Bind::Combined(12, maps[11]->view, sampler_)});
 }
 
 // The uniform block + the texture keys a material resolves to. Split out of
@@ -848,13 +848,13 @@ void MaterialSystem::BuildParams(const asset::Material& material, u64 id_salt, P
   out_map_keys[11] = material.human_params.residual_directional.hash ^ id_salt;
 }
 
-bool MaterialSystem::WriteSet(BindingSetHandle set, u32 pool, u32 param_index,
+bool MaterialSystem::WriteSet(gpu::BindingSetHandle set, u32 pool, u32 param_index,
                               const asset::Material& material, u64 id_salt,
                               u64 out_map_keys[12]) {
   Params params;
   BuildParams(material, id_salt, params, out_map_keys);
 
-  GpuBuffer& buffer = param_buffers_[pool];
+  gpu::GpuBuffer& buffer = param_buffers_[pool];
   u64 offset = static_cast<u64>(param_index) * kParamStride;
   base::MemCopy(static_cast<u8*>(buffer.mapped) + offset, &params, sizeof(params));
 
@@ -867,7 +867,7 @@ bool MaterialSystem::WriteSet(BindingSetHandle set, u32 pool, u32 param_index,
   return true;
 }
 
-const GpuImage* MaterialSystem::find_texture(u64 hash) const {
+const gpu::GpuImage* MaterialSystem::find_texture(u64 hash) const {
   if (const u32* index = textures_.find(hash)) return &texture_records_[*index]->image;
   return nullptr;
 }
@@ -965,7 +965,7 @@ bool MaterialSystem::UpdateMaterialParams(const asset::Material& material, u64 i
   Params params;
   u64 keys[12];
   BuildParams(material, id_salt, params, keys);
-  GpuBuffer& buffer = param_buffers_[runtime.pool];
+  gpu::GpuBuffer& buffer = param_buffers_[runtime.pool];
   const u64 offset = static_cast<u64>(runtime.param_index) * kParamStride;
   base::MemCopy(static_cast<u8*>(buffer.mapped) + offset, &params, sizeof(params));
   return true;
@@ -974,7 +974,7 @@ bool MaterialSystem::UpdateMaterialParams(const asset::Material& material, u64 i
 bool MaterialSystem::UploadMaterial(const asset::Material& material, u64 id_salt) {
   u64 key = material.id.hash ^ id_salt;
   if (sets_.find(key)) return true;
-  BindingSetHandle set = AllocateSet();
+  gpu::BindingSetHandle set = AllocateSet();
   if (!set) return false;
   MaterialRuntime runtime;
   runtime.set = set;
@@ -1052,7 +1052,7 @@ void MaterialSystem::BeginFrame(u32 frame_index) {
   size_t kept = 0;
   for (size_t i = 0; i < retired_.size(); ++i) {
     Retired& retired = retired_[i];
-    if (retired.frame + Device::kMaxFramesInFlight <= frame_index) {
+    if (retired.frame + gpu::Device::kMaxFramesInFlight <= frame_index) {
       if (retired.image) device_.DestroyImage(retired.image);
       if (retired.set) device_.DestroyBindingSet(retired.set);
       if (registry_ && retired.bindless_slot != BindlessRegistry::kInvalidIndex) {
@@ -1066,7 +1066,7 @@ void MaterialSystem::BeginFrame(u32 frame_index) {
 }
 
 bool MaterialSystem::SwapResident(TextureRecord& record, u32 first_mip, u32 frame_index) {
-  GpuImage next = UploadTextureImage(record.source, first_mip);
+  gpu::GpuImage next = UploadTextureImage(record.source, first_mip);
   if (!next) return false;
   // Deferred, not immediate: inside an upload batch the copy into `next` is
   // still pending, and SwapResident runs mid-frame (streaming), where a device
@@ -1089,11 +1089,11 @@ bool MaterialSystem::SwapResident(TextureRecord& record, u32 first_mip, u32 fram
   // Pre-create every replacement set before committing: the live sets may be
   // pending on the GPU, so a half-swapped state (image retired, set rebuild
   // failed) would leave a dangling descriptor.
-  base::Vector<BindingSetHandle> fresh_sets;
+  base::Vector<gpu::BindingSetHandle> fresh_sets;
   for (size_t i = 0; i < record.material_indices.size(); ++i) {
-    BindingSetHandle fresh = device_.CreateBindingSet(set_layout_);
+    gpu::BindingSetHandle fresh = device_.CreateBindingSet(set_layout_);
     if (!fresh) {
-      for (BindingSetHandle set : fresh_sets) device_.DestroyBindingSet(set);
+      for (gpu::BindingSetHandle set : fresh_sets) device_.DestroyBindingSet(set);
       if (registry_ && new_slot != BindlessRegistry::kInvalidIndex) {
         registry_->ReleaseTexture(new_slot);
       }
@@ -1286,7 +1286,7 @@ bool MaterialSystem::is_normal_model_space(u64 material_hash) const {
   return normal_model_space_.find(material_hash) != nullptr;
 }
 
-BindingSetHandle MaterialSystem::set(u64 material_hash) const {
+gpu::BindingSetHandle MaterialSystem::set(u64 material_hash) const {
   if (material_hash != 0) {
     if (const u32* index = sets_.find(material_hash)) return material_records_[*index].set;
   }
@@ -1304,7 +1304,7 @@ MaterialSystem::~MaterialSystem() {
   device_.DestroyImage(flat_normal_);
   device_.DestroyImage(black_);
   if (staging_bytes_) device_.DestroyBuffer(staging_);
-  for (GpuBuffer& buffer : param_buffers_) device_.DestroyBuffer(buffer);
+  for (gpu::GpuBuffer& buffer : param_buffers_) device_.DestroyBuffer(buffer);
   for (MaterialRuntime& runtime : material_records_) device_.DestroyBindingSet(runtime.set);
   if (default_set_) device_.DestroyBindingSet(default_set_);
   if (set_layout_) device_.DestroyBindingLayout(set_layout_);

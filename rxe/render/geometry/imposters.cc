@@ -56,84 +56,84 @@ Vec3 HemiOctDecode(f32 u, f32 v) {
 
 }  // namespace
 
-bool ImposterPass::Initialize(Device& device, Format color_format, Format depth_format) {
+bool ImposterPass::Initialize(gpu::Device& device, gpu::Format color_format, gpu::Format depth_format) {
   bake_pipeline_ = device.CreateGraphicsPipeline({
       .vertex = RX_SHADER(k_imposter_bake_vs_hlsl),
       .fragment = RX_SHADER(k_imposter_bake_ps_hlsl),
       .vertex_buffers = {{.stride = sizeof(asset::Vertex),
-                          .attributes = {{0, Format::kRGB32Float, 0},
-                                         {1, Format::kRGB32Float, 12},
-                                         {2, Format::kRGBA32Float, 24},
-                                         {3, Format::kRG32Float, 40},
-                                         {4, Format::kRGBA8Unorm, 48}}}},
-      .raster = {.cull = CullMode::kNone},  // thin foliage bakes double-sided
+                          .attributes = {{0, gpu::Format::kRGB32Float, 0},
+                                         {1, gpu::Format::kRGB32Float, 12},
+                                         {2, gpu::Format::kRGBA32Float, 24},
+                                         {3, gpu::Format::kRG32Float, 40},
+                                         {4, gpu::Format::kRGBA8Unorm, 48}}}},
+      .raster = {.cull = gpu::CullMode::kNone},  // thin foliage bakes double-sided
       // Orthographic() is forward-z (near = 0): kLess + clear 1, like the csm.
-      .depth = {.test = true, .write = true, .compare = CompareOp::kLess,
-                .format = Format::kD32Float},
-      .color_formats = {Format::kRGBA8Unorm, Format::kRGBA8Unorm},
-      .blend = {BlendMode::kOpaque, BlendMode::kOpaque},
-      .sets = {{.slots = {{0, BindingType::kCombinedTextureSampler}}}},
-      .push_constant_size = PushSize<BakePush>(),
+      .depth = {.test = true, .write = true, .compare = gpu::CompareOp::kLess,
+                .format = gpu::Format::kD32Float},
+      .color_formats = {gpu::Format::kRGBA8Unorm, gpu::Format::kRGBA8Unorm},
+      .blend = {gpu::BlendMode::kOpaque, gpu::BlendMode::kOpaque},
+      .sets = {{.slots = {{0, gpu::BindingType::kCombinedTextureSampler}}}},
+      .push_constant_size = gpu::PushSize<BakePush>(),
       .debug_name = "imposter_bake",
   });
   draw_pipeline_ = device.CreateGraphicsPipeline({
       .vertex = RX_SHADER(k_imposter_vs_hlsl),
       .fragment = RX_SHADER(k_imposter_ps_hlsl),
-      .topology = PrimitiveTopology::kTriangleStrip,
-      .raster = {.cull = CullMode::kNone},
-      .depth = {.test = true, .write = true, .compare = CompareOp::kGreaterEqual,
+      .topology = gpu::PrimitiveTopology::kTriangleStrip,
+      .raster = {.cull = gpu::CullMode::kNone},
+      .depth = {.test = true, .write = true, .compare = gpu::CompareOp::kGreaterEqual,
                 .format = depth_format},
       .color_formats = {color_format},
-      .sets = {{.slots = {{0, BindingType::kStorageBuffer},
-                          {1, BindingType::kCombinedTextureSampler},
-                          {2, BindingType::kCombinedTextureSampler},
-                          {3, BindingType::kStorageBuffer}}}},
-      .push_constant_size = PushSize<DrawPush>(),
+      .sets = {{.slots = {{0, gpu::BindingType::kStorageBuffer},
+                          {1, gpu::BindingType::kCombinedTextureSampler},
+                          {2, gpu::BindingType::kCombinedTextureSampler},
+                          {3, gpu::BindingType::kStorageBuffer}}}},
+      .push_constant_size = gpu::PushSize<DrawPush>(),
       .debug_name = "imposter_draw",
   });
   if (!bake_pipeline_ || !draw_pipeline_) {
     RX_ERROR("imposter pipeline creation failed");
     return false;
   }
-  sampler_ = device.GetSampler({.min_filter = Filter::kLinear,
-                                .mag_filter = Filter::kLinear,
-                                .mip_filter = Filter::kLinear,
-                                .address_u = AddressMode::kClampToEdge,
-                                .address_v = AddressMode::kClampToEdge});
+  sampler_ = device.GetSampler({.min_filter = gpu::Filter::kLinear,
+                                .mag_filter = gpu::Filter::kLinear,
+                                .mip_filter = gpu::Filter::kLinear,
+                                .address_u = gpu::AddressMode::kClampToEdge,
+                                .address_v = gpu::AddressMode::kClampToEdge});
 
   // The bake pipeline always samples a base-colour map, so a submesh that has
   // none needs something bound: white leaves the vertex-colour branch alone.
-  white_ = device.CreateImage2D(Format::kRGBA8Unorm, {1, 1},
-                                kTextureUsageSampled | kTextureUsageTransferDst);
+  white_ = device.CreateImage2D(gpu::Format::kRGBA8Unorm, {1, 1},
+                                gpu::kTextureUsageSampled | gpu::kTextureUsageTransferDst);
   if (!white_) return false;
   const u8 pixel[4] = {255, 255, 255, 255};
-  GpuBuffer staging = device.CreateBufferWithData(Span(pixel, sizeof(pixel)),
-                                                  kBufferUsageTransferSrc);
-  device.ImmediateSubmit([&](CommandList& cmd) {
-    TextureBarrier to_dst[1] = {
-        Transition(white_, ResourceState::kUndefined, ResourceState::kCopyDst)};
+  gpu::GpuBuffer staging = device.CreateBufferWithData(Span(pixel, sizeof(pixel)),
+                                                  gpu::kBufferUsageTransferSrc);
+  device.ImmediateSubmit([&](gpu::CommandList& cmd) {
+    gpu::TextureBarrier to_dst[1] = {
+        gpu::Transition(white_, gpu::ResourceState::kUndefined, gpu::ResourceState::kCopyDst)};
     cmd.TextureBarriers(to_dst);
-    BufferTextureCopy copy;
+    gpu::BufferTextureCopy copy;
     copy.extent = {1, 1};
     cmd.CopyBufferToTexture(staging, white_, base::Span(&copy, 1));
-    TextureBarrier to_read[1] = {Transition(white_, ResourceState::kCopyDst,
-                                            ResourceState::kShaderReadFragment)};
+    gpu::TextureBarrier to_read[1] = {gpu::Transition(white_, gpu::ResourceState::kCopyDst,
+                                            gpu::ResourceState::kShaderReadFragment)};
     cmd.TextureBarriers(to_read);
   });
   device.DestroyBuffer(staging);
   return true;
 }
 
-void ImposterPass::Destroy(Device& device) {
-  for (PipelineHandle* p : {&bake_pipeline_, &draw_pipeline_}) {
+void ImposterPass::Destroy(gpu::Device& device) {
+  for (gpu::PipelineHandle* p : {&bake_pipeline_, &draw_pipeline_}) {
     if (*p) device.DestroyPipeline(*p);
     *p = {};
   }
-  for (GpuImage* img : {&albedo_atlas_, &normal_atlas_, &white_}) {
+  for (gpu::GpuImage* img : {&albedo_atlas_, &normal_atlas_, &white_}) {
     if (*img) device.DestroyImage(*img);
     *img = {};
   }
-  for (GpuBuffer* buf : {&instances_, &mesh_params_}) {
+  for (gpu::GpuBuffer* buf : {&instances_, &mesh_params_}) {
     if (*buf) device.DestroyBuffer(*buf);
     *buf = {};
   }
@@ -141,7 +141,7 @@ void ImposterPass::Destroy(Device& device) {
   instance_count_ = 0;
 }
 
-u32 ImposterPass::Bake(Device& device, const asset::Mesh& mesh,
+u32 ImposterPass::Bake(gpu::Device& device, const asset::Mesh& mesh,
                        base::Span<const BakeMaterial> materials) {
   if (!bake_pipeline_ || mesh.lods.empty()) return kNoMesh;
   if (mesh_count_ >= kMaxMeshes) {
@@ -167,55 +167,55 @@ u32 ImposterPass::Bake(Device& device, const asset::Mesh& mesh,
 
   if (first) {
     albedo_atlas_ = device.CreateImage2D(
-        Format::kRGBA8Unorm, {kAtlas, kAtlas},
-        kTextureUsageSampled | kTextureUsageColorTarget | kTextureUsageTransferSrc |
-            kTextureUsageTransferDst,
+        gpu::Format::kRGBA8Unorm, {kAtlas, kAtlas},
+        gpu::kTextureUsageSampled | gpu::kTextureUsageColorTarget | gpu::kTextureUsageTransferSrc |
+            gpu::kTextureUsageTransferDst,
         kAtlasMips);
     normal_atlas_ = device.CreateImage2D(
-        Format::kRGBA8Unorm, {kAtlas, kAtlas},
-        kTextureUsageSampled | kTextureUsageColorTarget | kTextureUsageTransferSrc |
-            kTextureUsageTransferDst,
+        gpu::Format::kRGBA8Unorm, {kAtlas, kAtlas},
+        gpu::kTextureUsageSampled | gpu::kTextureUsageColorTarget | gpu::kTextureUsageTransferSrc |
+            gpu::kTextureUsageTransferDst,
         kAtlasMips);
   }
   if (!albedo_atlas_ || !normal_atlas_) return kNoMesh;
   // Only live for this bake: a full-atlas depth buffer is 16 MB and nothing
   // after the last bake reads it.
-  GpuImage bake_depth = device.CreateImage2D(Format::kD32Float, {kAtlas, kAtlas},
-                                             kTextureUsageDepthTarget);
+  gpu::GpuImage bake_depth = device.CreateImage2D(gpu::Format::kD32Float, {kAtlas, kAtlas},
+                                             gpu::kTextureUsageDepthTarget);
   if (!bake_depth) return kNoMesh;
 
-  GpuBuffer vertices = device.CreateBufferWithData(
+  gpu::GpuBuffer vertices = device.CreateBufferWithData(
       Span(lod.vertices.data(), lod.vertices.size() * sizeof(asset::Vertex)),
-      kBufferUsageVertex);
-  GpuBuffer indices = device.CreateBufferWithData(
-      Span(lod.indices.data(), lod.indices.size() * sizeof(u32)), kBufferUsageIndex);
+      gpu::kBufferUsageVertex);
+  gpu::GpuBuffer indices = device.CreateBufferWithData(
+      Span(lod.indices.data(), lod.indices.size() * sizeof(u32)), gpu::kBufferUsageIndex);
 
   const u32 tile_x = (slot % kMeshGrid) * kTile;
   const u32 tile_y = (slot / kMeshGrid) * kTile;
 
-  device.ImmediateSubmit([&](CommandList& cmd) {
+  device.ImmediateSubmit([&](gpu::CommandList& cmd) {
     // The first bake clears the whole atlas, so every later bake loads: the
     // tiles already baked have to survive, and an untouched tile keeps the
     // alpha 0 that first clear left.
-    const ResourceState before =
-        first ? ResourceState::kUndefined : ResourceState::kShaderReadFragment;
-    TextureBarrier to_target[2] = {
-        Transition(albedo_atlas_, before, ResourceState::kColorTarget),
-        Transition(normal_atlas_, before, ResourceState::kColorTarget)};
+    const gpu::ResourceState before =
+        first ? gpu::ResourceState::kUndefined : gpu::ResourceState::kShaderReadFragment;
+    gpu::TextureBarrier to_target[2] = {
+        gpu::Transition(albedo_atlas_, before, gpu::ResourceState::kColorTarget),
+        gpu::Transition(normal_atlas_, before, gpu::ResourceState::kColorTarget)};
     cmd.TextureBarriers(to_target);
-    TextureBarrier depth_target[1] = {
-        Transition(bake_depth, ResourceState::kUndefined, ResourceState::kDepthTarget)};
+    gpu::TextureBarrier depth_target[1] = {
+        gpu::Transition(bake_depth, gpu::ResourceState::kUndefined, gpu::ResourceState::kDepthTarget)};
     cmd.TextureBarriers(depth_target);
 
-    const LoadOp load = first ? LoadOp::kClear : LoadOp::kLoad;
-    ColorAttachment colors[2];
+    const gpu::LoadOp load = first ? gpu::LoadOp::kClear : gpu::LoadOp::kLoad;
+    gpu::ColorAttachment colors[2];
     colors[0] = {.view = albedo_atlas_.view, .load = load, .clear = {0, 0, 0, 0}};
     colors[1] = {.view = normal_atlas_.view, .load = load, .clear = {0.5f, 1, 0.5f, 0}};
-    DepthAttachment depth{.view = bake_depth.view, .load = LoadOp::kClear, .clear = 1.0f};
+    gpu::DepthAttachment depth{.view = bake_depth.view, .load = gpu::LoadOp::kClear, .clear = 1.0f};
     cmd.BeginRendering({.extent = {kAtlas, kAtlas}, .colors = base::Span(colors, 2), .depth = &depth});
     cmd.BindPipeline(bake_pipeline_);
     cmd.BindVertexBuffer(0, vertices, 0);
-    cmd.BindIndexBuffer(indices, 0, IndexType::kUint32);
+    cmd.BindIndexBuffer(indices, 0, gpu::IndexType::kUint32);
     for (u32 j = 0; j < kGrid; ++j) {
       for (u32 i = 0; i < kGrid; ++i) {
         Vec3 dir = HemiOctDecode((i + 0.5f) / kGrid, (j + 0.5f) / kGrid);
@@ -232,12 +232,12 @@ u32 ImposterPass::Bake(Device& device, const asset::Mesh& mesh,
         const u32 draws = rx::Max<u32>(1, static_cast<u32>(lod.submeshes.size()));
         for (u32 s = 0; s < draws; ++s) {
           const BakeMaterial material = s < materials.size() ? materials[s] : BakeMaterial{};
-          const GpuImage& albedo = material.base_color ? *material.base_color : white_;
+          const gpu::GpuImage& albedo = material.base_color ? *material.base_color : white_;
           BakePush push{};
           push.view_proj = proj * view;
           push.alpha_cutoff = material.alpha_cutoff;
           push.textured = material.base_color ? 1.0f : 0.0f;
-          cmd.BindTransient(0, {Bind::Combined(0, albedo.view, sampler_)});
+          cmd.BindTransient(0, {gpu::Bind::Combined(0, albedo.view, sampler_)});
           cmd.Push(push);
           // A mesh with no submeshes is one implicit range over every index.
           if (lod.submeshes.empty()) {
@@ -251,31 +251,31 @@ u32 ImposterPass::Bake(Device& device, const asset::Mesh& mesh,
     cmd.EndRendering();
 
     // Mip chain: blit each level down, then settle everything shader-read.
-    for (GpuImage* atlas : {&albedo_atlas_, &normal_atlas_}) {
-      TextureBarrier to_src[1] = {{.texture = atlas->handle,
-                                   .before = ResourceState::kColorTarget,
-                                   .after = ResourceState::kCopySrc,
+    for (gpu::GpuImage* atlas : {&albedo_atlas_, &normal_atlas_}) {
+      gpu::TextureBarrier to_src[1] = {{.texture = atlas->handle,
+                                   .before = gpu::ResourceState::kColorTarget,
+                                   .after = gpu::ResourceState::kCopySrc,
                                    .base_mip = 0,
                                    .mip_count = 1}};
       cmd.TextureBarriers(to_src);
       for (u32 mip = 1; mip < kAtlasMips; ++mip) {
-        TextureBarrier to_dst[1] = {{.texture = atlas->handle,
-                                     .before = ResourceState::kUndefined,
-                                     .after = ResourceState::kCopyDst,
+        gpu::TextureBarrier to_dst[1] = {{.texture = atlas->handle,
+                                     .before = gpu::ResourceState::kUndefined,
+                                     .after = gpu::ResourceState::kCopyDst,
                                      .base_mip = mip,
                                      .mip_count = 1}};
         cmd.TextureBarriers(to_dst);
         cmd.BlitMip(*atlas, mip - 1, {kAtlas >> (mip - 1), kAtlas >> (mip - 1)}, mip,
                     {kAtlas >> mip, kAtlas >> mip});
-        TextureBarrier next_src[1] = {{.texture = atlas->handle,
-                                       .before = ResourceState::kCopyDst,
-                                       .after = ResourceState::kCopySrc,
+        gpu::TextureBarrier next_src[1] = {{.texture = atlas->handle,
+                                       .before = gpu::ResourceState::kCopyDst,
+                                       .after = gpu::ResourceState::kCopySrc,
                                        .base_mip = mip,
                                        .mip_count = 1}};
         cmd.TextureBarriers(next_src);
       }
-      TextureBarrier to_read[1] = {Transition(*atlas, ResourceState::kCopySrc,
-                                              ResourceState::kShaderReadFragment)};
+      gpu::TextureBarrier to_read[1] = {gpu::Transition(*atlas, gpu::ResourceState::kCopySrc,
+                                              gpu::ResourceState::kShaderReadFragment)};
       cmd.TextureBarriers(to_read);
     }
   });
@@ -292,21 +292,21 @@ u32 ImposterPass::Bake(Device& device, const asset::Mesh& mesh,
 
   // RX_IMPOSTER_DUMP=<path.ppm> writes the baked albedo atlas for inspection.
   if (const char* dump = ::getenv("RX_IMPOSTER_DUMP")) {
-    GpuBuffer readback = device.CreateBuffer(static_cast<u64>(kAtlas) * kAtlas * 4,
-                                             kBufferUsageTransferDst, true);
-    device.ImmediateSubmit([&](CommandList& cmd) {
-      TextureBarrier to_src[1] = {{.texture = albedo_atlas_.handle,
-                                   .before = ResourceState::kShaderReadFragment,
-                                   .after = ResourceState::kCopySrc,
+    gpu::GpuBuffer readback = device.CreateBuffer(static_cast<u64>(kAtlas) * kAtlas * 4,
+                                             gpu::kBufferUsageTransferDst, true);
+    device.ImmediateSubmit([&](gpu::CommandList& cmd) {
+      gpu::TextureBarrier to_src[1] = {{.texture = albedo_atlas_.handle,
+                                   .before = gpu::ResourceState::kShaderReadFragment,
+                                   .after = gpu::ResourceState::kCopySrc,
                                    .base_mip = 0,
                                    .mip_count = 1}};
       cmd.TextureBarriers(to_src);
-      BufferTextureCopy copy;
+      gpu::BufferTextureCopy copy;
       copy.extent = {kAtlas, kAtlas};
       cmd.CopyTextureToBuffer(albedo_atlas_, readback, copy);
-      TextureBarrier back[1] = {{.texture = albedo_atlas_.handle,
-                                 .before = ResourceState::kCopySrc,
-                                 .after = ResourceState::kShaderReadFragment,
+      gpu::TextureBarrier back[1] = {{.texture = albedo_atlas_.handle,
+                                 .before = gpu::ResourceState::kCopySrc,
+                                 .after = gpu::ResourceState::kShaderReadFragment,
                                  .base_mip = 0,
                                  .mip_count = 1}};
       cmd.TextureBarriers(back);
@@ -328,13 +328,13 @@ u32 ImposterPass::Bake(Device& device, const asset::Mesh& mesh,
   return slot;
 }
 
-void ImposterPass::UploadMeshParams(Device& device) {
+void ImposterPass::UploadMeshParams(gpu::Device& device) {
   if (mesh_params_) device.DestroyBufferDeferred(mesh_params_);
   mesh_params_ = device.CreateBufferWithData(
-      Span(meshes_, mesh_count_ * sizeof(MeshParams)), kBufferUsageStorage);
+      Span(meshes_, mesh_count_ * sizeof(MeshParams)), gpu::kBufferUsageStorage);
 }
 
-void ImposterPass::SetInstances(Device& device, base::Span<const Instance> instances) {
+void ImposterPass::SetInstances(gpu::Device& device, base::Span<const Instance> instances) {
   // Deferred: the split is rebuilt as the camera moves, so the buffer this
   // replaces may still be read by a submitted frame.
   if (instances_) device.DestroyBufferDeferred(instances_);
@@ -342,11 +342,11 @@ void ImposterPass::SetInstances(Device& device, base::Span<const Instance> insta
   instance_count_ = static_cast<u32>(instances.size());
   if (instance_count_ == 0) return;
   instances_ = device.CreateBufferWithData(
-      Span(instances.data(), instances.size() * sizeof(Instance)), kBufferUsageStorage);
+      Span(instances.data(), instances.size() * sizeof(Instance)), gpu::kBufferUsageStorage);
 }
 
 void ImposterPass::AddToGraph(RenderGraph& graph, ResourceHandle color, ResourceHandle depth,
-                              Extent2D extent, const Frame& frame) {
+                              gpu::Extent2D extent, const Frame& frame) {
   if (!active() || !instances_ || !mesh_params_) return;
   graph.AddPass(
       "imposters",
@@ -372,14 +372,14 @@ void ImposterPass::AddToGraph(RenderGraph& graph, ResourceHandle color, Resource
         push.grid = static_cast<f32>(kGrid);
         push.tile_scale = 1.0f / static_cast<f32>(kMeshGrid);
 
-        ColorAttachment att{.view = ctx.graph->image(color).view, .load = LoadOp::kLoad};
-        DepthAttachment depth_att{.view = ctx.graph->image(depth).view, .load = LoadOp::kLoad};
+        gpu::ColorAttachment att{.view = ctx.graph->image(color).view, .load = gpu::LoadOp::kLoad};
+        gpu::DepthAttachment depth_att{.view = ctx.graph->image(depth).view, .load = gpu::LoadOp::kLoad};
         ctx.cmd->BeginRendering({.extent = extent, .colors = base::Span(&att, 1), .depth = &depth_att});
         ctx.cmd->BindPipeline(draw_pipeline_);
-        ctx.cmd->BindTransient(0, {Bind::StorageBuffer(0, instances_, 0, instances_.size),
-                                   Bind::Combined(1, albedo_atlas_.view, sampler_),
-                                   Bind::Combined(2, normal_atlas_.view, sampler_),
-                                   Bind::StorageBuffer(3, mesh_params_, 0, mesh_params_.size)});
+        ctx.cmd->BindTransient(0, {gpu::Bind::StorageBuffer(0, instances_, 0, instances_.size),
+                                   gpu::Bind::Combined(1, albedo_atlas_.view, sampler_),
+                                   gpu::Bind::Combined(2, normal_atlas_.view, sampler_),
+                                   gpu::Bind::StorageBuffer(3, mesh_params_, 0, mesh_params_.size)});
         ctx.cmd->Push(push);
         ctx.cmd->Draw(4, instance_count_, 0, 0);
         ctx.cmd->EndRendering();

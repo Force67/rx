@@ -45,7 +45,7 @@ class RX_NET_VIZ_EXPORT BubbleVisualizer {
   bool BuildPipeline(const render::SceneHookContext& ctx);
 
   render::Renderer* renderer_ = nullptr;
-  render::Device* device_ = nullptr;
+  gpu::Device* device_ = nullptr;
   VkDevice vk_ = VK_NULL_HANDLE;
   VkPipelineLayout layout_ = VK_NULL_HANDLE;
   VkPipeline pipeline_ = VK_NULL_HANDLE;

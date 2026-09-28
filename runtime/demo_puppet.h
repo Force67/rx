@@ -37,7 +37,7 @@ class PuppetDemo {
   // gym's input route, but the puppet keeps the free-fly camera). 1 = small
   // push, 2 = big push (controlled fall), 3 = reset. The actual impulse/reset is
   // deferred to the next fixed tick so it lands before the physics step.
-  void OnInput(const InputState& input, bool allow_keyboard);
+  void OnInput(const ui::InputState& input, bool allow_keyboard);
 
  private:
   void BuildArena();

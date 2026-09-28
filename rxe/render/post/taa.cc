@@ -7,7 +7,7 @@
 namespace rx::render {
 namespace {
 
-constexpr Format kHistoryFormat = Format::kRGBA16Float;
+constexpr gpu::Format kHistoryFormat = gpu::Format::kRGBA16Float;
 
 struct TaaPushConstants {
   f32 inv_size[2];
@@ -35,19 +35,19 @@ void JitterSequence::Sample(u32 frame_index, u32 sample_count, f32* out_x, f32* 
   *out_y = Halton(index, 3) - 0.5f;
 }
 
-bool TaaPass::Initialize(Device& device) {
-  sampler_ = device.GetSampler({.address_u = AddressMode::kClampToEdge,
-                                .address_v = AddressMode::kClampToEdge,
-                                .address_w = AddressMode::kClampToEdge});
+bool TaaPass::Initialize(gpu::Device& device) {
+  sampler_ = device.GetSampler({.address_u = gpu::AddressMode::kClampToEdge,
+                                .address_v = gpu::AddressMode::kClampToEdge,
+                                .address_w = gpu::AddressMode::kClampToEdge});
 
   pipeline_ = device.CreateComputePipeline({
       .shader = RX_SHADER(k_taa_cs_hlsl),
-      .sets = {{.slots = {{0, BindingType::kStorageImage},
-                          {1, BindingType::kCombinedTextureSampler},
-                          {2, BindingType::kCombinedTextureSampler},
-                          {3, BindingType::kCombinedTextureSampler},
-                          {4, BindingType::kStorageImage}}}},
-      .push_constant_size = PushSize<TaaPushConstants>(),
+      .sets = {{.slots = {{0, gpu::BindingType::kStorageImage},
+                          {1, gpu::BindingType::kCombinedTextureSampler},
+                          {2, gpu::BindingType::kCombinedTextureSampler},
+                          {3, gpu::BindingType::kCombinedTextureSampler},
+                          {4, gpu::BindingType::kStorageImage}}}},
+      .push_constant_size = gpu::PushSize<TaaPushConstants>(),
       .debug_name = "taa",
   });
   if (!pipeline_) {
@@ -57,19 +57,19 @@ bool TaaPass::Initialize(Device& device) {
   return true;
 }
 
-void TaaPass::Resize(Device& device, Extent2D extent) {
+void TaaPass::Resize(gpu::Device& device, gpu::Extent2D extent) {
   for (u32 i = 0; i < 2; ++i) {
     if (history_[i]) device.DestroyImage(history_[i]);
     history_[i] = device.CreateImage2D(kHistoryFormat, extent,
-                                       kTextureUsageSampled | kTextureUsageStorage);
-    history_states_[i] = ResourceState::kUndefined;
+                                       gpu::kTextureUsageSampled | gpu::kTextureUsageStorage);
+    history_states_[i] = gpu::ResourceState::kUndefined;
   }
   extent_ = extent;
   history_valid_ = false;
 }
 
-void TaaPass::Destroy(Device& device) {
-  for (GpuImage& image : history_) {
+void TaaPass::Destroy(gpu::Device& device) {
+  for (gpu::GpuImage& image : history_) {
     if (image) device.DestroyImage(image);
   }
   device.DestroyPipeline(pipeline_);
@@ -96,7 +96,7 @@ ResourceHandle TaaPass::AddToGraph(RenderGraph& graph, ResourceHandle color,
   ResourceHandle debug_target = kInvalidResource;
   if (debug_disocclusion) {
     debug_target = graph.CreateTexture({.name = "taa_disocclusion",
-                                        .format = Format::kRGBA16Float,
+                                        .format = gpu::Format::kRGBA16Float,
                                         .width = extent_.width,
                                         .height = extent_.height});
   }
@@ -112,7 +112,7 @@ ResourceHandle TaaPass::AddToGraph(RenderGraph& graph, ResourceHandle color,
       },
       [this, color, motion, history, resolved, reset, debug_mode,
        debug_target](PassContext& ctx) {
-        TextureView debug_view =
+        gpu::TextureView debug_view =
             debug_target != kInvalidResource ? ctx.graph->image(debug_target).view
                                              : ctx.graph->image(resolved).view;
 
@@ -125,11 +125,11 @@ ResourceHandle TaaPass::AddToGraph(RenderGraph& graph, ResourceHandle color,
 
         ctx.cmd->BindPipeline(pipeline_);
         ctx.cmd->BindTransient(
-            0, {Bind::Storage(0, ctx.graph->image(resolved)),
-                Bind::Combined(1, ctx.graph->image(color).view, sampler_),
-                Bind::Combined(2, ctx.graph->image(history).view, sampler_),
-                Bind::Combined(3, ctx.graph->image(motion).view, sampler_),
-                Bind::StorageView(4, debug_view)});
+            0, {gpu::Bind::Storage(0, ctx.graph->image(resolved)),
+                gpu::Bind::Combined(1, ctx.graph->image(color).view, sampler_),
+                gpu::Bind::Combined(2, ctx.graph->image(history).view, sampler_),
+                gpu::Bind::Combined(3, ctx.graph->image(motion).view, sampler_),
+                gpu::Bind::StorageView(4, debug_view)});
         ctx.cmd->Push(push);
         ctx.cmd->Dispatch2D(extent_);
       });

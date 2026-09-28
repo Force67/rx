@@ -36,28 +36,28 @@ struct ResolvePush {
 
 }  // namespace
 
-bool ExposurePass::Initialize(Device& device) {
+bool ExposurePass::Initialize(gpu::Device& device) {
   device_ = &device;
-  sampler_ = device.GetSampler({.min_filter = Filter::kNearest, .mag_filter = Filter::kNearest});
+  sampler_ = device.GetSampler({.min_filter = gpu::Filter::kNearest, .mag_filter = gpu::Filter::kNearest});
 
   histogram_ =
-      device.CreateBuffer(256 * sizeof(u32), kBufferUsageStorage | kBufferUsageTransferDst);
+      device.CreateBuffer(256 * sizeof(u32), gpu::kBufferUsageStorage | gpu::kBufferUsageTransferDst);
   exposure_ =
-      device.CreateBuffer(2 * sizeof(f32), kBufferUsageStorage | kBufferUsageTransferDst);
+      device.CreateBuffer(2 * sizeof(f32), gpu::kBufferUsageStorage | gpu::kBufferUsageTransferDst);
   if (!histogram_ || !exposure_) return false;
 
   histogram_pipeline_ = device.CreateComputePipeline({
       .shader = RX_SHADER(k_histogram_cs_hlsl),
-      .sets = {{.slots = {{0, BindingType::kCombinedTextureSampler},
-                          {1, BindingType::kStorageBuffer}}}},
-      .push_constant_size = PushSize<HistogramPush>(),
+      .sets = {{.slots = {{0, gpu::BindingType::kCombinedTextureSampler},
+                          {1, gpu::BindingType::kStorageBuffer}}}},
+      .push_constant_size = gpu::PushSize<HistogramPush>(),
       .debug_name = "exposure_histogram",
   });
   resolve_pipeline_ = device.CreateComputePipeline({
       .shader = RX_SHADER(k_exposure_resolve_cs_hlsl),
-      .sets = {{.slots = {{0, BindingType::kStorageBuffer},
-                          {1, BindingType::kStorageBuffer}}}},
-      .push_constant_size = PushSize<ResolvePush>(),
+      .sets = {{.slots = {{0, gpu::BindingType::kStorageBuffer},
+                          {1, gpu::BindingType::kStorageBuffer}}}},
+      .push_constant_size = gpu::PushSize<ResolvePush>(),
       .debug_name = "exposure_resolve",
   });
   if (!histogram_pipeline_ || !resolve_pipeline_) {
@@ -67,7 +67,7 @@ bool ExposurePass::Initialize(Device& device) {
   return true;
 }
 
-void ExposurePass::Destroy(Device& device) {
+void ExposurePass::Destroy(gpu::Device& device) {
   device.DestroyBuffer(histogram_);
   device.DestroyBuffer(exposure_);
   device.DestroyPipeline(histogram_pipeline_);
@@ -97,9 +97,9 @@ void ExposurePass::AddToGraph(RenderGraph& graph, ResourceHandle input, u32 widt
         // writes + the tonemap fragment read -> this frame's compute.
         auto buffer_barrier = [&] {
           if (first) {
-            ctx.cmd->MemoryBarrier(BarrierScope::kTransferWrite, BarrierScope::kComputeRead);
+            ctx.cmd->MemoryBarrier(gpu::BarrierScope::kTransferWrite, gpu::BarrierScope::kComputeRead);
           } else {
-            ctx.cmd->MemoryBarrier(BarrierScope::kAllCommands, BarrierScope::kComputeRead);
+            ctx.cmd->MemoryBarrier(gpu::BarrierScope::kAllCommands, gpu::BarrierScope::kComputeRead);
           }
         };
         buffer_barrier();
@@ -112,8 +112,8 @@ void ExposurePass::AddToGraph(RenderGraph& graph, ResourceHandle input, u32 widt
         histogram_push.height = height;
         ctx.cmd->BindPipeline(histogram_pipeline_);
         ctx.cmd->BindTransient(
-            0, {Bind::Combined(0, ctx.graph->image(input).view, sampler_),
-                Bind::StorageBuffer(1, histogram_, 0, histogram_.size)});
+            0, {gpu::Bind::Combined(0, ctx.graph->image(input).view, sampler_),
+                gpu::Bind::StorageBuffer(1, histogram_, 0, histogram_.size)});
         ctx.cmd->Push(histogram_push);
         ctx.cmd->Dispatch2D({width, height}, 16);
 
@@ -134,13 +134,13 @@ void ExposurePass::AddToGraph(RenderGraph& graph, ResourceHandle input, u32 widt
         resolve_push.low_percentile = 0.6f;
         resolve_push.high_percentile = 0.97f;
         ctx.cmd->BindPipeline(resolve_pipeline_);
-        ctx.cmd->BindTransient(0, {Bind::StorageBuffer(0, histogram_, 0, histogram_.size),
-                                   Bind::StorageBuffer(1, exposure_, 0, exposure_.size)});
+        ctx.cmd->BindTransient(0, {gpu::Bind::StorageBuffer(0, histogram_, 0, histogram_.size),
+                                   gpu::Bind::StorageBuffer(1, exposure_, 0, exposure_.size)});
         ctx.cmd->Push(resolve_push);
         ctx.cmd->Dispatch(1, 1, 1);
 
         // Visible to the tonemap fragment shader.
-        ctx.cmd->MemoryBarrier(BarrierScope::kComputeWrite, BarrierScope::kGraphicsRead);
+        ctx.cmd->MemoryBarrier(gpu::BarrierScope::kComputeWrite, gpu::BarrierScope::kGraphicsRead);
       });
 }
 

@@ -20,7 +20,7 @@
 #include "base/memory/mem_ops.h"
 #include "foundation/build_config/types.h"
 
-namespace rx::render {
+namespace rx::ui {
 
 // The engine's default UI font, in the archive the host mounts at fonts://
 // (asset::MountContent).
@@ -156,6 +156,6 @@ inline ImFont* LoadRxImGuiFont(const void* ttf, size_t size,
   return ImGui::GetIO().Fonts->AddFontFromMemoryTTF(owned, static_cast<int>(size), size_pixels);
 }
 
-}  // namespace rx::render
+}  // namespace rx::ui
 
 #endif  // RX_RENDER_UTIL_IMGUI_THEME_H_

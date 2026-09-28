@@ -25,7 +25,7 @@
 #include "rxe/gpu/rhi/swapchain.h"
 #include "rxe/gpu/rhi/vulkan_interop.h"
 
-namespace rx::render::vk {
+namespace rx::gpu::vk {
 
 // Resolves the promoted-command table VulkanApi() hands out; called once, right
 // after volkLoadDevice, with the api version the device was created at.
@@ -259,14 +259,14 @@ class VulkanSwapchain final : public Swapchain {
 
 class VulkanDevice final : public Device {
  public:
-  static base::UniquePointer<Device> Create(const DeviceDesc& desc, Window& window);
+  static base::UniquePointer<Device> Create(const DeviceDesc& desc, ui::Window& window);
   // Surfaceless device: no window, no surface, no swapchain extension. Same
   // adapter selection, feature enablement and caps as the windowed path.
   static base::UniquePointer<Device> CreateOffscreen(const DeviceDesc& desc);
   ~VulkanDevice() override;
 
   void WaitIdle() override;
-  bool RecreateSurface(Window& window) override;
+  bool RecreateSurface(ui::Window& window) override;
   void DestroySurface() override;
   base::UniquePointer<Swapchain> CreateSwapchain(u32 width, u32 height, bool vsync,
                                              bool hdr) override;
@@ -401,7 +401,7 @@ class VulkanDevice final : public Device {
   // swapchain device extension, and the graphics family is picked without a
   // present-support requirement. Everything else (adapter scoring, feature
   // enablement, caps, queues, resources) is identical.
-  static base::UniquePointer<Device> CreateImpl(const DeviceDesc& desc, Window* window);
+  static base::UniquePointer<Device> CreateImpl(const DeviceDesc& desc, ui::Window* window);
 
   bool InitResources();
   void ShutdownResources();
@@ -577,6 +577,6 @@ class VulkanDevice final : public Device {
   friend class VulkanCommandList;
 };
 
-}  // namespace rx::render::vk
+}  // namespace rx::gpu::vk
 
 #endif  // RX_RENDER_VULKAN_VK_BACKEND_H_

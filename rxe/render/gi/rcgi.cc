@@ -120,8 +120,8 @@ void FrameRotation(u32 frame_index, f32 out_rows[12]) {
 
 }  // namespace
 
-base::UniquePointer<RcgiSystem> RcgiSystem::Create(Device& device, TextureView sky_view,
-                                               SamplerHandle sky_sampler,
+base::UniquePointer<RcgiSystem> RcgiSystem::Create(gpu::Device& device, gpu::TextureView sky_view,
+                                               gpu::SamplerHandle sky_sampler,
                                                BindlessRegistry& bindless, bool rt_available) {
   auto rcgi = base::UniquePointer<RcgiSystem>(new RcgiSystem(device));
   rcgi->sky_view_ = sky_view;
@@ -140,92 +140,92 @@ Vec3 RcgiSystem::SnapOrigin(const Vec3& camera, u32 cascade) const {
 }
 
 bool RcgiSystem::CreateResources() {
-  sampler_ = device_.GetSampler({.mip_filter = Filter::kNearest,
-                                 .address_u = AddressMode::kClampToEdge,
-                                 .address_v = AddressMode::kClampToEdge,
-                                 .address_w = AddressMode::kClampToEdge,
+  sampler_ = device_.GetSampler({.mip_filter = gpu::Filter::kNearest,
+                                 .address_u = gpu::AddressMode::kClampToEdge,
+                                 .address_v = gpu::AddressMode::kClampToEdge,
+                                 .address_w = gpu::AddressMode::kClampToEdge,
                                  .max_lod = 0.0f});
-  linear_sampler_ = device_.GetSampler({.min_filter = Filter::kLinear,
-                                        .mag_filter = Filter::kLinear,
-                                        .mip_filter = Filter::kNearest,
-                                        .address_u = AddressMode::kClampToEdge,
-                                        .address_v = AddressMode::kClampToEdge,
-                                        .address_w = AddressMode::kClampToEdge,
+  linear_sampler_ = device_.GetSampler({.min_filter = gpu::Filter::kLinear,
+                                        .mag_filter = gpu::Filter::kLinear,
+                                        .mip_filter = gpu::Filter::kNearest,
+                                        .address_u = gpu::AddressMode::kClampToEdge,
+                                        .address_v = gpu::AddressMode::kClampToEdge,
+                                        .address_w = gpu::AddressMode::kClampToEdge,
                                         .max_lod = 0.0f});
   if (!sampler_ || !linear_sampler_) return false;
 
   // TransferDst on the atlases so they can be cleared to black at creation: a
   // cascade blends incrementally (one per frame) and cascades not yet blended
   // this session must read as 0, never as undefined image memory.
-  TextureUsageFlags atlas_usage =
-      kTextureUsageSampled | kTextureUsageStorage | kTextureUsageTransferDst;
-  TextureUsageFlags usage = kTextureUsageSampled | kTextureUsageStorage;
+  gpu::TextureUsageFlags atlas_usage =
+      gpu::kTextureUsageSampled | gpu::kTextureUsageStorage | gpu::kTextureUsageTransferDst;
+  gpu::TextureUsageFlags usage = gpu::kTextureUsageSampled | gpu::kTextureUsageStorage;
   irradiance_ =
-      device_.CreateImage2D(Format::kRGBA16Float, {kAtlasWidth, kAtlasHeight}, atlas_usage);
+      device_.CreateImage2D(gpu::Format::kRGBA16Float, {kAtlasWidth, kAtlasHeight}, atlas_usage);
   visibility_ =
-      device_.CreateImage2D(Format::kRGBA16Float, {kAtlasWidth, kAtlasHeight}, atlas_usage);
-  rays_ = device_.CreateImage2D(Format::kRGBA16Float, {kRaysPerProbe, kProbeCount}, usage);
+      device_.CreateImage2D(gpu::Format::kRGBA16Float, {kAtlasWidth, kAtlasHeight}, atlas_usage);
+  rays_ = device_.CreateImage2D(gpu::Format::kRGBA16Float, {kRaysPerProbe, kProbeCount}, usage);
   if (!irradiance_ || !visibility_ || !rays_) return false;
 
   // Clear the atlases to black now (belt and braces alongside the per-cascade
   // valid mask), then settle all three in GENERAL where the passes keep them.
   // rays_ is fully rewritten each frame before it is read, so it only needs the
   // undefined->general settle.
-  device_.ImmediateSubmit([&](CommandList& cmd) {
-    TextureBarrier to_clear[2] = {
-        Transition(irradiance_, ResourceState::kUndefined, ResourceState::kCopyDst),
-        Transition(visibility_, ResourceState::kUndefined, ResourceState::kCopyDst)};
+  device_.ImmediateSubmit([&](gpu::CommandList& cmd) {
+    gpu::TextureBarrier to_clear[2] = {
+        gpu::Transition(irradiance_, gpu::ResourceState::kUndefined, gpu::ResourceState::kCopyDst),
+        gpu::Transition(visibility_, gpu::ResourceState::kUndefined, gpu::ResourceState::kCopyDst)};
     cmd.TextureBarriers(to_clear);
     const f32 black[4] = {0, 0, 0, 0};
     cmd.ClearColor(irradiance_, black);
     cmd.ClearColor(visibility_, black);
-    TextureBarrier to_general[3] = {
-        Transition(irradiance_, ResourceState::kCopyDst, ResourceState::kGeneral),
-        Transition(visibility_, ResourceState::kCopyDst, ResourceState::kGeneral),
-        Transition(rays_, ResourceState::kUndefined, ResourceState::kGeneral)};
+    gpu::TextureBarrier to_general[3] = {
+        gpu::Transition(irradiance_, gpu::ResourceState::kCopyDst, gpu::ResourceState::kGeneral),
+        gpu::Transition(visibility_, gpu::ResourceState::kCopyDst, gpu::ResourceState::kGeneral),
+        gpu::Transition(rays_, gpu::ResourceState::kUndefined, gpu::ResourceState::kGeneral)};
     cmd.TextureBarriers(to_general);
   });
   atlas_initialized_ = true;  // the first-touch transition in AddToGraph is done
 
   // state_ / active_meta_ are FillBuffer-cleared, so they need TRANSFER_DST.
   state_ = device_.CreateBuffer(static_cast<u64>(kHashCapacity) * kEntryStride * sizeof(u32),
-                                kBufferUsageStorage | kBufferUsageTransferDst);
+                                gpu::kBufferUsageStorage | gpu::kBufferUsageTransferDst);
   radiance_ = device_.CreateBuffer(static_cast<u64>(kHashCapacity) * 2 * sizeof(u32),
-                                   kBufferUsageStorage);
+                                   gpu::kBufferUsageStorage);
   active_list_ = device_.CreateBuffer(static_cast<u64>(kActiveCapacity) * sizeof(u32),
-                                      kBufferUsageStorage);
-  active_meta_ = device_.CreateBuffer(4 * sizeof(u32), kBufferUsageStorage | kBufferUsageTransferDst);
+                                      gpu::kBufferUsageStorage);
+  active_meta_ = device_.CreateBuffer(4 * sizeof(u32), gpu::kBufferUsageStorage | gpu::kBufferUsageTransferDst);
   dispatch_args_ =
-      device_.CreateBuffer(4 * sizeof(u32), kBufferUsageStorage | kBufferUsageIndirect);
+      device_.CreateBuffer(4 * sizeof(u32), gpu::kBufferUsageStorage | gpu::kBufferUsageIndirect);
   if (!state_ || !radiance_ || !active_list_ || !active_meta_ || !dispatch_args_) return false;
 
   // Per-probe relocation metadata. FillBuffer-cleared on reset, so needs
   // TRANSFER_DST; zeroed now so an unrelocated read is a no-op (offset 0, not
   // disabled) even before the meta pass first runs.
   probe_meta_ = device_.CreateBuffer(static_cast<u64>(kProbeMetaCount) * 2 * sizeof(u32),
-                                     kBufferUsageStorage | kBufferUsageTransferDst);
+                                     gpu::kBufferUsageStorage | gpu::kBufferUsageTransferDst);
   // Interior volumes: host-visible, updated by SetInteriorVolumes. Zeroed so a
   // stale slot never classifies as inside before the game forwards volumes.
-  for (GpuBuffer& volumes : interior_volumes_) {
+  for (gpu::GpuBuffer& volumes : interior_volumes_) {
     volumes = device_.CreateBuffer(static_cast<u64>(kInteriorVolFloat4s) * 4 * sizeof(f32),
-                                   kBufferUsageStorage, true);
+                                   gpu::kBufferUsageStorage, true);
     if (!volumes.mapped) return false;
     base::MemSet(volumes.mapped, 0,
                 static_cast<size_t>(kInteriorVolFloat4s) * 4 * sizeof(f32));
   }
   if (!probe_meta_) return false;
-  device_.ImmediateSubmit([&](CommandList& cmd) {
+  device_.ImmediateSubmit([&](gpu::CommandList& cmd) {
     cmd.FillBuffer(probe_meta_, 0, probe_meta_.size, 0);
   });
 
-  for (GpuBuffer& b : globals_buffers_) {
-    b = device_.CreateBuffer(sizeof(RcgiGlobals), kBufferUsageUniform, true);
+  for (gpu::GpuBuffer& b : globals_buffers_) {
+    b = device_.CreateBuffer(sizeof(RcgiGlobals), gpu::kBufferUsageUniform, true);
     if (!b.mapped) return false;
   }
   // One per in-flight frame: the gather rewrites it while the previous frame
   // may still be reading its own copy.
-  for (GpuBuffer& b : gather_camera_) {
-    b = device_.CreateBuffer(sizeof(GatherCamera), kBufferUsageUniform, true);
+  for (gpu::GpuBuffer& b : gather_camera_) {
+    b = device_.CreateBuffer(sizeof(GatherCamera), gpu::kBufferUsageUniform, true);
     if (!b.mapped) return false;
   }
   return true;
@@ -235,43 +235,43 @@ bool RcgiSystem::CreatePipelines(bool rt_available) {
   rt_pipelines_ = rt_available;
   // Software SDF-clipmap descriptor set (set 1) shared by both sw variants:
   // {0 sdf globals UBO, 1..3 distance/albedo/emissive Texture3D, 4 sampler}.
-  const PipelineBindings kSdfSet{.slots = {{0, BindingType::kUniformBuffer},
-                                           {1, BindingType::kSampledImage},
-                                           {2, BindingType::kSampledImage},
-                                           {3, BindingType::kSampledImage},
-                                           {4, BindingType::kSampler}}};
+  const gpu::PipelineBindings kSdfSet{.slots = {{0, gpu::BindingType::kUniformBuffer},
+                                           {1, gpu::BindingType::kSampledImage},
+                                           {2, gpu::BindingType::kSampledImage},
+                                           {3, gpu::BindingType::kSampledImage},
+                                           {4, gpu::BindingType::kSampler}}};
   // Software probe trace: hardware set 0 minus the accel-struct slot (1), plus
   // the SDF set. Contains no RayQuery, so it creates on non-ray-query devices.
   probe_trace_sw_pipeline_ = device_.CreateComputePipeline({
       .shader = RX_SHADER(k_rcgi_probe_trace_sw_cs_hlsl),
-      .sets = {{.slots = {{0, BindingType::kStorageImage},
-                          {2, BindingType::kUniformBuffer},
-                          {3, BindingType::kStorageBuffer},
-                          {4, BindingType::kStorageBuffer},
-                          {5, BindingType::kStorageBuffer},
-                          {6, BindingType::kCombinedTextureSampler},
-                          {7, BindingType::kStorageBuffer}}},
+      .sets = {{.slots = {{0, gpu::BindingType::kStorageImage},
+                          {2, gpu::BindingType::kUniformBuffer},
+                          {3, gpu::BindingType::kStorageBuffer},
+                          {4, gpu::BindingType::kStorageBuffer},
+                          {5, gpu::BindingType::kStorageBuffer},
+                          {6, gpu::BindingType::kCombinedTextureSampler},
+                          {7, gpu::BindingType::kStorageBuffer}}},
                kSdfSet},
-      .push_constant_size = PushSize<RotationPush>(),
+      .push_constant_size = gpu::PushSize<RotationPush>(),
       .debug_name = "rcgi_probe_trace_sw",
   });
   // Software cache shade: hardware set 0 minus the accel-struct slot (5), plus
   // the SDF set. No bindless material tables (colour comes from the entry).
   cache_shade_sw_pipeline_ = device_.CreateComputePipeline({
       .shader = RX_SHADER(k_rcgi_cache_shade_sw_cs_hlsl),
-      .sets = {{.slots = {{0, BindingType::kUniformBuffer},
-                          {1, BindingType::kStorageBuffer},
-                          {2, BindingType::kStorageBuffer},
-                          {3, BindingType::kStorageBuffer},
-                          {4, BindingType::kStorageBuffer},
-                          {6, BindingType::kStorageBuffer},
-                          {7, BindingType::kStorageBuffer},
-                          {8, BindingType::kStorageBuffer},
-                          {9, BindingType::kUniformBuffer},
-                          {10, BindingType::kCombinedTextureSampler},
-                          {11, BindingType::kCombinedTextureSampler},
-                          {12, BindingType::kStorageBuffer},
-                          {13, BindingType::kStorageBuffer}}},
+      .sets = {{.slots = {{0, gpu::BindingType::kUniformBuffer},
+                          {1, gpu::BindingType::kStorageBuffer},
+                          {2, gpu::BindingType::kStorageBuffer},
+                          {3, gpu::BindingType::kStorageBuffer},
+                          {4, gpu::BindingType::kStorageBuffer},
+                          {6, gpu::BindingType::kStorageBuffer},
+                          {7, gpu::BindingType::kStorageBuffer},
+                          {8, gpu::BindingType::kStorageBuffer},
+                          {9, gpu::BindingType::kUniformBuffer},
+                          {10, gpu::BindingType::kCombinedTextureSampler},
+                          {11, gpu::BindingType::kCombinedTextureSampler},
+                          {12, gpu::BindingType::kStorageBuffer},
+                          {13, gpu::BindingType::kStorageBuffer}}},
                kSdfSet},
       .push_constant_size = 0,
       .debug_name = "rcgi_cache_shade_sw",
@@ -284,43 +284,43 @@ bool RcgiSystem::CreatePipelines(bool rt_available) {
   if (rt_available) {
   probe_trace_pipeline_ = device_.CreateComputePipeline({
       .shader = RX_SHADER(k_rcgi_probe_trace_cs_hlsl),
-      .sets = {{.slots = {{0, BindingType::kStorageImage},
-                          {1, BindingType::kAccelStruct},
-                          {2, BindingType::kUniformBuffer},
-                          {3, BindingType::kStorageBuffer},
-                          {4, BindingType::kStorageBuffer},
-                          {5, BindingType::kStorageBuffer},
-                          {6, BindingType::kCombinedTextureSampler},
-                          {7, BindingType::kStorageBuffer}}},
+      .sets = {{.slots = {{0, gpu::BindingType::kStorageImage},
+                          {1, gpu::BindingType::kAccelStruct},
+                          {2, gpu::BindingType::kUniformBuffer},
+                          {3, gpu::BindingType::kStorageBuffer},
+                          {4, gpu::BindingType::kStorageBuffer},
+                          {5, gpu::BindingType::kStorageBuffer},
+                          {6, gpu::BindingType::kCombinedTextureSampler},
+                          {7, gpu::BindingType::kStorageBuffer}}},
                {.shared = bindless_->set_layout()}},
-      .push_constant_size = PushSize<RotationPush>(),
+      .push_constant_size = gpu::PushSize<RotationPush>(),
       .debug_name = "rcgi_probe_trace",
   });
   }
   args_pipeline_ = device_.CreateComputePipeline({
       .shader = RX_SHADER(k_rcgi_args_cs_hlsl),
-      .sets = {{.slots = {{0, BindingType::kStorageBuffer},
-                          {1, BindingType::kStorageBuffer}}}},
+      .sets = {{.slots = {{0, gpu::BindingType::kStorageBuffer},
+                          {1, gpu::BindingType::kStorageBuffer}}}},
       .push_constant_size = 0,
       .debug_name = "rcgi_args",
   });
   if (rt_available) {
   cache_shade_pipeline_ = device_.CreateComputePipeline({
       .shader = RX_SHADER(k_rcgi_cache_shade_cs_hlsl),
-      .sets = {{.slots = {{0, BindingType::kUniformBuffer},
-                          {1, BindingType::kStorageBuffer},
-                          {2, BindingType::kStorageBuffer},
-                          {3, BindingType::kStorageBuffer},
-                          {4, BindingType::kStorageBuffer},
-                          {5, BindingType::kAccelStruct},
-                          {6, BindingType::kStorageBuffer},
-                          {7, BindingType::kStorageBuffer},
-                          {8, BindingType::kStorageBuffer},
-                          {9, BindingType::kUniformBuffer},
-                          {10, BindingType::kCombinedTextureSampler},
-                          {11, BindingType::kCombinedTextureSampler},
-                          {12, BindingType::kStorageBuffer},
-                          {13, BindingType::kStorageBuffer}}},
+      .sets = {{.slots = {{0, gpu::BindingType::kUniformBuffer},
+                          {1, gpu::BindingType::kStorageBuffer},
+                          {2, gpu::BindingType::kStorageBuffer},
+                          {3, gpu::BindingType::kStorageBuffer},
+                          {4, gpu::BindingType::kStorageBuffer},
+                          {5, gpu::BindingType::kAccelStruct},
+                          {6, gpu::BindingType::kStorageBuffer},
+                          {7, gpu::BindingType::kStorageBuffer},
+                          {8, gpu::BindingType::kStorageBuffer},
+                          {9, gpu::BindingType::kUniformBuffer},
+                          {10, gpu::BindingType::kCombinedTextureSampler},
+                          {11, gpu::BindingType::kCombinedTextureSampler},
+                          {12, gpu::BindingType::kStorageBuffer},
+                          {13, gpu::BindingType::kStorageBuffer}}},
                {.shared = bindless_->set_layout()}},
       .push_constant_size = 0,
       .debug_name = "rcgi_cache_shade",
@@ -328,42 +328,42 @@ bool RcgiSystem::CreatePipelines(bool rt_available) {
   }
   blend_pipeline_ = device_.CreateComputePipeline({
       .shader = RX_SHADER(k_rcgi_blend_cs_hlsl),
-      .sets = {{.slots = {{0, BindingType::kStorageImage},
-                          {1, BindingType::kCombinedTextureSampler},
-                          {2, BindingType::kUniformBuffer},
-                          {3, BindingType::kStorageBuffer},
-                          {4, BindingType::kStorageBuffer},
-                          {5, BindingType::kStorageBuffer},
-                          {6, BindingType::kCombinedTextureSampler}}}},  // sky (cache-miss fallback)
-      .push_constant_size = PushSize<BlendPush>(),
+      .sets = {{.slots = {{0, gpu::BindingType::kStorageImage},
+                          {1, gpu::BindingType::kCombinedTextureSampler},
+                          {2, gpu::BindingType::kUniformBuffer},
+                          {3, gpu::BindingType::kStorageBuffer},
+                          {4, gpu::BindingType::kStorageBuffer},
+                          {5, gpu::BindingType::kStorageBuffer},
+                          {6, gpu::BindingType::kCombinedTextureSampler}}}},  // sky (cache-miss fallback)
+      .push_constant_size = gpu::PushSize<BlendPush>(),
       .debug_name = "rcgi_blend",
   });
   // Per-probe relocation (item 10): reads this frame's rays, writes probe_meta.
   probe_meta_pipeline_ = device_.CreateComputePipeline({
       .shader = RX_SHADER(k_rcgi_probe_meta_cs_hlsl),
-      .sets = {{.slots = {{0, BindingType::kStorageImage},
-                          {1, BindingType::kUniformBuffer},
-                          {2, BindingType::kStorageBuffer}}}},
-      .push_constant_size = PushSize<MetaPush>(),
+      .sets = {{.slots = {{0, gpu::BindingType::kStorageImage},
+                          {1, gpu::BindingType::kUniformBuffer},
+                          {2, gpu::BindingType::kStorageBuffer}}}},
+      .push_constant_size = gpu::PushSize<MetaPush>(),
       .debug_name = "rcgi_probe_meta",
   });
   border_pipeline_ = device_.CreateComputePipeline({
       .shader = RX_SHADER(k_rcgi_border_cs_hlsl),
-      .sets = {{.slots = {{0, BindingType::kStorageImage}}}},
-      .push_constant_size = PushSize<BorderPush>(),
+      .sets = {{.slots = {{0, gpu::BindingType::kStorageImage}}}},
+      .push_constant_size = gpu::PushSize<BorderPush>(),
       .debug_name = "rcgi_border",
   });
   resolve_pipeline_ = device_.CreateComputePipeline({
       .shader = RX_SHADER(k_rcgi_resolve_cs_hlsl),
-      .sets = {{.slots = {{0, BindingType::kStorageImage},
-                          {1, BindingType::kSampledImage},
-                          {2, BindingType::kSampledImage},
-                          {3, BindingType::kUniformBuffer},
-                          {4, BindingType::kCombinedTextureSampler},
-                          {5, BindingType::kCombinedTextureSampler},
-                          {6, BindingType::kStorageBuffer},
-                          {7, BindingType::kStorageBuffer}}}},
-      .push_constant_size = PushSize<ResolvePush>(),
+      .sets = {{.slots = {{0, gpu::BindingType::kStorageImage},
+                          {1, gpu::BindingType::kSampledImage},
+                          {2, gpu::BindingType::kSampledImage},
+                          {3, gpu::BindingType::kUniformBuffer},
+                          {4, gpu::BindingType::kCombinedTextureSampler},
+                          {5, gpu::BindingType::kCombinedTextureSampler},
+                          {6, gpu::BindingType::kStorageBuffer},
+                          {7, gpu::BindingType::kStorageBuffer}}}},
+      .push_constant_size = gpu::PushSize<ResolvePush>(),
       .debug_name = "rcgi_resolve",
   });
   // M2 gather chain (ray-query gather + its denoise/upscale/history filters):
@@ -372,62 +372,62 @@ bool RcgiSystem::CreatePipelines(bool rt_available) {
   if (rt_available) {
   gather_pipeline_ = device_.CreateComputePipeline({
       .shader = RX_SHADER(k_rcgi_gather_cs_hlsl),
-      .sets = {{.slots = {{0, BindingType::kStorageImage},
-                          {1, BindingType::kStorageImage},
-                          {2, BindingType::kStorageImage},
-                          {3, BindingType::kStorageImage},
-                          {4, BindingType::kSampledImage},
-                          {5, BindingType::kSampledImage},
-                          {6, BindingType::kAccelStruct},
-                          {7, BindingType::kUniformBuffer},
-                          {8, BindingType::kStorageBuffer},
-                          {9, BindingType::kStorageBuffer},
-                          {10, BindingType::kCombinedTextureSampler},
-                          {11, BindingType::kCombinedTextureSampler},
-                          {12, BindingType::kCombinedTextureSampler},
-                          {13, BindingType::kCombinedTextureSampler},
-                          {14, BindingType::kCombinedTextureSampler},
-                          {15, BindingType::kStorageBuffer},
-                          {16, BindingType::kStorageBuffer},
-                          {17, BindingType::kUniformBuffer}}}},
-      .push_constant_size = PushSize<GatherPush>(),
+      .sets = {{.slots = {{0, gpu::BindingType::kStorageImage},
+                          {1, gpu::BindingType::kStorageImage},
+                          {2, gpu::BindingType::kStorageImage},
+                          {3, gpu::BindingType::kStorageImage},
+                          {4, gpu::BindingType::kSampledImage},
+                          {5, gpu::BindingType::kSampledImage},
+                          {6, gpu::BindingType::kAccelStruct},
+                          {7, gpu::BindingType::kUniformBuffer},
+                          {8, gpu::BindingType::kStorageBuffer},
+                          {9, gpu::BindingType::kStorageBuffer},
+                          {10, gpu::BindingType::kCombinedTextureSampler},
+                          {11, gpu::BindingType::kCombinedTextureSampler},
+                          {12, gpu::BindingType::kCombinedTextureSampler},
+                          {13, gpu::BindingType::kCombinedTextureSampler},
+                          {14, gpu::BindingType::kCombinedTextureSampler},
+                          {15, gpu::BindingType::kStorageBuffer},
+                          {16, gpu::BindingType::kStorageBuffer},
+                          {17, gpu::BindingType::kUniformBuffer}}}},
+      .push_constant_size = gpu::PushSize<GatherPush>(),
       .debug_name = "rcgi_gather",
   });
   denoise_pipeline_ = device_.CreateComputePipeline({
       .shader = RX_SHADER(k_rcgi_denoise_cs_hlsl),
-      .sets = {{.slots = {{0, BindingType::kStorageImage},
-                          {1, BindingType::kStorageImage},
-                          {2, BindingType::kStorageImage},
-                          {3, BindingType::kSampledImage},
-                          {4, BindingType::kSampledImage},
-                          {5, BindingType::kSampledImage},
-                          {6, BindingType::kSampledImage},
-                          {7, BindingType::kSampledImage},
-                          {8, BindingType::kSampledImage}}}},
-      .push_constant_size = PushSize<DenoisePush>(),
+      .sets = {{.slots = {{0, gpu::BindingType::kStorageImage},
+                          {1, gpu::BindingType::kStorageImage},
+                          {2, gpu::BindingType::kStorageImage},
+                          {3, gpu::BindingType::kSampledImage},
+                          {4, gpu::BindingType::kSampledImage},
+                          {5, gpu::BindingType::kSampledImage},
+                          {6, gpu::BindingType::kSampledImage},
+                          {7, gpu::BindingType::kSampledImage},
+                          {8, gpu::BindingType::kSampledImage}}}},
+      .push_constant_size = gpu::PushSize<DenoisePush>(),
       .debug_name = "rcgi_denoise",
   });
   upscale_pipeline_ = device_.CreateComputePipeline({
       .shader = RX_SHADER(k_rcgi_upscale_cs_hlsl),
-      .sets = {{.slots = {{0, BindingType::kStorageImage},
-                          {1, BindingType::kStorageImage},
-                          {2, BindingType::kSampledImage},
-                          {3, BindingType::kSampledImage},
-                          {4, BindingType::kSampledImage},
-                          {5, BindingType::kSampledImage},
-                          {6, BindingType::kSampledImage},
-                          {7, BindingType::kSampledImage},
-                          {8, BindingType::kSampledImage}}}},
-      .push_constant_size = PushSize<UpscalePush>(),
+      .sets = {{.slots = {{0, gpu::BindingType::kStorageImage},
+                          {1, gpu::BindingType::kStorageImage},
+                          {2, gpu::BindingType::kSampledImage},
+                          {3, gpu::BindingType::kSampledImage},
+                          {4, gpu::BindingType::kSampledImage},
+                          {5, gpu::BindingType::kSampledImage},
+                          {6, gpu::BindingType::kSampledImage},
+                          {7, gpu::BindingType::kSampledImage},
+                          {8, gpu::BindingType::kSampledImage}}}},
+      .push_constant_size = gpu::PushSize<UpscalePush>(),
       .debug_name = "rcgi_upscale",
   });
   history_pipeline_ = device_.CreateComputePipeline({
       .shader = RX_SHADER(k_rcgi_history_cs_hlsl),
-      .sets = {{.slots = {{0, BindingType::kStorageImage},
-                          {1, BindingType::kStorageImage},
-                          {2, BindingType::kSampledImage},
-                          {3, BindingType::kSampledImage}}}},
-      .push_constant_size = PushSize<HistoryPush>(),
+      .sets = {{.slots = {{0, gpu::BindingType::kStorageImage},
+                          {1, gpu::BindingType::kStorageImage},
+                          {2, gpu::BindingType::kSampledImage},
+                          {3, gpu::BindingType::kSampledImage}}}},
+      .push_constant_size = gpu::PushSize<HistoryPush>(),
       .debug_name = "rcgi_history",
   });
   }  // rt_available (gather chain)
@@ -444,30 +444,30 @@ bool RcgiSystem::CreatePipelines(bool rt_available) {
 }
 
 void RcgiSystem::DestroyScreenResources() {
-  for (GpuImage* img : {&screen_color_hist_, &screen_depth_hist_, &irr_hist_[0], &irr_hist_[1]}) {
+  for (gpu::GpuImage* img : {&screen_color_hist_, &screen_depth_hist_, &irr_hist_[0], &irr_hist_[1]}) {
     if (*img) device_.DestroyImage(*img);
     *img = {};
   }
-  screen_color_state_ = ResourceState::kUndefined;
-  screen_depth_state_ = ResourceState::kUndefined;
-  irr_hist_state_[0] = ResourceState::kUndefined;
-  irr_hist_state_[1] = ResourceState::kUndefined;
+  screen_color_state_ = gpu::ResourceState::kUndefined;
+  screen_depth_state_ = gpu::ResourceState::kUndefined;
+  irr_hist_state_[0] = gpu::ResourceState::kUndefined;
+  irr_hist_state_[1] = gpu::ResourceState::kUndefined;
   screen_extent_ = {};
   screen_history_valid_ = false;
 }
 
-bool RcgiSystem::EnsureScreenResources(Extent2D extent) {
+bool RcgiSystem::EnsureScreenResources(gpu::Extent2D extent) {
   if (extent.width == screen_extent_.width && extent.height == screen_extent_.height &&
       screen_color_hist_) {
     return true;
   }
   DestroyScreenResources();
   screen_extent_ = extent;
-  TextureUsageFlags usage = kTextureUsageSampled | kTextureUsageStorage;
-  screen_color_hist_ = device_.CreateImage2D(Format::kRGBA16Float, extent, usage);
-  screen_depth_hist_ = device_.CreateImage2D(Format::kR32Float, extent, usage);
-  irr_hist_[0] = device_.CreateImage2D(Format::kRGBA16Float, extent, usage);
-  irr_hist_[1] = device_.CreateImage2D(Format::kRGBA16Float, extent, usage);
+  gpu::TextureUsageFlags usage = gpu::kTextureUsageSampled | gpu::kTextureUsageStorage;
+  screen_color_hist_ = device_.CreateImage2D(gpu::Format::kRGBA16Float, extent, usage);
+  screen_depth_hist_ = device_.CreateImage2D(gpu::Format::kR32Float, extent, usage);
+  irr_hist_[0] = device_.CreateImage2D(gpu::Format::kRGBA16Float, extent, usage);
+  irr_hist_[1] = device_.CreateImage2D(gpu::Format::kRGBA16Float, extent, usage);
   if (!screen_color_hist_ || !screen_depth_hist_ || !irr_hist_[0] || !irr_hist_[1]) {
     RX_ERROR("rcgi screen resource creation failed");
     // Tear down whatever was created and clear the cached extent so a later
@@ -477,25 +477,25 @@ bool RcgiSystem::EnsureScreenResources(Extent2D extent) {
     return false;
   }
   // Prime to kGeneral so the first frame's imports have a defined source state.
-  device_.ImmediateSubmit([&](CommandList& cmd) {
-    TextureBarrier b[4] = {
-        Transition(screen_color_hist_, ResourceState::kUndefined, ResourceState::kGeneral),
-        Transition(screen_depth_hist_, ResourceState::kUndefined, ResourceState::kGeneral),
-        Transition(irr_hist_[0], ResourceState::kUndefined, ResourceState::kGeneral),
-        Transition(irr_hist_[1], ResourceState::kUndefined, ResourceState::kGeneral)};
+  device_.ImmediateSubmit([&](gpu::CommandList& cmd) {
+    gpu::TextureBarrier b[4] = {
+        gpu::Transition(screen_color_hist_, gpu::ResourceState::kUndefined, gpu::ResourceState::kGeneral),
+        gpu::Transition(screen_depth_hist_, gpu::ResourceState::kUndefined, gpu::ResourceState::kGeneral),
+        gpu::Transition(irr_hist_[0], gpu::ResourceState::kUndefined, gpu::ResourceState::kGeneral),
+        gpu::Transition(irr_hist_[1], gpu::ResourceState::kUndefined, gpu::ResourceState::kGeneral)};
     cmd.TextureBarriers(b);
   });
-  screen_color_state_ = ResourceState::kGeneral;
-  screen_depth_state_ = ResourceState::kGeneral;
-  irr_hist_state_[0] = ResourceState::kGeneral;
-  irr_hist_state_[1] = ResourceState::kGeneral;
+  screen_color_state_ = gpu::ResourceState::kGeneral;
+  screen_depth_state_ = gpu::ResourceState::kGeneral;
+  irr_hist_state_[0] = gpu::ResourceState::kGeneral;
+  irr_hist_state_[1] = gpu::ResourceState::kGeneral;
   screen_history_valid_ = false;
   screen_reset_ = true;  // the freshly created temporal history holds undefined data
   return true;
 }
 
 void RcgiSystem::AddToGraph(RenderGraph& graph, RayTracingContext* raytracing, u32 tlas_slot,
-                            const LightGrid& light_grid, const GpuBuffer& lights,
+                            const LightGrid& light_grid, const gpu::GpuBuffer& lights,
                             const Vec3& camera, const Vec3& sun_direction, f32 sun_intensity,
                             const Vec3& sun_color, u32 frame_index, const FrameConfig& config,
                             bool async, const SdfClipmap* sdf) {
@@ -623,36 +623,36 @@ void RcgiSystem::AddToGraph(RenderGraph& graph, RayTracingContext* raytracing, u
 
   const bool software = sdf != nullptr;
   const bool relocate = config.relocate;
-  const GpuBuffer interior_volumes = interior_volumes_[frame_index % 2];
+  const gpu::GpuBuffer interior_volumes = interior_volumes_[frame_index % 2];
   graph.AddPass(
       "rcgi", [async](RenderGraph::PassBuilder& b) { if (async) b.Async(); },
       [this, raytracing, tlas_slot, &light_grid, &lights, trace_push, frame_index, current, reset,
        do_clear, software, sdf, relocate, interior_volumes](PassContext& ctx) {
-        const GpuBuffer& globals = globals_buffers_[frame_index % 2];
+        const gpu::GpuBuffer& globals = globals_buffers_[frame_index % 2];
         // Software mode binds the SDF clipmap resources into set 1 for both the
         // probe trace and cache shade sw variants (mirrors sdf_debug's wiring).
         auto bind_sdf = [&](u32 set) {
-          const GpuBuffer& sdf_globals = sdf->globals(frame_index);
+          const gpu::GpuBuffer& sdf_globals = sdf->globals(frame_index);
           ctx.cmd->BindTransient(
-              set, {Bind::Uniform(0, sdf_globals, 0, sdf_globals.size),
-                    InGeneral(Bind::Sampled(1, sdf->distance_volume())),
-                    InGeneral(Bind::Sampled(2, sdf->albedo_volume())),
-                    InGeneral(Bind::Sampled(3, sdf->emissive_volume())),
-                    Bind::Sampler(4, sdf->sampler())});
+              set, {gpu::Bind::Uniform(0, sdf_globals, 0, sdf_globals.size),
+                    gpu::InGeneral(gpu::Bind::Sampled(1, sdf->distance_volume())),
+                    gpu::InGeneral(gpu::Bind::Sampled(2, sdf->albedo_volume())),
+                    gpu::InGeneral(gpu::Bind::Sampled(3, sdf->emissive_volume())),
+                    gpu::Bind::Sampler(4, sdf->sampler())});
         };
 
         // First touch transitions the atlases from UNDEFINED to GENERAL.
         if (!atlas_initialized_) {
           atlas_initialized_ = true;
-          TextureBarrier barriers[3] = {
-              Transition(irradiance_, ResourceState::kUndefined, ResourceState::kGeneral),
-              Transition(visibility_, ResourceState::kUndefined, ResourceState::kGeneral),
-              Transition(rays_, ResourceState::kUndefined, ResourceState::kGeneral)};
+          gpu::TextureBarrier barriers[3] = {
+              gpu::Transition(irradiance_, gpu::ResourceState::kUndefined, gpu::ResourceState::kGeneral),
+              gpu::Transition(visibility_, gpu::ResourceState::kUndefined, gpu::ResourceState::kGeneral),
+              gpu::Transition(rays_, gpu::ResourceState::kUndefined, gpu::ResourceState::kGeneral)};
           ctx.cmd->TextureBarriers(barriers);
         } else {
           // Persistent world resources can be sampled by both compute gathers
           // and forward fragment shaders in the preceding frame.
-          ctx.cmd->MemoryBarrier(BarrierScope::kAllCommands, BarrierScope::kComputeWrite);
+          ctx.cmd->MemoryBarrier(gpu::BarrierScope::kAllCommands, gpu::BarrierScope::kComputeWrite);
         }
 
         // Zero the hash on first frame / teleport (garbage keys = false hits).
@@ -661,11 +661,11 @@ void RcgiSystem::AddToGraph(RenderGraph& graph, RayTracingContext* raytracing, u
         // as well as writes (kComputeReadWrite, not just kComputeWrite).
         if (do_clear) {
           ctx.cmd->FillBuffer(state_, 0, state_.size, 0);
-          ctx.cmd->MemoryBarrier(BarrierScope::kTransferWrite, BarrierScope::kComputeReadWrite);
+          ctx.cmd->MemoryBarrier(gpu::BarrierScope::kTransferWrite, gpu::BarrierScope::kComputeReadWrite);
         }
         // Per-frame: reset the active-cell counter (read+incremented by InterlockedAdd).
         ctx.cmd->FillBuffer(active_meta_, 0, active_meta_.size, 0);
-        ctx.cmd->MemoryBarrier(BarrierScope::kTransferWrite, BarrierScope::kComputeReadWrite);
+        ctx.cmd->MemoryBarrier(gpu::BarrierScope::kTransferWrite, gpu::BarrierScope::kComputeReadWrite);
 
         // Cascade (re)snapped: its cells now cover different world space, so any
         // carried relocation offset is meaningless. Zero the current cascade's
@@ -675,7 +675,7 @@ void RcgiSystem::AddToGraph(RenderGraph& graph, RayTracingContext* raytracing, u
         const u64 meta_slice = static_cast<u64>(kProbeCount) * 2 * sizeof(u32);
         if (relocate && reset) {
           ctx.cmd->FillBuffer(probe_meta_, current * meta_slice, meta_slice, 0);
-          ctx.cmd->MemoryBarrier(BarrierScope::kTransferWrite, BarrierScope::kComputeRead);
+          ctx.cmd->MemoryBarrier(gpu::BarrierScope::kTransferWrite, gpu::BarrierScope::kComputeRead);
         }
 
         // Probe trace: register hits into the cache, sky into the rays buffer.
@@ -683,36 +683,36 @@ void RcgiSystem::AddToGraph(RenderGraph& graph, RayTracingContext* raytracing, u
         if (software) {
           ctx.cmd->BindPipeline(probe_trace_sw_pipeline_);
           ctx.cmd->BindTransient(
-              0, {Bind::Storage(0, rays_), Bind::Uniform(2, globals, 0, sizeof(RcgiGlobals)),
-                  Bind::StorageBuffer(3, state_, 0, state_.size),
-                  Bind::StorageBuffer(4, active_list_, 0, active_list_.size),
-                  Bind::StorageBuffer(5, active_meta_, 0, active_meta_.size),
-                  Bind::Combined(6, sky_view_, sky_sampler_),
-                  Bind::StorageBuffer(7, probe_meta_, 0, probe_meta_.size)});
+              0, {gpu::Bind::Storage(0, rays_), gpu::Bind::Uniform(2, globals, 0, sizeof(RcgiGlobals)),
+                  gpu::Bind::StorageBuffer(3, state_, 0, state_.size),
+                  gpu::Bind::StorageBuffer(4, active_list_, 0, active_list_.size),
+                  gpu::Bind::StorageBuffer(5, active_meta_, 0, active_meta_.size),
+                  gpu::Bind::Combined(6, sky_view_, sky_sampler_),
+                  gpu::Bind::StorageBuffer(7, probe_meta_, 0, probe_meta_.size)});
           bind_sdf(1);
         } else {
           ctx.cmd->BindPipeline(probe_trace_pipeline_);
           ctx.cmd->BindTransient(
-              0, {Bind::Storage(0, rays_), Bind::Accel(1, raytracing->tlas(tlas_slot)),
-                  Bind::Uniform(2, globals, 0, sizeof(RcgiGlobals)),
-                  Bind::StorageBuffer(3, state_, 0, state_.size),
-                  Bind::StorageBuffer(4, active_list_, 0, active_list_.size),
-                  Bind::StorageBuffer(5, active_meta_, 0, active_meta_.size),
-                  Bind::Combined(6, sky_view_, sky_sampler_),
-                  Bind::StorageBuffer(7, probe_meta_, 0, probe_meta_.size)});
+              0, {gpu::Bind::Storage(0, rays_), gpu::Bind::Accel(1, raytracing->tlas(tlas_slot)),
+                  gpu::Bind::Uniform(2, globals, 0, sizeof(RcgiGlobals)),
+                  gpu::Bind::StorageBuffer(3, state_, 0, state_.size),
+                  gpu::Bind::StorageBuffer(4, active_list_, 0, active_list_.size),
+                  gpu::Bind::StorageBuffer(5, active_meta_, 0, active_meta_.size),
+                  gpu::Bind::Combined(6, sky_view_, sky_sampler_),
+                  gpu::Bind::StorageBuffer(7, probe_meta_, 0, probe_meta_.size)});
           ctx.cmd->BindSet(1, bindless_->set());
         }
         ctx.cmd->Push(trace_push);
         ctx.cmd->Dispatch((kRaysPerProbe + 31) / 32, kProbeCount, 1);
 
-        ctx.cmd->MemoryBarrier(BarrierScope::kComputeWrite, BarrierScope::kComputeRead);
+        ctx.cmd->MemoryBarrier(gpu::BarrierScope::kComputeWrite, gpu::BarrierScope::kComputeRead);
 
         // Build the indirect dispatch args for the shade pass.
         ctx.cmd->BindPipeline(args_pipeline_);
-        ctx.cmd->BindTransient(0, {Bind::StorageBuffer(0, active_meta_, 0, active_meta_.size),
-                                   Bind::StorageBuffer(1, dispatch_args_, 0, dispatch_args_.size)});
+        ctx.cmd->BindTransient(0, {gpu::Bind::StorageBuffer(0, active_meta_, 0, active_meta_.size),
+                                   gpu::Bind::StorageBuffer(1, dispatch_args_, 0, dispatch_args_.size)});
         ctx.cmd->Dispatch(1, 1, 1);
-        ctx.cmd->MemoryBarrier(BarrierScope::kComputeWrite, BarrierScope::kIndirectArgs);
+        ctx.cmd->MemoryBarrier(gpu::BarrierScope::kComputeWrite, gpu::BarrierScope::kIndirectArgs);
 
         // Cache shade: one thread per active cell, resolve + light + store.
         // Software mode reads surface colour from the entry (packed by the sw
@@ -720,82 +720,82 @@ void RcgiSystem::AddToGraph(RenderGraph& graph, RayTracingContext* raytracing, u
         if (software) {
           ctx.cmd->BindPipeline(cache_shade_sw_pipeline_);
           ctx.cmd->BindTransient(
-              0, {Bind::Uniform(0, globals, 0, sizeof(RcgiGlobals)),
-                  Bind::StorageBuffer(1, state_, 0, state_.size),
-                  Bind::StorageBuffer(2, radiance_, 0, radiance_.size),
-                  Bind::StorageBuffer(3, active_list_, 0, active_list_.size),
-                  Bind::StorageBuffer(4, active_meta_, 0, active_meta_.size),
-                  Bind::StorageBuffer(6, lights, 0, lights.size),
-                  Bind::StorageBuffer(7, light_grid.counts_buffer(), 0,
+              0, {gpu::Bind::Uniform(0, globals, 0, sizeof(RcgiGlobals)),
+                  gpu::Bind::StorageBuffer(1, state_, 0, state_.size),
+                  gpu::Bind::StorageBuffer(2, radiance_, 0, radiance_.size),
+                  gpu::Bind::StorageBuffer(3, active_list_, 0, active_list_.size),
+                  gpu::Bind::StorageBuffer(4, active_meta_, 0, active_meta_.size),
+                  gpu::Bind::StorageBuffer(6, lights, 0, lights.size),
+                  gpu::Bind::StorageBuffer(7, light_grid.counts_buffer(), 0,
                                       light_grid.counts_buffer().size),
-                  Bind::StorageBuffer(8, light_grid.ids_buffer(), 0, light_grid.ids_buffer().size),
-                  Bind::Uniform(9, light_grid.params_buffer(frame_index), 0,
+                  gpu::Bind::StorageBuffer(8, light_grid.ids_buffer(), 0, light_grid.ids_buffer().size),
+                  gpu::Bind::Uniform(9, light_grid.params_buffer(frame_index), 0,
                                 LightGrid::params_size()),
-                  InGeneral(Bind::Combined(10, irradiance_.view, sampler_)),
-                  InGeneral(Bind::Combined(11, visibility_.view, sampler_)),
-                  Bind::StorageBuffer(12, probe_meta_, 0, probe_meta_.size),
-                  Bind::StorageBuffer(13, interior_volumes, 0, interior_volumes.size)});
+                  gpu::InGeneral(gpu::Bind::Combined(10, irradiance_.view, sampler_)),
+                  gpu::InGeneral(gpu::Bind::Combined(11, visibility_.view, sampler_)),
+                  gpu::Bind::StorageBuffer(12, probe_meta_, 0, probe_meta_.size),
+                  gpu::Bind::StorageBuffer(13, interior_volumes, 0, interior_volumes.size)});
           bind_sdf(1);
         } else {
           ctx.cmd->BindPipeline(cache_shade_pipeline_);
           ctx.cmd->BindTransient(
-              0, {Bind::Uniform(0, globals, 0, sizeof(RcgiGlobals)),
-                  Bind::StorageBuffer(1, state_, 0, state_.size),
-                  Bind::StorageBuffer(2, radiance_, 0, radiance_.size),
-                  Bind::StorageBuffer(3, active_list_, 0, active_list_.size),
-                  Bind::StorageBuffer(4, active_meta_, 0, active_meta_.size),
-                  Bind::Accel(5, raytracing->tlas(tlas_slot)),
-                  Bind::StorageBuffer(6, lights, 0, lights.size),
-                  Bind::StorageBuffer(7, light_grid.counts_buffer(), 0,
+              0, {gpu::Bind::Uniform(0, globals, 0, sizeof(RcgiGlobals)),
+                  gpu::Bind::StorageBuffer(1, state_, 0, state_.size),
+                  gpu::Bind::StorageBuffer(2, radiance_, 0, radiance_.size),
+                  gpu::Bind::StorageBuffer(3, active_list_, 0, active_list_.size),
+                  gpu::Bind::StorageBuffer(4, active_meta_, 0, active_meta_.size),
+                  gpu::Bind::Accel(5, raytracing->tlas(tlas_slot)),
+                  gpu::Bind::StorageBuffer(6, lights, 0, lights.size),
+                  gpu::Bind::StorageBuffer(7, light_grid.counts_buffer(), 0,
                                       light_grid.counts_buffer().size),
-                  Bind::StorageBuffer(8, light_grid.ids_buffer(), 0, light_grid.ids_buffer().size),
-                  Bind::Uniform(9, light_grid.params_buffer(frame_index), 0,
+                  gpu::Bind::StorageBuffer(8, light_grid.ids_buffer(), 0, light_grid.ids_buffer().size),
+                  gpu::Bind::Uniform(9, light_grid.params_buffer(frame_index), 0,
                                 LightGrid::params_size()),
-                  InGeneral(Bind::Combined(10, irradiance_.view, sampler_)),
-                  InGeneral(Bind::Combined(11, visibility_.view, sampler_)),
-                  Bind::StorageBuffer(12, probe_meta_, 0, probe_meta_.size),
-                  Bind::StorageBuffer(13, interior_volumes, 0, interior_volumes.size)});
+                  gpu::InGeneral(gpu::Bind::Combined(10, irradiance_.view, sampler_)),
+                  gpu::InGeneral(gpu::Bind::Combined(11, visibility_.view, sampler_)),
+                  gpu::Bind::StorageBuffer(12, probe_meta_, 0, probe_meta_.size),
+                  gpu::Bind::StorageBuffer(13, interior_volumes, 0, interior_volumes.size)});
           ctx.cmd->BindSet(1, bindless_->set());
         }
         ctx.cmd->DispatchIndirect(dispatch_args_, 0);
 
-        ctx.cmd->MemoryBarrier(BarrierScope::kComputeWrite, BarrierScope::kComputeRead);
+        ctx.cmd->MemoryBarrier(gpu::BarrierScope::kComputeWrite, gpu::BarrierScope::kComputeRead);
 
         // Blend rays into the current cascade's irradiance + visibility slabs.
-        auto blend = [&](const GpuImage& atlas, u32 mode) {
+        auto blend = [&](const gpu::GpuImage& atlas, u32 mode) {
           BlendPush push{};
           base::MemCopy(push.rotation, trace_push.rotation, sizeof(push.rotation));
           push.mode = mode;
           push.reset = reset ? 1u : 0u;
           ctx.cmd->BindPipeline(blend_pipeline_);
-          ctx.cmd->BindTransient(0, {Bind::Storage(0, atlas),
-                                     InGeneral(Bind::Combined(1, rays_.view, sampler_)),
-                                     Bind::Uniform(2, globals, 0, sizeof(RcgiGlobals)),
-                                     Bind::StorageBuffer(3, state_, 0, state_.size),
-                                     Bind::StorageBuffer(4, radiance_, 0, radiance_.size),
-                                     Bind::StorageBuffer(5, probe_meta_, 0, probe_meta_.size),
-                                     Bind::Combined(6, sky_view_, sky_sampler_)});
+          ctx.cmd->BindTransient(0, {gpu::Bind::Storage(0, atlas),
+                                     gpu::InGeneral(gpu::Bind::Combined(1, rays_.view, sampler_)),
+                                     gpu::Bind::Uniform(2, globals, 0, sizeof(RcgiGlobals)),
+                                     gpu::Bind::StorageBuffer(3, state_, 0, state_.size),
+                                     gpu::Bind::StorageBuffer(4, radiance_, 0, radiance_.size),
+                                     gpu::Bind::StorageBuffer(5, probe_meta_, 0, probe_meta_.size),
+                                     gpu::Bind::Combined(6, sky_view_, sky_sampler_)});
           ctx.cmd->Push(push);
           ctx.cmd->Dispatch2D({kAtlasWidth, kSlabHeight});
         };
         blend(irradiance_, 0);
         blend(visibility_, 1);
 
-        ctx.cmd->MemoryBarrier(BarrierScope::kComputeWrite, BarrierScope::kComputeRead);
+        ctx.cmd->MemoryBarrier(gpu::BarrierScope::kComputeWrite, gpu::BarrierScope::kComputeRead);
 
         // Octahedral borders for the current cascade slab.
-        auto border = [&](const GpuImage& atlas, u32 texels) {
+        auto border = [&](const gpu::GpuImage& atlas, u32 texels) {
           BorderPush push{texels, kProbesPerAxis * kProbesPerAxis, kProbesPerAxis,
                           current * kSlabHeight};
           ctx.cmd->BindPipeline(border_pipeline_);
-          ctx.cmd->BindTransient(0, {Bind::Storage(0, atlas)});
+          ctx.cmd->BindTransient(0, {gpu::Bind::Storage(0, atlas)});
           ctx.cmd->Push(push);
           ctx.cmd->Dispatch2D({kAtlasWidth, kSlabHeight});
         };
         border(irradiance_, kIrradianceTexels);
         border(visibility_, kVisibilityTexels);
 
-        ctx.cmd->MemoryBarrier(BarrierScope::kComputeWrite, BarrierScope::kComputeRead);
+        ctx.cmd->MemoryBarrier(gpu::BarrierScope::kComputeWrite, gpu::BarrierScope::kComputeRead);
 
         // Probe relocation (item 10): read back this frame's rays and refresh the
         // current cascade's per-probe offset/disable metadata, consumed by next
@@ -805,23 +805,23 @@ void RcgiSystem::AddToGraph(RenderGraph& graph, RayTracingContext* raytracing, u
           base::MemCopy(mp.rotation, trace_push.rotation, sizeof(mp.rotation));
           mp.reset = reset ? 1u : 0u;
           ctx.cmd->BindPipeline(probe_meta_pipeline_);
-          ctx.cmd->BindTransient(0, {Bind::Storage(0, rays_),
-                                     Bind::Uniform(1, globals, 0, sizeof(RcgiGlobals)),
-                                     Bind::StorageBuffer(2, probe_meta_, 0, probe_meta_.size)});
+          ctx.cmd->BindTransient(0, {gpu::Bind::Storage(0, rays_),
+                                     gpu::Bind::Uniform(1, globals, 0, sizeof(RcgiGlobals)),
+                                     gpu::Bind::StorageBuffer(2, probe_meta_, 0, probe_meta_.size)});
           ctx.cmd->Push(mp);
           ctx.cmd->Dispatch((kProbeCount + 63) / 64, 1, 1);
-          ctx.cmd->MemoryBarrier(BarrierScope::kComputeWrite, BarrierScope::kComputeRead);
+          ctx.cmd->MemoryBarrier(gpu::BarrierScope::kComputeWrite, gpu::BarrierScope::kComputeRead);
         }
         // Inline reflection hit shading samples these persistent resources from
         // the forward fragment shader later in this frame.
-        ctx.cmd->MemoryBarrier(BarrierScope::kComputeWrite, BarrierScope::kGraphicsRead);
+        ctx.cmd->MemoryBarrier(gpu::BarrierScope::kComputeWrite, gpu::BarrierScope::kGraphicsRead);
       });
 }
 
 void RcgiSystem::SetInteriorVolumes(base::Span<const InteriorVolume> volumes, u32 frame_index) {
   u32 count = static_cast<u32>(rx::Min<size_t>(volumes.size(), kMaxInteriorVolumes));
   interior_volume_count_ = count;
-  GpuBuffer& buffer = interior_volumes_[frame_index % 2];
+  gpu::GpuBuffer& buffer = interior_volumes_[frame_index % 2];
   if (!buffer.mapped) return;
   // Layout: two float4 per volume (min.xyz, max.xyz); w padding unused.
   f32* dst = static_cast<f32*>(buffer.mapped);
@@ -838,12 +838,12 @@ void RcgiSystem::SetInteriorVolumes(base::Span<const InteriorVolume> volumes, u3
 }
 
 ResourceHandle RcgiSystem::AddResolvePass(RenderGraph& graph, ResourceHandle depth_export,
-                                          ResourceHandle normals, Extent2D extent,
+                                          ResourceHandle normals, gpu::Extent2D extent,
                                           const Mat4& inv_view_proj, const Vec3& camera,
                                           f32 intensity, u32 frame_index) {
   denoised_sh_valid_ = false;  // probes-only path produces no SH for the ray-skip
   ResourceHandle out = graph.CreateTexture({.name = "rcgi_irradiance",
-                                            .format = Format::kRGBA16Float,
+                                            .format = gpu::Format::kRGBA16Float,
                                             .width = extent.width,
                                             .height = extent.height});
   graph.AddPass(
@@ -855,8 +855,8 @@ ResourceHandle RcgiSystem::AddResolvePass(RenderGraph& graph, ResourceHandle dep
       },
       [this, depth_export, normals, out, inv_view_proj, camera, intensity,
        frame_index](PassContext& ctx) {
-        const GpuBuffer& globals = globals_buffers_[frame_index % 2];
-        const GpuImage& out_img = ctx.graph->image(out);
+        const gpu::GpuBuffer& globals = globals_buffers_[frame_index % 2];
+        const gpu::GpuImage& out_img = ctx.graph->image(out);
         ResolvePush push{};
         base::MemCopy(push.inv_view_proj, &inv_view_proj, sizeof(push.inv_view_proj));
         push.inv_size[0] = 1.0f / static_cast<f32>(out_img.extent.width);
@@ -867,13 +867,13 @@ ResourceHandle RcgiSystem::AddResolvePass(RenderGraph& graph, ResourceHandle dep
         push.camera_pos[3] = intensity;
         ctx.cmd->BindPipeline(resolve_pipeline_);
         ctx.cmd->BindTransient(
-            0, {Bind::Storage(0, out_img), Bind::Sampled(1, ctx.graph->image(depth_export)),
-                Bind::Sampled(2, ctx.graph->image(normals)),
-                Bind::Uniform(3, globals, 0, sizeof(RcgiGlobals)),
-                InGeneral(Bind::Combined(4, irradiance_.view, sampler_)),
-                InGeneral(Bind::Combined(5, visibility_.view, sampler_)),
-                Bind::StorageBuffer(6, probe_meta_, 0, probe_meta_.size),
-                Bind::StorageBuffer(7, interior_volumes_[frame_index % 2], 0,
+            0, {gpu::Bind::Storage(0, out_img), gpu::Bind::Sampled(1, ctx.graph->image(depth_export)),
+                gpu::Bind::Sampled(2, ctx.graph->image(normals)),
+                gpu::Bind::Uniform(3, globals, 0, sizeof(RcgiGlobals)),
+                gpu::InGeneral(gpu::Bind::Combined(4, irradiance_.view, sampler_)),
+                gpu::InGeneral(gpu::Bind::Combined(5, visibility_.view, sampler_)),
+                gpu::Bind::StorageBuffer(6, probe_meta_, 0, probe_meta_.size),
+                gpu::Bind::StorageBuffer(7, interior_volumes_[frame_index % 2], 0,
                                     interior_volumes_[frame_index % 2].size)});
         ctx.cmd->Push(push);
         ctx.cmd->Dispatch2D(out_img.extent);
@@ -884,11 +884,11 @@ ResourceHandle RcgiSystem::AddResolvePass(RenderGraph& graph, ResourceHandle dep
 ResourceHandle RcgiSystem::AddGatherChain(RenderGraph& graph, RayTracingContext& raytracing,
                                           u32 tlas_slot, ResourceHandle depth_export,
                                           ResourceHandle normals, ResourceHandle motion,
-                                          Extent2D extent, const Mat4& inv_view_proj,
+                                          gpu::Extent2D extent, const Mat4& inv_view_proj,
                                           const Mat4& prev_view_proj, const Vec3& camera,
                                           f32 intensity, u32 frame_index, bool reset) {
   const u32 divisor = gather_divisor_;  // 2 half (default), 4 quarter (RX_RCGI_GATHER_SCALE)
-  Extent2D gather{(extent.width + divisor - 1) / divisor,
+  gpu::Extent2D gather{(extent.width + divisor - 1) / divisor,
                   (extent.height + divisor - 1) / divisor};
   // Quarter-res carries ~4x fewer rays per full-res pixel, so the spatial filter
   // needs a wider footprint to avoid splotching; scale the separable radius with
@@ -899,19 +899,19 @@ ResourceHandle RcgiSystem::AddGatherChain(RenderGraph& graph, RayTracingContext&
   screen_reset_ = false;
   bool screen_valid = screen_history_valid_ && !reset;
 
-  auto tex = [&](const char* name, Format fmt, Extent2D e) {
+  auto tex = [&](const char* name, gpu::Format fmt, gpu::Extent2D e) {
     return graph.CreateTexture(
         {.name = name, .format = fmt, .width = e.width, .height = e.height});
   };
   // Gather-res SH triples (ping-pong: A gather/denoise-V, B denoise-H) + hitT.
-  ResourceHandle a_r = tex("rcgi_sh_a_r", Format::kRGBA16Float, gather);
-  ResourceHandle a_g = tex("rcgi_sh_a_g", Format::kRGBA16Float, gather);
-  ResourceHandle a_b = tex("rcgi_sh_a_b", Format::kRGBA16Float, gather);
-  ResourceHandle b_r = tex("rcgi_sh_b_r", Format::kRGBA16Float, gather);
-  ResourceHandle b_g = tex("rcgi_sh_b_g", Format::kRGBA16Float, gather);
-  ResourceHandle b_b = tex("rcgi_sh_b_b", Format::kRGBA16Float, gather);
-  ResourceHandle hitt = tex("rcgi_hitt", Format::kR16Float, gather);
-  ResourceHandle out = tex("rcgi_irradiance", Format::kRGBA16Float, extent);
+  ResourceHandle a_r = tex("rcgi_sh_a_r", gpu::Format::kRGBA16Float, gather);
+  ResourceHandle a_g = tex("rcgi_sh_a_g", gpu::Format::kRGBA16Float, gather);
+  ResourceHandle a_b = tex("rcgi_sh_a_b", gpu::Format::kRGBA16Float, gather);
+  ResourceHandle b_r = tex("rcgi_sh_b_r", gpu::Format::kRGBA16Float, gather);
+  ResourceHandle b_g = tex("rcgi_sh_b_g", gpu::Format::kRGBA16Float, gather);
+  ResourceHandle b_b = tex("rcgi_sh_b_b", gpu::Format::kRGBA16Float, gather);
+  ResourceHandle hitt = tex("rcgi_hitt", gpu::Format::kR16Float, gather);
+  ResourceHandle out = tex("rcgi_irradiance", gpu::Format::kRGBA16Float, extent);
 
   u32 cur = frame_index % 2;
   u32 prv = 1u - cur;
@@ -940,8 +940,8 @@ ResourceHandle RcgiSystem::AddGatherChain(RenderGraph& graph, RayTracingContext&
       [this, &raytracing, tlas_slot, a_r, a_g, a_b, hitt, depth_export, normals, screen_color,
        screen_depth, gather, extent, inv_view_proj, prev_view_proj, camera, frame_index,
        screen_valid, ray_max, near_plane](PassContext& ctx) {
-        const GpuBuffer& globals = globals_buffers_[frame_index % 2];
-        const GpuBuffer& gather_camera = gather_camera_[frame_index % 2];
+        const gpu::GpuBuffer& globals = globals_buffers_[frame_index % 2];
+        const gpu::GpuBuffer& gather_camera = gather_camera_[frame_index % 2];
         GatherCamera gc{};
         base::MemCopy(gc.inv_view_proj, &inv_view_proj, sizeof(gc.inv_view_proj));
         base::MemCopy(gc.prev_view_proj, &prev_view_proj, sizeof(gc.prev_view_proj));
@@ -957,23 +957,23 @@ ResourceHandle RcgiSystem::AddGatherChain(RenderGraph& graph, RayTracingContext&
         base::MemCopy(&p.misc[2], &ray_max, sizeof(f32));
         ctx.cmd->BindPipeline(gather_pipeline_);
         ctx.cmd->BindTransient(
-            0, {Bind::Storage(0, ctx.graph->image(a_r)), Bind::Storage(1, ctx.graph->image(a_g)),
-                Bind::Storage(2, ctx.graph->image(a_b)), Bind::Storage(3, ctx.graph->image(hitt)),
-                Bind::Sampled(4, ctx.graph->image(depth_export)),
-                Bind::Sampled(5, ctx.graph->image(normals)),
-                Bind::Accel(6, raytracing.tlas(tlas_slot)),
-                Bind::Uniform(7, globals, 0, sizeof(RcgiGlobals)),
-                Bind::StorageBuffer(8, state_, 0, state_.size),
-                Bind::StorageBuffer(9, radiance_, 0, radiance_.size),
-                InGeneral(Bind::Combined(10, irradiance_.view, sampler_)),
-                InGeneral(Bind::Combined(11, visibility_.view, sampler_)),
-                Bind::Combined(12, sky_view_, sky_sampler_),
-                Bind::Combined(13, ctx.graph->image(screen_color).view, linear_sampler_),
-                Bind::Combined(14, ctx.graph->image(screen_depth).view, sampler_),
-                Bind::StorageBuffer(15, probe_meta_, 0, probe_meta_.size),
-                Bind::StorageBuffer(16, interior_volumes_[frame_index % 2], 0,
+            0, {gpu::Bind::Storage(0, ctx.graph->image(a_r)), gpu::Bind::Storage(1, ctx.graph->image(a_g)),
+                gpu::Bind::Storage(2, ctx.graph->image(a_b)), gpu::Bind::Storage(3, ctx.graph->image(hitt)),
+                gpu::Bind::Sampled(4, ctx.graph->image(depth_export)),
+                gpu::Bind::Sampled(5, ctx.graph->image(normals)),
+                gpu::Bind::Accel(6, raytracing.tlas(tlas_slot)),
+                gpu::Bind::Uniform(7, globals, 0, sizeof(RcgiGlobals)),
+                gpu::Bind::StorageBuffer(8, state_, 0, state_.size),
+                gpu::Bind::StorageBuffer(9, radiance_, 0, radiance_.size),
+                gpu::InGeneral(gpu::Bind::Combined(10, irradiance_.view, sampler_)),
+                gpu::InGeneral(gpu::Bind::Combined(11, visibility_.view, sampler_)),
+                gpu::Bind::Combined(12, sky_view_, sky_sampler_),
+                gpu::Bind::Combined(13, ctx.graph->image(screen_color).view, linear_sampler_),
+                gpu::Bind::Combined(14, ctx.graph->image(screen_depth).view, sampler_),
+                gpu::Bind::StorageBuffer(15, probe_meta_, 0, probe_meta_.size),
+                gpu::Bind::StorageBuffer(16, interior_volumes_[frame_index % 2], 0,
                                     interior_volumes_[frame_index % 2].size),
-                Bind::Uniform(17, gather_camera, 0, sizeof(GatherCamera))});
+                gpu::Bind::Uniform(17, gather_camera, 0, sizeof(GatherCamera))});
         ctx.cmd->Push(p);
         ctx.cmd->Dispatch2D(gather);
       });
@@ -1000,15 +1000,15 @@ ResourceHandle RcgiSystem::AddGatherChain(RenderGraph& graph, RayTracingContext&
           p.params[0] = near_plane;
           ctx.cmd->BindPipeline(denoise_pipeline_);
           ctx.cmd->BindTransient(
-              0, {Bind::Storage(0, ctx.graph->image(out_r)),
-                  Bind::Storage(1, ctx.graph->image(out_g)),
-                  Bind::Storage(2, ctx.graph->image(out_b)),
-                  Bind::Sampled(3, ctx.graph->image(in_r)),
-                  Bind::Sampled(4, ctx.graph->image(in_g)),
-                  Bind::Sampled(5, ctx.graph->image(in_b)),
-                  Bind::Sampled(6, ctx.graph->image(hitt)),
-                  Bind::Sampled(7, ctx.graph->image(depth_export)),
-                  Bind::Sampled(8, ctx.graph->image(normals))});
+              0, {gpu::Bind::Storage(0, ctx.graph->image(out_r)),
+                  gpu::Bind::Storage(1, ctx.graph->image(out_g)),
+                  gpu::Bind::Storage(2, ctx.graph->image(out_b)),
+                  gpu::Bind::Sampled(3, ctx.graph->image(in_r)),
+                  gpu::Bind::Sampled(4, ctx.graph->image(in_g)),
+                  gpu::Bind::Sampled(5, ctx.graph->image(in_b)),
+                  gpu::Bind::Sampled(6, ctx.graph->image(hitt)),
+                  gpu::Bind::Sampled(7, ctx.graph->image(depth_export)),
+                  gpu::Bind::Sampled(8, ctx.graph->image(normals))});
           ctx.cmd->Push(p);
           ctx.cmd->Dispatch2D(gather);
         });
@@ -1038,15 +1038,15 @@ ResourceHandle RcgiSystem::AddGatherChain(RenderGraph& graph, RayTracingContext&
         p.misc[1] = denoise_mask_ ? 1u : 0u;  // item 22b: vegetation disocclusion handling
         ctx.cmd->BindPipeline(upscale_pipeline_);
         ctx.cmd->BindTransient(
-            0, {Bind::Storage(0, ctx.graph->image(out)),
-                Bind::Storage(1, ctx.graph->image(irr_cur)),
-                Bind::Sampled(2, ctx.graph->image(a_r)),
-                Bind::Sampled(3, ctx.graph->image(a_g)),
-                Bind::Sampled(4, ctx.graph->image(a_b)),
-                Bind::Sampled(5, ctx.graph->image(depth_export)),
-                Bind::Sampled(6, ctx.graph->image(normals)),
-                Bind::Sampled(7, ctx.graph->image(motion)),
-                Bind::Sampled(8, ctx.graph->image(irr_prv))});
+            0, {gpu::Bind::Storage(0, ctx.graph->image(out)),
+                gpu::Bind::Storage(1, ctx.graph->image(irr_cur)),
+                gpu::Bind::Sampled(2, ctx.graph->image(a_r)),
+                gpu::Bind::Sampled(3, ctx.graph->image(a_g)),
+                gpu::Bind::Sampled(4, ctx.graph->image(a_b)),
+                gpu::Bind::Sampled(5, ctx.graph->image(depth_export)),
+                gpu::Bind::Sampled(6, ctx.graph->image(normals)),
+                gpu::Bind::Sampled(7, ctx.graph->image(motion)),
+                gpu::Bind::Sampled(8, ctx.graph->image(irr_prv))});
         ctx.cmd->Push(p);
         ctx.cmd->Dispatch2D(extent);
       });
@@ -1064,7 +1064,7 @@ ResourceHandle RcgiSystem::AddGatherChain(RenderGraph& graph, RayTracingContext&
 }
 
 void RcgiSystem::AddHistoryCopy(RenderGraph& graph, ResourceHandle lit_color,
-                                ResourceHandle depth_export, Extent2D extent) {
+                                ResourceHandle depth_export, gpu::Extent2D extent) {
   if (!screen_color_handle_ || !screen_depth_handle_) return;
   ResourceHandle color_h = screen_color_handle_;
   ResourceHandle depth_h = screen_depth_handle_;
@@ -1080,10 +1080,10 @@ void RcgiSystem::AddHistoryCopy(RenderGraph& graph, ResourceHandle lit_color,
         HistoryPush p{};
         p.size[0] = extent.width; p.size[1] = extent.height;
         ctx.cmd->BindPipeline(history_pipeline_);
-        ctx.cmd->BindTransient(0, {Bind::Storage(0, ctx.graph->image(color_h)),
-                                   Bind::Storage(1, ctx.graph->image(depth_h)),
-                                   Bind::Sampled(2, ctx.graph->image(lit_color)),
-                                   Bind::Sampled(3, ctx.graph->image(depth_export))});
+        ctx.cmd->BindTransient(0, {gpu::Bind::Storage(0, ctx.graph->image(color_h)),
+                                   gpu::Bind::Storage(1, ctx.graph->image(depth_h)),
+                                   gpu::Bind::Sampled(2, ctx.graph->image(lit_color)),
+                                   gpu::Bind::Sampled(3, ctx.graph->image(depth_export))});
         ctx.cmd->Push(p);
         ctx.cmd->Dispatch2D(extent);
       });
@@ -1094,7 +1094,7 @@ void RcgiSystem::AddHistoryCopy(RenderGraph& graph, ResourceHandle lit_color,
 
 RcgiSystem::~RcgiSystem() {
   DestroyScreenResources();
-  for (PipelineHandle* p : {&probe_trace_pipeline_, &probe_trace_sw_pipeline_, &args_pipeline_,
+  for (gpu::PipelineHandle* p : {&probe_trace_pipeline_, &probe_trace_sw_pipeline_, &args_pipeline_,
                             &cache_shade_pipeline_, &cache_shade_sw_pipeline_, &blend_pipeline_,
                             &border_pipeline_, &probe_meta_pipeline_, &resolve_pipeline_,
                             &gather_pipeline_, &denoise_pipeline_, &upscale_pipeline_,
@@ -1111,9 +1111,9 @@ RcgiSystem::~RcgiSystem() {
   device_.DestroyBuffer(active_meta_);
   device_.DestroyBuffer(dispatch_args_);
   device_.DestroyBuffer(probe_meta_);
-  for (GpuBuffer& volumes : interior_volumes_) device_.DestroyBuffer(volumes);
-  for (GpuBuffer& b : globals_buffers_) device_.DestroyBuffer(b);
-  for (GpuBuffer& b : gather_camera_) device_.DestroyBuffer(b);
+  for (gpu::GpuBuffer& volumes : interior_volumes_) device_.DestroyBuffer(volumes);
+  for (gpu::GpuBuffer& b : globals_buffers_) device_.DestroyBuffer(b);
+  for (gpu::GpuBuffer& b : gather_camera_) device_.DestroyBuffer(b);
 }
 
 }  // namespace rx::render

@@ -14,7 +14,7 @@ bool IsReadUsage(ResourceUsage usage) {
 }
 
 struct UsageState {
-  ResourceState state;
+  gpu::ResourceState state;
   bool is_write;
 };
 
@@ -22,45 +22,45 @@ UsageState StateFor(ResourceUsage usage) {
   switch (usage) {
     case ResourceUsage::kColorAttachment:
       // Write covers LOAD_OP_LOAD of previous content too.
-      return {ResourceState::kColorTarget, true};
+      return {gpu::ResourceState::kColorTarget, true};
     case ResourceUsage::kDepthAttachment:
-      return {ResourceState::kDepthTarget, true};
+      return {gpu::ResourceState::kDepthTarget, true};
     case ResourceUsage::kSampledFragment:
-      return {ResourceState::kShaderReadFragment, false};
+      return {gpu::ResourceState::kShaderReadFragment, false};
     case ResourceUsage::kSampledCompute:
-      return {ResourceState::kShaderReadCompute, false};
+      return {gpu::ResourceState::kShaderReadCompute, false};
     case ResourceUsage::kSampledTaskMesh:
-      return {ResourceState::kShaderReadTaskMesh, false};
+      return {gpu::ResourceState::kShaderReadTaskMesh, false};
     case ResourceUsage::kStorageWrite:
-      return {ResourceState::kGeneral, true};
+      return {gpu::ResourceState::kGeneral, true};
     case ResourceUsage::kStorageClearWrite:
-      return {ResourceState::kGeneralComputeTransfer, true};
+      return {gpu::ResourceState::kGeneralComputeTransfer, true};
     case ResourceUsage::kResolveSrc:
-      return {ResourceState::kResolveSrc, false};
+      return {gpu::ResourceState::kResolveSrc, false};
     case ResourceUsage::kResolveDst:
-      return {ResourceState::kResolveDst, true};
+      return {gpu::ResourceState::kResolveDst, true};
   }
-  return {ResourceState::kGeneral, true};
+  return {gpu::ResourceState::kGeneral, true};
 }
 
-TextureUsageFlags ImageUsageFor(ResourceUsage usage) {
+gpu::TextureUsageFlags ImageUsageFor(ResourceUsage usage) {
   switch (usage) {
     case ResourceUsage::kColorAttachment:
-      return kTextureUsageColorTarget;
+      return gpu::kTextureUsageColorTarget;
     case ResourceUsage::kDepthAttachment:
-      return kTextureUsageDepthTarget;
+      return gpu::kTextureUsageDepthTarget;
     case ResourceUsage::kSampledFragment:
     case ResourceUsage::kSampledCompute:
     case ResourceUsage::kSampledTaskMesh:
-      return kTextureUsageSampled;
+      return gpu::kTextureUsageSampled;
     case ResourceUsage::kStorageWrite:
-      return kTextureUsageStorage;
+      return gpu::kTextureUsageStorage;
     case ResourceUsage::kStorageClearWrite:
-      return kTextureUsageStorage | kTextureUsageTransferDst;
+      return gpu::kTextureUsageStorage | gpu::kTextureUsageTransferDst;
     case ResourceUsage::kResolveSrc:
-      return kTextureUsageTransferSrc;
+      return gpu::kTextureUsageTransferSrc;
     case ResourceUsage::kResolveDst:
-      return kTextureUsageTransferDst;
+      return gpu::kTextureUsageTransferDst;
   }
   return 0;
 }
@@ -73,7 +73,7 @@ void TransientPool::BeginFrame() {
   for (Entry& entry : entries_) entry.in_use = false;
 }
 
-const GpuImage* TransientPool::Acquire(Format format, Extent2D extent, TextureUsageFlags usage,
+const gpu::GpuImage* TransientPool::Acquire(gpu::Format format, gpu::Extent2D extent, gpu::TextureUsageFlags usage,
                                        u32 samples) {
   for (Entry& entry : entries_) {
     if (entry.in_use || entry.image.format != format ||
@@ -104,8 +104,8 @@ ResourceHandle RenderGraph::CreateTexture(const TransientTextureDesc& desc) {
   return static_cast<ResourceHandle>(resources_.size());
 }
 
-ResourceHandle RenderGraph::ImportImage(base::String name, const GpuImage& image,
-                                        ResourceState* state) {
+ResourceHandle RenderGraph::ImportImage(base::String name, const gpu::GpuImage& image,
+                                        gpu::ResourceState* state) {
   Resource resource;
   resource.desc.name = base::move(name);
   resource.desc.format = image.format;
@@ -120,7 +120,7 @@ ResourceHandle RenderGraph::ImportImage(base::String name, const GpuImage& image
   return static_cast<ResourceHandle>(resources_.size());
 }
 
-ResourceHandle RenderGraph::ImportBackbuffer(const GpuImage& image, ResourceState final_state) {
+ResourceHandle RenderGraph::ImportBackbuffer(const gpu::GpuImage& image, gpu::ResourceState final_state) {
   Resource resource;
   resource.desc.name = "backbuffer";
   resource.desc.format = image.format;
@@ -128,7 +128,7 @@ ResourceHandle RenderGraph::ImportBackbuffer(const GpuImage& image, ResourceStat
   resource.imported = true;
   resource.is_backbuffer = true;
   resource.backbuffer_final_state = final_state;
-  resource.state = ResourceState::kUndefined;
+  resource.state = gpu::ResourceState::kUndefined;
   resource.last_was_write = true;
   resources_.push_back(resource);
   return static_cast<ResourceHandle>(resources_.size());
@@ -140,10 +140,10 @@ void RenderGraph::AddPass(base::String name, SetupFn setup, ExecuteFn execute) {
   passes_.push_back(base::move(pass));
 }
 
-bool RenderGraph::Compile(Device& device, TransientPool& pool) {
+bool RenderGraph::Compile(gpu::Device& device, TransientPool& pool) {
   // Transients get the union of every declared usage so one physical image
   // serves all passes that touch it.
-  base::Vector<TextureUsageFlags>& usages = usage_scratch_;
+  base::Vector<gpu::TextureUsageFlags>& usages = usage_scratch_;
   usages.clear();
   usages.resize(resources_.size());
   for (const Pass& pass : passes_) {
@@ -154,7 +154,7 @@ bool RenderGraph::Compile(Device& device, TransientPool& pool) {
   for (size_t i = 0; i < resources_.size(); ++i) {
     Resource& resource = resources_[i];
     if (resource.imported || usages[i] == 0) continue;
-    const GpuImage* image = pool.Acquire(
+    const gpu::GpuImage* image = pool.Acquire(
         resource.desc.format, {resource.desc.width, resource.desc.height}, usages[i],
         resource.desc.samples > 0 ? resource.desc.samples : 1);
     if (!image) {
@@ -210,7 +210,7 @@ bool RenderGraph::Compile(Device& device, TransientPool& pool) {
     entry.height = resource.desc.height;
     entry.imported = resource.imported;
     entry.bytes = static_cast<u64>(resource.desc.width) * resource.desc.height *
-                  FormatTexelBytes(resource.desc.format);
+                  gpu::FormatTexelBytes(resource.desc.format);
     if (!resource.imported) {
       stats_.transient_bytes += entry.bytes;
       ++stats_.transient_count;
@@ -220,7 +220,7 @@ bool RenderGraph::Compile(Device& device, TransientPool& pool) {
   return true;
 }
 
-CommandList* RenderGraph::Execute(PassContext& ctx) {
+gpu::CommandList* RenderGraph::Execute(PassContext& ctx) {
   ctx.graph = this;
   auto run_pass = [&](Pass& pass) {
     if (pass_begin_) pass_begin_(*ctx.cmd, pass.name.c_str());
@@ -270,10 +270,10 @@ CommandList* RenderGraph::Execute(PassContext& ctx) {
   for (; i < first_async; ++i) {
     if (!passes_[i].builder.async) run_pass(passes_[i]);
   }
-  CommandList* main_cmd = ctx.device->SplitFrame(ctx.cmd, /*signal_fork=*/true);
+  gpu::CommandList* main_cmd = ctx.device->SplitFrame(ctx.cmd, /*signal_fork=*/true);
 
   // Async segment: all flagged passes, in add order, on the compute queue.
-  CommandList* async_cmd = ctx.device->BeginAsync();
+  gpu::CommandList* async_cmd = ctx.device->BeginAsync();
   if (async_cmd) {
     ctx.cmd = async_cmd;
     for (Pass& pass : passes_) {

@@ -29,8 +29,8 @@ class RX_RENDER_EXPORT InstanceStore {
     // Original submitted prefix while an update is waiting for one frame of
     // motion. Instance indices are stable identities across Replace calls.
     base::Vector<Mat4> submitted_transforms;
-    GpuBuffer buffer;
-    GpuBuffer previous_buffer;
+    gpu::GpuBuffer buffer;
+    gpu::GpuBuffer previous_buffer;
     Vec3 bounds_center{};
     f32 bounds_radius = 0;
     f32 lod_scale = 1;
@@ -45,15 +45,15 @@ class RX_RENDER_EXPORT InstanceStore {
     bool has_submitted_state = false;
   };
 
-  InstanceGroupHandle Create(Device &device, u64 mesh, base::Span<const Mat4> transforms,
+  InstanceGroupHandle Create(gpu::Device &device, u64 mesh, base::Span<const Mat4> transforms,
                              const f32 mesh_center[3], f32 mesh_radius);
-  bool Replace(Device &device, InstanceGroupHandle handle, base::Span<const Mat4> transforms,
+  bool Replace(gpu::Device &device, InstanceGroupHandle handle, base::Span<const Mat4> transforms,
                const f32 mesh_center[3], f32 mesh_radius);
-  bool Destroy(Device &device, InstanceGroupHandle handle);
-  void RefreshMesh(Device &device, u64 mesh, const f32 mesh_center[3], f32 mesh_radius,
+  bool Destroy(gpu::Device &device, InstanceGroupHandle handle);
+  void RefreshMesh(gpu::Device &device, u64 mesh, const f32 mesh_center[3], f32 mesh_radius,
                    bool compatible);
-  void OnFrameSubmitted(Device &device);
-  void Shutdown(Device &device);
+  void OnFrameSubmitted(gpu::Device &device);
+  void Shutdown(gpu::Device &device);
 
   const base::Vector<Group> &groups() const { return groups_; }
   size_t group_count() const { return live_groups_; }
@@ -62,7 +62,7 @@ class RX_RENDER_EXPORT InstanceStore {
  private:
   Group *Resolve(InstanceGroupHandle handle);
   static void ComputeBounds(Group &group, const f32 mesh_center[3], f32 mesh_radius);
-  static GpuBuffer Upload(Device &device, base::Span<const Mat4> transforms);
+  static gpu::GpuBuffer Upload(gpu::Device &device, base::Span<const Mat4> transforms);
 
   base::Vector<Group> groups_;
   base::Vector<u32> free_;

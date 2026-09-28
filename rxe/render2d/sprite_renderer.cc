@@ -20,12 +20,13 @@
 namespace rx::render2d {
 
 using namespace rx::render;
+namespace gpu = rx::gpu;
 
 static_assert(sizeof(GpuSprite) == 64, "GpuSprite must match the sprite.vs std430 layout");
 static_assert(sizeof(GpuLight) == 48, "GpuLight must match the light2d.vs std430 layout");
 
 namespace {
-constexpr Format kTargetFormat = Format::kRGBA16Float;
+constexpr gpu::Format kTargetFormat = gpu::Format::kRGBA16Float;
 }  // namespace
 
 bool SpriteRenderer::Init(render::Renderer& renderer) {
@@ -70,12 +71,12 @@ bool SpriteRenderer::Init(render::Renderer& renderer) {
 
 bool SpriteRenderer::UpdateSampler() {
   if (!device_) return false;
-  SamplerDesc sd;
-  const Filter filter = sampling_mode_ == SamplingMode::kNearest ? Filter::kNearest
-                                                                 : Filter::kLinear;
+  gpu::SamplerDesc sd;
+  const gpu::Filter filter = sampling_mode_ == SamplingMode::kNearest ? gpu::Filter::kNearest
+                                                                 : gpu::Filter::kLinear;
   sd.min_filter = sd.mag_filter = sd.mip_filter = filter;
-  sd.address_u = sd.address_v = sd.address_w = AddressMode::kClampToEdge;
-  SamplerHandle sampler = device_->GetSampler(sd);
+  sd.address_u = sd.address_v = sd.address_w = gpu::AddressMode::kClampToEdge;
+  gpu::SamplerHandle sampler = device_->GetSampler(sd);
   if (!sampler) return false;
   sampler_ = sampler;
   return true;
@@ -85,17 +86,17 @@ bool SpriteRenderer::CreatePipelines() {
   // Sprite pipeline: instanced quads pulled from a StructuredBuffer, alpha
   // blended into an RGBA16F target, no depth (painter's order on the CPU).
   {
-    base::Vector<PipelineBindings> sets;
-    sets.push_back({.slots = {{0, BindingType::kStorageBuffer},
-                              {1, BindingType::kCombinedTextureSampler}}});
-    GraphicsPipelineDesc desc{
+    base::Vector<gpu::PipelineBindings> sets;
+    sets.push_back({.slots = {{0, gpu::BindingType::kStorageBuffer},
+                              {1, gpu::BindingType::kCombinedTextureSampler}}});
+    gpu::GraphicsPipelineDesc desc{
         .vertex = RX_SHADER(k_sprite_vs_hlsl),
         .fragment = RX_SHADER(k_sprite_ps_hlsl),
-        .topology = PrimitiveTopology::kTriangleList,
-        .raster = {.cull = CullMode::kNone},
+        .topology = gpu::PrimitiveTopology::kTriangleList,
+        .raster = {.cull = gpu::CullMode::kNone},
         .depth = {},
         .color_formats = {kTargetFormat},
-        .blend = {BlendMode::kAlpha},
+        .blend = {gpu::BlendMode::kAlpha},
         .sets = sets,
         .push_constant_size = sizeof(Mat4),
         .debug_name = "render2d_sprite",
@@ -105,16 +106,16 @@ bool SpriteRenderer::CreatePipelines() {
 
   // Light pipeline: one additive quad per light.
   {
-    base::Vector<PipelineBindings> sets;
-    sets.push_back({.slots = {{0, BindingType::kStorageBuffer}}});
-    GraphicsPipelineDesc desc{
+    base::Vector<gpu::PipelineBindings> sets;
+    sets.push_back({.slots = {{0, gpu::BindingType::kStorageBuffer}}});
+    gpu::GraphicsPipelineDesc desc{
         .vertex = RX_SHADER(k_light2d_vs_hlsl),
         .fragment = RX_SHADER(k_light2d_ps_hlsl),
-        .topology = PrimitiveTopology::kTriangleList,
-        .raster = {.cull = CullMode::kNone},
+        .topology = gpu::PrimitiveTopology::kTriangleList,
+        .raster = {.cull = gpu::CullMode::kNone},
         .depth = {},
         .color_formats = {kTargetFormat},
-        .blend = {BlendMode::kAdditive},
+        .blend = {gpu::BlendMode::kAdditive},
         .sets = sets,
         .push_constant_size = sizeof(Mat4),
         .debug_name = "render2d_light",
@@ -124,17 +125,17 @@ bool SpriteRenderer::CreatePipelines() {
 
   // Composite pipeline: fullscreen albedo*light over rx's scene, alpha blended.
   {
-    base::Vector<PipelineBindings> sets;
-    sets.push_back({.slots = {{0, BindingType::kCombinedTextureSampler},
-                              {1, BindingType::kCombinedTextureSampler}}});
-    GraphicsPipelineDesc desc{
+    base::Vector<gpu::PipelineBindings> sets;
+    sets.push_back({.slots = {{0, gpu::BindingType::kCombinedTextureSampler},
+                              {1, gpu::BindingType::kCombinedTextureSampler}}});
+    gpu::GraphicsPipelineDesc desc{
         .vertex = RX_SHADER(k_composite_vs_hlsl),
         .fragment = RX_SHADER(k_composite_ps_hlsl),
-        .topology = PrimitiveTopology::kTriangleList,
-        .raster = {.cull = CullMode::kNone},
+        .topology = gpu::PrimitiveTopology::kTriangleList,
+        .raster = {.cull = gpu::CullMode::kNone},
         .depth = {},
         .color_formats = {kTargetFormat},
-        .blend = {BlendMode::kPremultiplied},
+        .blend = {gpu::BlendMode::kPremultiplied},
         .sets = sets,
         .push_constant_size = 0,
         .debug_name = "render2d_composite",
@@ -148,16 +149,16 @@ bool SpriteRenderer::CreatePipelines() {
 TextureId SpriteRenderer::CreateTexture(u32 width, u32 height, const u8* rgba,
                                         const char* debug_name) {
   if (!device_ || width == 0 || height == 0 || !rgba) return 0;
-  GpuImage image = device_->CreateImage2D(
-      Format::kRGBA8Srgb, {width, height},
-      kTextureUsageSampled | kTextureUsageTransferDst, /*mip_levels=*/1);
+  gpu::GpuImage image = device_->CreateImage2D(
+      gpu::Format::kRGBA8Srgb, {width, height},
+      gpu::kTextureUsageSampled | gpu::kTextureUsageTransferDst, /*mip_levels=*/1);
   if (!image) {
     RX_ERROR("render2d: texture {}x{} creation failed", width, height);
     return 0;
   }
 
   const u64 bytes = static_cast<u64>(width) * height * 4u;
-  GpuBuffer staging = device_->CreateBuffer(bytes, kBufferUsageTransferSrc, /*host_visible=*/true);
+  gpu::GpuBuffer staging = device_->CreateBuffer(bytes, gpu::kBufferUsageTransferSrc, /*host_visible=*/true);
   if (!staging.mapped) {
     RX_ERROR("render2d: texture staging failed");
     device_->DestroyImage(image);
@@ -166,12 +167,12 @@ TextureId SpriteRenderer::CreateTexture(u32 width, u32 height, const u8* rgba,
   base::MemCopy(staging.mapped, rgba, bytes);
   device_->FlushBuffer(staging, 0, bytes);
 
-  device_->ImmediateSubmit([&](CommandList& cmd) {
-    cmd.Barrier(Transition(image, ResourceState::kUndefined, ResourceState::kCopyDst));
-    BufferTextureCopy region{.buffer_offset = 0, .mip = 0, .array_layer = 0,
+  device_->ImmediateSubmit([&](gpu::CommandList& cmd) {
+    cmd.Barrier(gpu::Transition(image, gpu::ResourceState::kUndefined, gpu::ResourceState::kCopyDst));
+    gpu::BufferTextureCopy region{.buffer_offset = 0, .mip = 0, .array_layer = 0,
                              .extent = {width, height}};
     cmd.CopyBufferToTexture(staging, image, base::Span(&region, 1));
-    cmd.Barrier(Transition(image, ResourceState::kCopyDst, ResourceState::kShaderReadFragment));
+    cmd.Barrier(gpu::Transition(image, gpu::ResourceState::kCopyDst, gpu::ResourceState::kShaderReadFragment));
   });
   device_->DestroyBuffer(staging);
   (void)debug_name;
@@ -295,8 +296,8 @@ void SpriteRenderer::InstallInto(render::FrameView& view) {
   view.hdr_overlay = [this, previous = base::move(previous)](const HdrOverlayContext& ctx) {
     if (previous) {
       previous(ctx);
-      ctx.cmd->Barrier(Transition(*ctx.color, ResourceState::kColorTarget,
-                                  ResourceState::kColorTarget));
+      ctx.cmd->Barrier(gpu::Transition(*ctx.color, gpu::ResourceState::kColorTarget,
+                                  gpu::ResourceState::kColorTarget));
     }
     Record(ctx);
   };
@@ -308,7 +309,7 @@ bool SpriteRenderer::EnsureSprites(FrameSlot& slot, u32 count) {
   cap = cap + cap / 2;  // headroom
   if (slot.sprites) device_->DestroyBufferDeferred(slot.sprites);
   slot.sprites = device_->CreateBuffer(static_cast<u64>(cap) * sizeof(GpuSprite),
-                                       kBufferUsageStorage, /*host_visible=*/true);
+                                       gpu::kBufferUsageStorage, /*host_visible=*/true);
   slot.sprite_cap = slot.sprites.mapped ? cap : 0;
   return slot.sprites.mapped != nullptr;
 }
@@ -319,16 +320,16 @@ bool SpriteRenderer::EnsureLights(FrameSlot& slot, u32 count) {
   cap = cap + cap / 2;
   if (slot.lights) device_->DestroyBufferDeferred(slot.lights);
   slot.lights = device_->CreateBuffer(static_cast<u64>(cap) * sizeof(GpuLight),
-                                      kBufferUsageStorage, /*host_visible=*/true);
+                                      gpu::kBufferUsageStorage, /*host_visible=*/true);
   slot.light_cap = slot.lights.mapped ? cap : 0;
   return slot.lights.mapped != nullptr;
 }
 
-bool SpriteRenderer::EnsureLitTargets(FrameSlot& slot, render::Extent2D extent) {
+bool SpriteRenderer::EnsureLitTargets(FrameSlot& slot, gpu::Extent2D extent) {
   if (slot.albedo && slot.light_target && slot.lit_extent == extent) return true;
   if (slot.albedo) device_->DestroyImageDeferred(slot.albedo);
   if (slot.light_target) device_->DestroyImageDeferred(slot.light_target);
-  TextureUsageFlags usage = kTextureUsageSampled | kTextureUsageColorTarget;
+  gpu::TextureUsageFlags usage = gpu::kTextureUsageSampled | gpu::kTextureUsageColorTarget;
   slot.albedo = device_->CreateImage2D(kTargetFormat, extent, usage);
   slot.light_target = device_->CreateImage2D(kTargetFormat, extent, usage);
   slot.lit_extent = extent;
@@ -351,7 +352,7 @@ u32 SpriteRenderer::UploadSprites(FrameSlot& slot) {
   return count;
 }
 
-void SpriteRenderer::DrawSpriteRuns(render::CommandList& cmd, FrameSlot& slot, u32 count) {
+void SpriteRenderer::DrawSpriteRuns(gpu::CommandList& cmd, FrameSlot& slot, u32 count) {
   cmd.BindPipeline(sprite_pipeline_);
   cmd.Push(view_proj_);
   u32 i = 0;
@@ -361,14 +362,14 @@ void SpriteRenderer::DrawSpriteRuns(render::CommandList& cmd, FrameSlot& slot, u
     while (i < count && queue_[i].texture == tex) ++i;
     u32 run = i - start;
     const Texture& t = textures_[tex];
-    cmd.BindTransient(0, {Bind::StorageBuffer(0, slot.sprites),
-                          Bind::Combined(1, t.image.view, sampler_)});
+    cmd.BindTransient(0, {gpu::Bind::StorageBuffer(0, slot.sprites),
+                          gpu::Bind::Combined(1, t.image.view, sampler_)});
     cmd.Draw(6, run, 0, start);
   }
 }
 
 void SpriteRenderer::Record(const HdrOverlayContext& ctx) {
-  FrameSlot& slot = slots_[ctx.frame_slot % Device::kMaxFramesInFlight];
+  FrameSlot& slot = slots_[ctx.frame_slot % gpu::Device::kMaxFramesInFlight];
   if (lighting_ == LightingMode::kLit) {
     RecordLit(ctx, slot);
   } else {
@@ -378,8 +379,8 @@ void SpriteRenderer::Record(const HdrOverlayContext& ctx) {
 
 void SpriteRenderer::RecordUnlit(const HdrOverlayContext& ctx, FrameSlot& slot) {
   u32 count = UploadSprites(slot);
-  ColorAttachment color{.view = ctx.color_view,
-                        .load = clear_scene_ ? LoadOp::kClear : LoadOp::kLoad};
+  gpu::ColorAttachment color{.view = ctx.color_view,
+                        .load = clear_scene_ ? gpu::LoadOp::kClear : gpu::LoadOp::kLoad};
   if (clear_scene_) {
     color.clear[0] = scene_clear_.r;
     color.clear[1] = scene_clear_.g;
@@ -406,38 +407,38 @@ void SpriteRenderer::RecordLit(const HdrOverlayContext& ctx, FrameSlot& slot) {
   }
 
   // Pass A: unlit sprite albedo into the albedo target (cleared transparent).
-  ctx.cmd->Barrier(Transition(slot.albedo, ResourceState::kUndefined, ResourceState::kColorTarget));
+  ctx.cmd->Barrier(gpu::Transition(slot.albedo, gpu::ResourceState::kUndefined, gpu::ResourceState::kColorTarget));
   {
-    ColorAttachment a{.view = slot.albedo.view, .load = LoadOp::kClear, .clear = {0, 0, 0, 0}};
+    gpu::ColorAttachment a{.view = slot.albedo.view, .load = gpu::LoadOp::kClear, .clear = {0, 0, 0, 0}};
     ctx.cmd->BeginRendering({.extent = ctx.extent, .colors = base::Span(&a, 1)});
     if (sprite_count > 0) DrawSpriteRuns(*ctx.cmd, slot, sprite_count);
     ctx.cmd->EndRendering();
   }
   ctx.cmd->Barrier(
-      Transition(slot.albedo, ResourceState::kColorTarget, ResourceState::kShaderReadFragment));
+      gpu::Transition(slot.albedo, gpu::ResourceState::kColorTarget, gpu::ResourceState::kShaderReadFragment));
 
   // Pass B: additive light accumulation over the ambient clear.
   ctx.cmd->Barrier(
-      Transition(slot.light_target, ResourceState::kUndefined, ResourceState::kColorTarget));
+      gpu::Transition(slot.light_target, gpu::ResourceState::kUndefined, gpu::ResourceState::kColorTarget));
   {
-    ColorAttachment lc{.view = slot.light_target.view,
-                       .load = LoadOp::kClear,
+    gpu::ColorAttachment lc{.view = slot.light_target.view,
+                       .load = gpu::LoadOp::kClear,
                        .clear = {ambient_.r, ambient_.g, ambient_.b, 1.0f}};
     ctx.cmd->BeginRendering({.extent = ctx.extent, .colors = base::Span(&lc, 1)});
     if (light_count > 0) {
       ctx.cmd->BindPipeline(light_pipeline_);
       ctx.cmd->Push(view_proj_);
-      ctx.cmd->BindTransient(0, {Bind::StorageBuffer(0, slot.lights)});
+      ctx.cmd->BindTransient(0, {gpu::Bind::StorageBuffer(0, slot.lights)});
       ctx.cmd->Draw(6, light_count, 0, 0);
     }
     ctx.cmd->EndRendering();
   }
-  ctx.cmd->Barrier(Transition(slot.light_target, ResourceState::kColorTarget,
-                              ResourceState::kShaderReadFragment));
+  ctx.cmd->Barrier(gpu::Transition(slot.light_target, gpu::ResourceState::kColorTarget,
+                              gpu::ResourceState::kShaderReadFragment));
 
   // Pass C: composite albedo*light over rx's scene colour.
-  ColorAttachment sc{.view = ctx.color_view,
-                     .load = clear_scene_ ? LoadOp::kClear : LoadOp::kLoad};
+  gpu::ColorAttachment sc{.view = ctx.color_view,
+                     .load = clear_scene_ ? gpu::LoadOp::kClear : gpu::LoadOp::kLoad};
   if (clear_scene_) {
     sc.clear[0] = scene_clear_.r;
     sc.clear[1] = scene_clear_.g;
@@ -446,8 +447,8 @@ void SpriteRenderer::RecordLit(const HdrOverlayContext& ctx, FrameSlot& slot) {
   }
   ctx.cmd->BeginRendering({.extent = ctx.extent, .colors = base::Span(&sc, 1)});
   ctx.cmd->BindPipeline(composite_pipeline_);
-  ctx.cmd->BindTransient(0, {Bind::Combined(0, slot.albedo.view, sampler_),
-                             Bind::Combined(1, slot.light_target.view, sampler_)});
+  ctx.cmd->BindTransient(0, {gpu::Bind::Combined(0, slot.albedo.view, sampler_),
+                             gpu::Bind::Combined(1, slot.light_target.view, sampler_)});
   ctx.cmd->Draw(3, 1, 0, 0);
   ctx.cmd->EndRendering();
 }

@@ -15,5 +15,5 @@ target), and `asset::MountContent` mounts it at `rxe://`
 Roboto 3.016, unhinted static instances from
 [googlefonts/roboto-3-classic](https://github.com/googlefonts/roboto-3-classic),
 under the SIL Open Font License 1.1 (`roboto/OFL.txt`). Regular is the default
-imgui font (`render::kRxDefaultFontPath`); Medium and Bold are there for UI that
+imgui font (`ui::kRxDefaultFontPath`); Medium and Bold are there for UI that
 wants weight.

@@ -41,7 +41,7 @@ class LookdevDemo {
   // OLAT rig. Call once from DemoScenes::CreateDemoScene.
   void Create();
 
-  void Update(f32 dt, const InputState& input, const ActionState& actions, bool allow_keyboard,
+  void Update(f32 dt, const ui::InputState& input, const ui::ActionState& actions, bool allow_keyboard,
               bool allow_mouse);
 
   // Writes the frozen camera, the active OLAT light and the panel.

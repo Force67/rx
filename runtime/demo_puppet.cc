@@ -292,9 +292,9 @@ void PuppetDemo::Step(f32 dt) {
   }
 }
 
-void PuppetDemo::OnInput(const InputState& input, bool allow_keyboard) {
+void PuppetDemo::OnInput(const ui::InputState& input, bool allow_keyboard) {
   if (!allow_keyboard) return;
-  const Key keys[3] = {Key::k1, Key::k2, Key::k3};
+  const ui::Key keys[3] = {ui::Key::k1, ui::Key::k2, ui::Key::k3};
   for (int i = 0; i < 3; ++i) {
     const bool down = input.key_pressed(keys[i]);
     if (down && !prev_key_[i]) {

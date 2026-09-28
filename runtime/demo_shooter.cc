@@ -362,7 +362,7 @@ void ShooterDemo::ResetPlayer() {
   }
 }
 
-void ShooterDemo::FillLookAndMove(const InputState& input, const ActionState& actions,
+void ShooterDemo::FillLookAndMove(const ui::InputState& input, const ui::ActionState& actions,
                                   bool allow_keyboard, bool allow_mouse, f32 dt) {
   auto* intent = ctx_.world->Get<character::CharacterIntent>(player_);
   auto* state = ctx_.world->Get<character::CharacterState>(player_);
@@ -539,21 +539,21 @@ void ShooterDemo::AgePresentation(f32 dt) {
   for (Popup& popup : popups_) popup.position.y += dt * 0.35f;
 }
 
-void ShooterDemo::Update(f32 dt, const InputState& input, const ActionState& actions,
+void ShooterDemo::Update(f32 dt, const ui::InputState& input, const ui::ActionState& actions,
                          bool allow_keyboard, bool allow_mouse) {
   if (!player_ || dt <= 0) return;
   ecs::World& world = *ctx_.world;
   physics::PhysicsWorld& phys = *ctx_.physics;
 
-  if (allow_keyboard && input.key_pressed(Key::kTab)) mouse_captured_ = !mouse_captured_;
+  if (allow_keyboard && input.key_pressed(ui::Key::kTab)) mouse_captured_ = !mouse_captured_;
   if (allow_keyboard && mouse_captured_) {
-    if (input.key_pressed(Key::kR)) pending_reload_ = true;
-    if (input.key_pressed(Key::k1)) pending_switch_ = 0;
-    if (input.key_pressed(Key::k2)) pending_switch_ = 1;
-    if (input.key_pressed(Key::k3)) pending_switch_ = 2;
-    if (input.key_pressed(Key::k4)) pending_switch_ = 3;
-    if (input.key_pressed(Key::kG)) ResetPlayer();
-    if (input.key_pressed(Key::kM)) show_panel_ = !show_panel_;
+    if (input.key_pressed(ui::Key::kR)) pending_reload_ = true;
+    if (input.key_pressed(ui::Key::k1)) pending_switch_ = 0;
+    if (input.key_pressed(ui::Key::k2)) pending_switch_ = 1;
+    if (input.key_pressed(ui::Key::k3)) pending_switch_ = 2;
+    if (input.key_pressed(ui::Key::k4)) pending_switch_ = 3;
+    if (input.key_pressed(ui::Key::kG)) ResetPlayer();
+    if (input.key_pressed(ui::Key::kM)) show_panel_ = !show_panel_;
     if (input.wheel != 0) {
       if (auto* loadout = world.Get<combat::Loadout>(player_)) {
         const int count = rx::Max<int>(loadout->count, 1);
@@ -563,8 +563,8 @@ void ShooterDemo::Update(f32 dt, const InputState& input, const ActionState& act
     }
   }
 
-  const bool firing = mouse_captured_ && allow_mouse && input.button(MouseButton::kLeft);
-  const bool aiming = mouse_captured_ && allow_mouse && input.button(MouseButton::kRight);
+  const bool firing = mouse_captured_ && allow_mouse && input.button(ui::MouseButton::kLeft);
+  const bool aiming = mouse_captured_ && allow_mouse && input.button(ui::MouseButton::kRight);
   if (auto* intent = world.Get<combat::WeaponIntent>(player_)) {
     intent->trigger = firing;
     intent->aim = aiming;

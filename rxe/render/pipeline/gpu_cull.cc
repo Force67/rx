@@ -56,15 +56,15 @@ void ExtractPlanes(const Mat4& vp, f32 out[5][4]) {
 
 }  // namespace
 
-bool GpuCull::Initialize(Device& device, Format color_format) {
+bool GpuCull::Initialize(gpu::Device& device, gpu::Format color_format) {
   pipeline_ = device.CreateComputePipeline({
       .shader = RX_SHADER(k_cull_cs_hlsl),
-      .sets = {{.slots = {{0, BindingType::kStorageBuffer},
-                          {1, BindingType::kStorageBuffer},
-                          {2, BindingType::kStorageBuffer},
-                          {3, BindingType::kSampledImage},     // hi-z (occlusion)
-                          {4, BindingType::kUniformBuffer}}}},  // CullReproject
-      .push_constant_size = PushSize<CullPush>(),
+      .sets = {{.slots = {{0, gpu::BindingType::kStorageBuffer},
+                          {1, gpu::BindingType::kStorageBuffer},
+                          {2, gpu::BindingType::kStorageBuffer},
+                          {3, gpu::BindingType::kSampledImage},     // hi-z (occlusion)
+                          {4, gpu::BindingType::kUniformBuffer}}}},  // CullReproject
+      .push_constant_size = gpu::PushSize<CullPush>(),
       .debug_name = "cull",
   });
   if (!pipeline_) {
@@ -74,13 +74,13 @@ bool GpuCull::Initialize(Device& device, Format color_format) {
 
   for (u32 i = 0; i < kFramesInFlight; ++i) {
     instances_[i] = device.CreateBuffer(static_cast<u64>(kMaxInstances) * sizeof(Instance),
-                                        kBufferUsageStorage, true);
+                                        gpu::kBufferUsageStorage, true);
     commands_[i] = device.CreateBuffer(static_cast<u64>(kMaxCommands) * sizeof(Command),
-                                       kBufferUsageStorage | kBufferUsageIndirect, true);
-    counts_[i] = device.CreateBuffer(16, kBufferUsageStorage, true);
+                                       gpu::kBufferUsageStorage | gpu::kBufferUsageIndirect, true);
+    counts_[i] = device.CreateBuffer(16, gpu::kBufferUsageStorage, true);
     // One per in-flight frame: the pass rewrites it while the previous frame
     // may still be reading its own copy.
-    reproject_[i] = device.CreateBuffer(sizeof(CullReproject), kBufferUsageUniform, true);
+    reproject_[i] = device.CreateBuffer(sizeof(CullReproject), gpu::kBufferUsageUniform, true);
     if (!instances_[i].mapped || !commands_[i].mapped || !counts_[i].mapped ||
         !reproject_[i].mapped) {
       return false;
@@ -90,9 +90,9 @@ bool GpuCull::Initialize(Device& device, Format color_format) {
   // Hi-z reduce pipeline: storage dst + sampled src.
   hiz_pipeline_ = device.CreateComputePipeline({
       .shader = RX_SHADER(k_hiz_reduce_cs_hlsl),
-      .sets = {{.slots = {{0, BindingType::kStorageImage},
-                          {1, BindingType::kSampledImage}}}},
-      .push_constant_size = PushSize<HizPush>(),
+      .sets = {{.slots = {{0, gpu::BindingType::kStorageImage},
+                          {1, gpu::BindingType::kSampledImage}}}},
+      .push_constant_size = gpu::PushSize<HizPush>(),
       .debug_name = "cull_hiz_reduce",
   });
   if (!hiz_pipeline_) return false;
@@ -100,13 +100,13 @@ bool GpuCull::Initialize(Device& device, Format color_format) {
   return CreateBoundsPipeline(device, color_format);
 }
 
-void GpuCull::ResizeDepth(Device& device, u32 width, u32 height) {
+void GpuCull::ResizeDepth(gpu::Device& device, u32 width, u32 height) {
   if (width == depth_w_ && height == depth_h_) return;
   for (u32 i = 0; i < kFramesInFlight; ++i) {
     device.DestroyImage(prev_depth_[i]);
-    prev_depth_[i] = device.CreateImage2D(Format::kR32Float, {width, height},
-                                          kTextureUsageStorage | kTextureUsageSampled);
-    prev_depth_state_[i] = ResourceState::kUndefined;
+    prev_depth_[i] = device.CreateImage2D(gpu::Format::kR32Float, {width, height},
+                                          gpu::kTextureUsageStorage | gpu::kTextureUsageSampled);
+    prev_depth_state_[i] = gpu::ResourceState::kUndefined;
   }
   depth_w_ = width;
   depth_h_ = height;
@@ -120,7 +120,7 @@ ResourceHandle GpuCull::BuildHiZ(RenderGraph& graph, u32 slot) {
   ResourceHandle prev = graph.ImportImage("cull_prev_depth", prev_depth_[read],
                                           &prev_depth_state_[read]);
   ResourceHandle hiz =
-      graph.CreateTexture({.name = "cull_hiz", .format = Format::kR32Float,
+      graph.CreateTexture({.name = "cull_hiz", .format = gpu::Format::kR32Float,
                            .width = hiz_w_, .height = hiz_h_});
   graph.AddPass(
       "cull_hiz",
@@ -130,8 +130,8 @@ ResourceHandle GpuCull::BuildHiZ(RenderGraph& graph, u32 slot) {
       },
       [this, prev, hiz](PassContext& ctx) {
         ctx.cmd->BindPipeline(hiz_pipeline_);
-        ctx.cmd->BindTransient(0, {Bind::Storage(0, ctx.graph->image(hiz)),
-                                   Bind::Sampled(1, ctx.graph->image(prev))});
+        ctx.cmd->BindTransient(0, {gpu::Bind::Storage(0, ctx.graph->image(hiz)),
+                                   gpu::Bind::Sampled(1, ctx.graph->image(prev))});
         HizPush push{{hiz_w_, hiz_h_}, kHizDownsample};
         ctx.cmd->Push(push);
         ctx.cmd->Dispatch2D({hiz_w_, hiz_h_});
@@ -151,23 +151,23 @@ void GpuCull::CopyDepth(RenderGraph& graph, ResourceHandle depth_export, u32 slo
       },
       [this, depth_export, dst](PassContext& ctx) {
         ctx.cmd->BindPipeline(hiz_pipeline_);
-        ctx.cmd->BindTransient(0, {Bind::Storage(0, ctx.graph->image(dst)),
-                                   Bind::Sampled(1, ctx.graph->image(depth_export))});
+        ctx.cmd->BindTransient(0, {gpu::Bind::Storage(0, ctx.graph->image(dst)),
+                                   gpu::Bind::Sampled(1, ctx.graph->image(depth_export))});
         HizPush push{{depth_w_, depth_h_}, 1};  // 1:1 snapshot
         ctx.cmd->Push(push);
         ctx.cmd->Dispatch2D({depth_w_, depth_h_});
       });
 }
 
-bool GpuCull::CreateBoundsPipeline(Device& device, Format color_format) {
+bool GpuCull::CreateBoundsPipeline(gpu::Device& device, gpu::Format color_format) {
   bounds_pipeline_ = device.CreateGraphicsPipeline({
       .vertex = RX_SHADER(k_bounds_vs_hlsl),
       .fragment = RX_SHADER(k_bounds_ps_hlsl),
-      .topology = PrimitiveTopology::kLineList,
-      .raster = {.cull = CullMode::kNone},  // overlay, no depth
+      .topology = gpu::PrimitiveTopology::kLineList,
+      .raster = {.cull = gpu::CullMode::kNone},  // overlay, no depth
       .color_formats = {color_format},
-      .sets = {{.slots = {{0, BindingType::kStorageBuffer}}, .stages = kShaderStageVertex}},
-      .push_constant_size = PushSize<Mat4>(),
+      .sets = {{.slots = {{0, gpu::BindingType::kStorageBuffer}}, .stages = gpu::kShaderStageVertex}},
+      .push_constant_size = gpu::PushSize<Mat4>(),
       .debug_name = "bounds_debug",
   });
   if (!bounds_pipeline_) {
@@ -180,16 +180,16 @@ bool GpuCull::CreateBoundsPipeline(Device& device, Format color_format) {
 void GpuCull::AddBoundsPass(RenderGraph& graph, ResourceHandle color, const Mat4& view_proj,
                             u32 instance_count, u32 slot) {
   if (instance_count == 0) return;
-  GpuBuffer instances = instances_[slot];
+  gpu::GpuBuffer instances = instances_[slot];
   graph.AddPass(
       "bounds_debug",
       [&](RenderGraph::PassBuilder& builder) { builder.Write(color, ResourceUsage::kColorAttachment); },
       [this, color, instances, view_proj, instance_count](PassContext& ctx) {
-        const GpuImage& target = ctx.graph->image(color);
-        ColorAttachment attachment{.view = target.view, .load = LoadOp::kLoad};
+        const gpu::GpuImage& target = ctx.graph->image(color);
+        gpu::ColorAttachment attachment{.view = target.view, .load = gpu::LoadOp::kLoad};
         ctx.cmd->BeginRendering({.extent = target.extent, .colors = base::Span(&attachment, 1)});
         ctx.cmd->BindPipeline(bounds_pipeline_);
-        ctx.cmd->BindTransient(0, {Bind::StorageBuffer(0, instances)});
+        ctx.cmd->BindTransient(0, {gpu::Bind::StorageBuffer(0, instances)});
         ctx.cmd->Push(view_proj);
         ctx.cmd->Draw(24, instance_count, 0, 0);
         ctx.cmd->EndRendering();
@@ -230,10 +230,10 @@ void GpuCull::AddToGraph(RenderGraph& graph, const Mat4& view_proj, const Mat4& 
   push.misc[0] = instance_count;
   push.misc[1] = frustum ? 1u : 0u;
   push.misc[2] = occ ? 1u : 0u;
-  GpuBuffer instances = instances_[slot];
-  GpuBuffer commands = commands_[slot];
-  GpuBuffer counts = counts_[slot];
-  GpuBuffer reproject_buffer = reproject_[slot];
+  gpu::GpuBuffer instances = instances_[slot];
+  gpu::GpuBuffer commands = commands_[slot];
+  gpu::GpuBuffer counts = counts_[slot];
+  gpu::GpuBuffer reproject_buffer = reproject_[slot];
 
   bool has_hiz = hiz != kInvalidResource;
   graph.AddPass(
@@ -244,22 +244,22 @@ void GpuCull::AddToGraph(RenderGraph& graph, const Mat4& view_proj, const Mat4& 
       [this, push, instances, commands, counts, reproject_buffer, instance_count, has_hiz,
        hiz](PassContext& ctx) {
         ctx.cmd->BindPipeline(pipeline_);
-        base::Vector<BindingItem> items;
-        items.push_back(Bind::StorageBuffer(0, instances));
-        items.push_back(Bind::StorageBuffer(1, commands));
-        items.push_back(Bind::StorageBuffer(2, counts));
-        if (has_hiz) items.push_back(Bind::Sampled(3, ctx.graph->image(hiz)));
-        items.push_back(Bind::Uniform(4, reproject_buffer, 0, sizeof(CullReproject)));
+        base::Vector<gpu::BindingItem> items;
+        items.push_back(gpu::Bind::StorageBuffer(0, instances));
+        items.push_back(gpu::Bind::StorageBuffer(1, commands));
+        items.push_back(gpu::Bind::StorageBuffer(2, counts));
+        if (has_hiz) items.push_back(gpu::Bind::Sampled(3, ctx.graph->image(hiz)));
+        items.push_back(gpu::Bind::Uniform(4, reproject_buffer, 0, sizeof(CullReproject)));
         ctx.cmd->BindTransient(0, base::Span(items.data(), items.size()));
         ctx.cmd->Push(push);
         ctx.cmd->Dispatch((instance_count + 63) / 64, 1, 1);
 
         // Make the written instanceCounts visible to the indirect draws.
-        ctx.cmd->MemoryBarrier(BarrierScope::kComputeWrite, BarrierScope::kIndirectArgs);
+        ctx.cmd->MemoryBarrier(gpu::BarrierScope::kComputeWrite, gpu::BarrierScope::kIndirectArgs);
       });
 }
 
-void GpuCull::Destroy(Device& device) {
+void GpuCull::Destroy(gpu::Device& device) {
   if (pipeline_) device.DestroyPipeline(pipeline_);
   if (bounds_pipeline_) device.DestroyPipeline(bounds_pipeline_);
   if (hiz_pipeline_) device.DestroyPipeline(hiz_pipeline_);

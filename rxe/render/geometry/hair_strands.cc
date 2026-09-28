@@ -71,8 +71,8 @@ u32 PackCaps(const HairTierCaps& caps) {
          (caps.per_fragment_h ? kCapPerFragmentH : 0u) | (caps.tilted_lobes ? kCapTilt : 0u);
 }
 
-constexpr Format kDomFormat = Format::kRGBA16Float;
-constexpr Format kDomDepthFormat = Format::kD32Float;
+constexpr gpu::Format kDomFormat = gpu::Format::kRGBA16Float;
+constexpr gpu::Format kDomDepthFormat = gpu::Format::kD32Float;
 
 ByteSpan Span(const void* data, size_t bytes) {
   return ByteSpan(static_cast<const u8*>(data), bytes);
@@ -82,25 +82,25 @@ constexpr u32 kAllSlotsStale = (1u << HairStrands::kFramesInFlight) - 1;
 
 }  // namespace
 
-bool HairStrands::Initialize(Device& device, Format color_format, Format depth_format) {
+bool HairStrands::Initialize(gpu::Device& device, gpu::Format color_format, gpu::Format depth_format) {
   device_ = &device;
   draw_pipeline_ = device.CreateGraphicsPipeline({
       .vertex = RX_SHADER(k_hair_vs_hlsl),
       .fragment = RX_SHADER(k_hair_ps_hlsl),
-      .raster = {.cull = CullMode::kNone},  // ribbons flip with the view
-      .depth = {.test = true, .write = true, .compare = CompareOp::kGreaterEqual,
+      .raster = {.cull = gpu::CullMode::kNone},  // ribbons flip with the view
+      .depth = {.test = true, .write = true, .compare = gpu::CompareOp::kGreaterEqual,
                 .format = depth_format},
       .color_formats = {color_format},
       // The fragment stage reads the transmittance volume, so the set spans
       // both stages now.
-      .sets = {{.slots = {{0, BindingType::kStorageBuffer},
-                          {1, BindingType::kStorageBuffer},
-                          {2, BindingType::kCombinedTextureSampler},
-                          {3, BindingType::kCombinedTextureSampler},
-                          {4, BindingType::kUniformBuffer},
-                          {5, BindingType::kUniformBuffer}},
-                .stages = kShaderStageVertex | kShaderStageFragment}},
-      .push_constant_size = PushSize<DrawPush>(),
+      .sets = {{.slots = {{0, gpu::BindingType::kStorageBuffer},
+                          {1, gpu::BindingType::kStorageBuffer},
+                          {2, gpu::BindingType::kCombinedTextureSampler},
+                          {3, gpu::BindingType::kCombinedTextureSampler},
+                          {4, gpu::BindingType::kUniformBuffer},
+                          {5, gpu::BindingType::kUniformBuffer}},
+                .stages = gpu::kShaderStageVertex | gpu::kShaderStageFragment}},
+      .push_constant_size = gpu::PushSize<DrawPush>(),
       .debug_name = "hair_draw",
   });
   if (!draw_pipeline_) {
@@ -112,13 +112,13 @@ bool HairStrands::Initialize(Device& device, Format color_format, Format depth_f
   // fragment shader - the depth is the whole output.
   depth_pipeline_ = device.CreateGraphicsPipeline({
       .vertex = RX_SHADER(k_hair_vs_hlsl),
-      .fragment = ShaderBlob{},
-      .raster = {.cull = CullMode::kNone},
-      .depth = {.test = true, .write = true, .compare = CompareOp::kLess,
+      .fragment = gpu::ShaderBlob{},
+      .raster = {.cull = gpu::CullMode::kNone},
+      .depth = {.test = true, .write = true, .compare = gpu::CompareOp::kLess,
                 .format = kDomDepthFormat},
-      .sets = {{.slots = {{0, BindingType::kStorageBuffer}, {1, BindingType::kStorageBuffer}},
-                .stages = kShaderStageVertex}},
-      .push_constant_size = PushSize<DrawPush>(),
+      .sets = {{.slots = {{0, gpu::BindingType::kStorageBuffer}, {1, gpu::BindingType::kStorageBuffer}},
+                .stages = gpu::kShaderStageVertex}},
+      .push_constant_size = gpu::PushSize<DrawPush>(),
       .debug_name = "hair_dom_depth",
   });
   // Pass two: additive fibre counts, depth test OFF. Every fibre along the ray
@@ -127,16 +127,16 @@ bool HairStrands::Initialize(Device& device, Format color_format, Format depth_f
   dom_pipeline_ = device.CreateGraphicsPipeline({
       .vertex = RX_SHADER(k_hair_vs_hlsl),
       .fragment = RX_SHADER(k_hair_dom_ps_hlsl),
-      .raster = {.cull = CullMode::kNone},
+      .raster = {.cull = gpu::CullMode::kNone},
       .depth = {.test = false, .write = false, .format = kDomDepthFormat},
       .color_formats = {kDomFormat},
-      .blend = {BlendMode::kAdditive},
-      .sets = {{.slots = {{0, BindingType::kStorageBuffer},
-                          {1, BindingType::kStorageBuffer},
-                          {2, BindingType::kCombinedTextureSampler},
-                          {3, BindingType::kUniformBuffer}},
-                .stages = kShaderStageVertex | kShaderStageFragment}},
-      .push_constant_size = PushSize<DrawPush>(),
+      .blend = {gpu::BlendMode::kAdditive},
+      .sets = {{.slots = {{0, gpu::BindingType::kStorageBuffer},
+                          {1, gpu::BindingType::kStorageBuffer},
+                          {2, gpu::BindingType::kCombinedTextureSampler},
+                          {3, gpu::BindingType::kUniformBuffer}},
+                .stages = gpu::kShaderStageVertex | gpu::kShaderStageFragment}},
+      .push_constant_size = gpu::PushSize<DrawPush>(),
       .debug_name = "hair_dom",
   });
   if (!depth_pipeline_ || !dom_pipeline_) {
@@ -145,30 +145,30 @@ bool HairStrands::Initialize(Device& device, Format color_format, Format depth_f
     RX_WARN("hair transmittance volume unavailable; grooms will shade without self-shadowing");
   }
 
-  volume_sampler_ = device.GetSampler({.min_filter = Filter::kLinear,
-                                       .mag_filter = Filter::kLinear,
-                                       .address_u = AddressMode::kClampToEdge,
-                                       .address_v = AddressMode::kClampToEdge});
+  volume_sampler_ = device.GetSampler({.min_filter = gpu::Filter::kLinear,
+                                       .mag_filter = gpu::Filter::kLinear,
+                                       .address_u = gpu::AddressMode::kClampToEdge,
+                                       .address_v = gpu::AddressMode::kClampToEdge});
   front_depth_ = device.CreateImage2D(kDomDepthFormat,
                                       {kTransmittanceResolution, kTransmittanceResolution},
-                                      kTextureUsageDepthTarget | kTextureUsageSampled);
+                                      gpu::kTextureUsageDepthTarget | gpu::kTextureUsageSampled);
   dom_ = device.CreateImage2D(kDomFormat, {kTransmittanceResolution, kTransmittanceResolution},
-                              kTextureUsageColorTarget | kTextureUsageSampled);
+                              gpu::kTextureUsageColorTarget | gpu::kTextureUsageSampled);
   for (u32 i = 0; i < kFramesInFlight; ++i) {
-    volume_params_[i] = device.CreateBuffer(sizeof(VolumeParams), kBufferUsageUniform, true);
+    volume_params_[i] = device.CreateBuffer(sizeof(VolumeParams), gpu::kBufferUsageUniform, true);
   }
   // Park both images in a readable state up front. A frame that skips the
   // volume passes still binds them, and a descriptor pointing at an image in
   // kUndefined is a validation error rather than a black texture.
   if (front_depth_ && dom_) {
-    device.ImmediateSubmit([&](CommandList& cmd) {
-      cmd.Barrier(Transition(front_depth_, ResourceState::kUndefined,
-                             ResourceState::kShaderReadFragment));
+    device.ImmediateSubmit([&](gpu::CommandList& cmd) {
+      cmd.Barrier(gpu::Transition(front_depth_, gpu::ResourceState::kUndefined,
+                             gpu::ResourceState::kShaderReadFragment));
       cmd.Barrier(
-          Transition(dom_, ResourceState::kUndefined, ResourceState::kShaderReadFragment));
+          gpu::Transition(dom_, gpu::ResourceState::kUndefined, gpu::ResourceState::kShaderReadFragment));
     });
-    front_depth_state_ = ResourceState::kShaderReadFragment;
-    dom_state_ = ResourceState::kShaderReadFragment;
+    front_depth_state_ = gpu::ResourceState::kShaderReadFragment;
+    dom_state_ = gpu::ResourceState::kShaderReadFragment;
   }
   return true;
 }
@@ -238,7 +238,7 @@ HairStrands::TransmittanceBinding HairStrands::transmittance() const {
   return b;
 }
 
-void HairStrands::Destroy(Device& device) {
+void HairStrands::Destroy(gpu::Device& device) {
   if (draw_pipeline_) device.DestroyPipeline(draw_pipeline_);
   if (depth_pipeline_) device.DestroyPipeline(depth_pipeline_);
   if (dom_pipeline_) device.DestroyPipeline(dom_pipeline_);
@@ -260,7 +260,7 @@ void HairStrands::Destroy(Device& device) {
       if (g.points[i]) device.DestroyBuffer(g.points[i]);
       g.points[i] = {};
     }
-    for (GpuBuffer* b : {&g.colors, &g.indices, &g.material}) {
+    for (gpu::GpuBuffer* b : {&g.colors, &g.indices, &g.material}) {
       if (*b) device.DestroyBuffer(*b);
       *b = {};
     }
@@ -283,7 +283,7 @@ HairStrands::Groom* HairStrands::Find(u32 id) {
   return nullptr;
 }
 
-u32 HairStrands::Upload(Device& device, const GroomData& data, const GroomParams& params,
+u32 HairStrands::Upload(gpu::Device& device, const GroomData& data, const GroomParams& params,
                         const Mat4& transform) {
   if (data.guide_count == 0 || data.points.size() < data.guide_count * kPointsPerStrand * 3) {
     return 0;
@@ -337,7 +337,7 @@ u32 HairStrands::Upload(Device& device, const GroomData& data, const GroomParams
   // when SetGroomPoints marked it stale, so an unfed groom costs no copies.
   const u64 points_bytes = g.host_points.size() * sizeof(HairPoint);
   for (u32 i = 0; i < kFramesInFlight; ++i) {
-    g.points[i] = device.CreateBuffer(points_bytes, kBufferUsageStorage, true);
+    g.points[i] = device.CreateBuffer(points_bytes, gpu::kBufferUsageStorage, true);
     if (!g.points[i].mapped) {
       for (u32 j = 0; j <= i; ++j) {
         if (g.points[j]) device.DestroyBuffer(g.points[j]);
@@ -347,9 +347,9 @@ u32 HairStrands::Upload(Device& device, const GroomData& data, const GroomParams
     base::MemCopy(g.points[i].mapped, g.host_points.data(), points_bytes);
   }
   g.colors = device.CreateBufferWithData(
-      Span(host_colors.data(), host_colors.size() * sizeof(f32)), kBufferUsageStorage);
+      Span(host_colors.data(), host_colors.size() * sizeof(f32)), gpu::kBufferUsageStorage);
   g.indices = device.CreateBufferWithData(Span(idx.data(), idx.size() * sizeof(u32)),
-                                          kBufferUsageIndex);
+                                          gpu::kBufferUsageIndex);
   g.guide_count = n;
   g.children = children;
   g.index_count = static_cast<u32>(idx.size());
@@ -359,7 +359,7 @@ u32 HairStrands::Upload(Device& device, const GroomData& data, const GroomParams
   g.collision_center = data.collision_center;
   g.collision_radius = data.collision_radius;
   g.tint = params.tint;
-  g.material = device.CreateBuffer(sizeof(GroomMaterial), kBufferUsageUniform, true);
+  g.material = device.CreateBuffer(sizeof(GroomMaterial), gpu::kBufferUsageUniform, true);
   // A groom with no authored fibre starts brown rather than at the struct's
   // zero absorption, which would be a colourless fibre nobody wants to see.
   g.hair = HairPresetParams(HairPreset::kBrown);
@@ -372,7 +372,7 @@ u32 HairStrands::Upload(Device& device, const GroomData& data, const GroomParams
   return grooms_.back().id;
 }
 
-u32 HairStrands::CreateGroom(Device& device, const GroomData& data, const GroomParams& params,
+u32 HairStrands::CreateGroom(gpu::Device& device, const GroomData& data, const GroomParams& params,
                              const Mat4& transform) {
   return Upload(device, data, params, transform);
 }
@@ -423,21 +423,21 @@ bool HairStrands::GroomHead(u32 id, Vec3* center, f32* radius) {
   return true;
 }
 
-void HairStrands::DestroyGroom(Device& device, u32 id) {
+void HairStrands::DestroyGroom(gpu::Device& device, u32 id) {
   Groom* g = Find(id);
   if (!g) return;
   for (u32 i = 0; i < kFramesInFlight; ++i) {
     if (g->points[i]) device.DestroyBuffer(g->points[i]);
     g->points[i] = {};
   }
-  for (GpuBuffer* b : {&g->colors, &g->indices, &g->material}) {
+  for (gpu::GpuBuffer* b : {&g->colors, &g->indices, &g->material}) {
     if (*b) device.DestroyBuffer(*b);
     *b = {};
   }
   g->alive = false;
 }
 
-void HairStrands::SeedCap(Device& device, const Vec3& head_center, f32 head_radius,
+void HairStrands::SeedCap(gpu::Device& device, const Vec3& head_center, f32 head_radius,
                           u32 strand_count, f32 strand_length) {
   // Fibonacci-distributed roots over the upper hemisphere, in a groom-local
   // frame (scalp at origin); a simulation feed relaxes them under gravity.
@@ -564,7 +564,7 @@ void HairStrands::AddTransmittanceToGraph(RenderGraph& graph, const Frame& frame
     g.stale &= ~slot_bit;
   }
 
-  const Extent2D res{kTransmittanceResolution, kTransmittanceResolution};
+  const gpu::Extent2D res{kTransmittanceResolution, kTransmittanceResolution};
   ResourceHandle front = graph.ImportImage("hair_dom_depth", front_depth_, &front_depth_state_);
   ResourceHandle layers = graph.ImportImage("hair_dom", dom_, &dom_state_);
   // Remembered so the lit draw can DECLARE the reads. Declaring them is the
@@ -586,17 +586,17 @@ void HairStrands::AddTransmittanceToGraph(RenderGraph& graph, const Frame& frame
       FillGroomPush(push, g.strand_width, g.clump_radius, g.tint, g.children);
       if (dom_pass) {
         ctx.cmd->BindTransient(
-            0, {Bind::StorageBuffer(0, g.points[slot], 0, g.points[slot].size),
-                Bind::StorageBuffer(1, g.colors, 0, g.colors.size),
-                Bind::Combined(2, front_depth_.view, volume_sampler_),
-                Bind::Uniform(3, volume_params_[slot])});
+            0, {gpu::Bind::StorageBuffer(0, g.points[slot], 0, g.points[slot].size),
+                gpu::Bind::StorageBuffer(1, g.colors, 0, g.colors.size),
+                gpu::Bind::Combined(2, front_depth_.view, volume_sampler_),
+                gpu::Bind::Uniform(3, volume_params_[slot])});
       } else {
         ctx.cmd->BindTransient(
-            0, {Bind::StorageBuffer(0, g.points[slot], 0, g.points[slot].size),
-                Bind::StorageBuffer(1, g.colors, 0, g.colors.size)});
+            0, {gpu::Bind::StorageBuffer(0, g.points[slot], 0, g.points[slot].size),
+                gpu::Bind::StorageBuffer(1, g.colors, 0, g.colors.size)});
       }
       ctx.cmd->Push(push);
-      ctx.cmd->BindIndexBuffer(g.indices, 0, IndexType::kUint32);
+      ctx.cmd->BindIndexBuffer(g.indices, 0, gpu::IndexType::kUint32);
       ctx.cmd->DrawIndexed(g.index_count, 1, 0, 0, 0);
     }
   };
@@ -605,8 +605,8 @@ void HairStrands::AddTransmittanceToGraph(RenderGraph& graph, const Frame& frame
       "hair_dom_depth",
       [&](RenderGraph::PassBuilder& b) { b.Write(front, ResourceUsage::kDepthAttachment); },
       [this, front, res, record_grooms](PassContext& ctx) {
-        DepthAttachment depth_att{.view = ctx.graph->image(front).view,
-                                  .load = LoadOp::kClear,
+        gpu::DepthAttachment depth_att{.view = ctx.graph->image(front).view,
+                                  .load = gpu::LoadOp::kClear,
                                   // Standard depth here (the DOM pipeline uses
                                   // kLess), not the scene's reversed-z.
                                   .clear = 1.0f};
@@ -623,7 +623,7 @@ void HairStrands::AddTransmittanceToGraph(RenderGraph& graph, const Frame& frame
         b.Write(layers, ResourceUsage::kColorAttachment);
       },
       [this, layers, res, record_grooms](PassContext& ctx) {
-        ColorAttachment att{.view = ctx.graph->image(layers).view, .load = LoadOp::kClear};
+        gpu::ColorAttachment att{.view = ctx.graph->image(layers).view, .load = gpu::LoadOp::kClear};
         ctx.cmd->BeginRendering({.extent = res, .colors = base::Span(&att, 1)});
         ctx.cmd->BindPipeline(dom_pipeline_);
         record_grooms(ctx, true);
@@ -634,7 +634,7 @@ void HairStrands::AddTransmittanceToGraph(RenderGraph& graph, const Frame& frame
 }
 
 void HairStrands::AddToGraph(RenderGraph& graph, ResourceHandle color, ResourceHandle depth,
-                             Extent2D extent, const Frame& frame, u32 frame_slot) {
+                             gpu::Extent2D extent, const Frame& frame, u32 frame_slot) {
   if (!active()) return;
 
   // Publish this frame's simulated positions into the slot's buffer before
@@ -659,8 +659,8 @@ void HairStrands::AddToGraph(RenderGraph& graph, ResourceHandle color, ResourceH
         }
       },
       [this, color, depth, extent, frame, slot](PassContext& ctx) {
-        ColorAttachment att{.view = ctx.graph->image(color).view, .load = LoadOp::kLoad};
-        DepthAttachment depth_att{.view = ctx.graph->image(depth).view, .load = LoadOp::kLoad};
+        gpu::ColorAttachment att{.view = ctx.graph->image(color).view, .load = gpu::LoadOp::kLoad};
+        gpu::DepthAttachment depth_att{.view = ctx.graph->image(depth).view, .load = gpu::LoadOp::kLoad};
         ctx.cmd->BeginRendering({.extent = extent, .colors = base::Span(&att, 1), .depth = &depth_att});
         ctx.cmd->BindPipeline(draw_pipeline_);
         Vec3 sun = Normalize(frame.sun_direction);
@@ -680,18 +680,18 @@ void HairStrands::AddToGraph(RenderGraph& graph, ResourceHandle color, ResourceH
           push.sun_color[2] = frame.sun_color.z;
           FillGroomPush(push, g.strand_width, g.clump_radius, g.tint, g.children);
           ctx.cmd->BindTransient(
-              0, {Bind::StorageBuffer(0, g.points[slot], 0, g.points[slot].size),
-                  Bind::StorageBuffer(1, g.colors, 0, g.colors.size),
+              0, {gpu::Bind::StorageBuffer(0, g.points[slot], 0, g.points[slot].size),
+                  gpu::Bind::StorageBuffer(1, g.colors, 0, g.colors.size),
                   // The volume images are always bound; the shader gates on the
                   // caps instead. They are transitioned to a sampled state at
                   // creation and left in one by the graph, so a frame that
                   // skipped the volume passes still has something legal here.
-                  Bind::Combined(2, front_depth_.view, volume_sampler_),
-                  Bind::Combined(3, dom_.view, volume_sampler_),
-                  Bind::Uniform(4, volume_params_[volume_slot_]),
-                  Bind::Uniform(5, g.material)});
+                  gpu::Bind::Combined(2, front_depth_.view, volume_sampler_),
+                  gpu::Bind::Combined(3, dom_.view, volume_sampler_),
+                  gpu::Bind::Uniform(4, volume_params_[volume_slot_]),
+                  gpu::Bind::Uniform(5, g.material)});
           ctx.cmd->Push(push);
-          ctx.cmd->BindIndexBuffer(g.indices, 0, IndexType::kUint32);
+          ctx.cmd->BindIndexBuffer(g.indices, 0, gpu::IndexType::kUint32);
           ctx.cmd->DrawIndexed(g.index_count, 1, 0, 0, 0);
         }
         ctx.cmd->EndRendering();

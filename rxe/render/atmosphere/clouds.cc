@@ -30,14 +30,14 @@ struct CloudPush {
 
 }  // namespace
 
-bool Clouds::Initialize(Device& device) {
+bool Clouds::Initialize(gpu::Device& device) {
   pipeline_ = device.CreateComputePipeline({
       .shader = RX_SHADER(k_clouds_cs_hlsl),
-      .sets = {{.slots = {{0, BindingType::kStorageImage},
-                          {1, BindingType::kSampledImage},
-                          {2, BindingType::kSampledImage},
-                          {3, BindingType::kUniformBuffer}}}},
-      .push_constant_size = PushSize<CloudPush>(),
+      .sets = {{.slots = {{0, gpu::BindingType::kStorageImage},
+                          {1, gpu::BindingType::kSampledImage},
+                          {2, gpu::BindingType::kSampledImage},
+                          {3, gpu::BindingType::kUniformBuffer}}}},
+      .push_constant_size = gpu::PushSize<CloudPush>(),
       .debug_name = "clouds",
   });
   if (!pipeline_) {
@@ -46,26 +46,26 @@ bool Clouds::Initialize(Device& device) {
   }
   // One per in-flight frame: the pass rewrites it while the previous frame may
   // still be reading its own copy.
-  for (GpuBuffer& camera : camera_) {
-    camera = device.CreateBuffer(sizeof(CloudCamera), kBufferUsageUniform, true);
+  for (gpu::GpuBuffer& camera : camera_) {
+    camera = device.CreateBuffer(sizeof(CloudCamera), gpu::kBufferUsageUniform, true);
     if (!camera.mapped) return false;
   }
   return true;
 }
 
-void Clouds::Destroy(Device& device) {
+void Clouds::Destroy(gpu::Device& device) {
   device.DestroyPipeline(pipeline_);
   pipeline_ = {};
-  for (GpuBuffer& camera : camera_) {
+  for (gpu::GpuBuffer& camera : camera_) {
     if (camera) device.DestroyBuffer(camera);
     camera = {};
   }
 }
 
 ResourceHandle Clouds::AddToGraph(RenderGraph& graph, ResourceHandle color, ResourceHandle depth,
-                                  Extent2D extent, const Frame& frame) {
+                                  gpu::Extent2D extent, const Frame& frame) {
   ResourceHandle out = graph.CreateTexture({.name = "clouds",
-                                            .format = Format::kRGBA16Float,
+                                            .format = gpu::Format::kRGBA16Float,
                                             .width = extent.width,
                                             .height = extent.height});
   uniform_slot_ ^= 1;
@@ -106,10 +106,10 @@ ResourceHandle Clouds::AddToGraph(RenderGraph& graph, ResourceHandle color, Reso
         push.wind_z = frame.wind_z;
 
         ctx.cmd->BindPipeline(pipeline_);
-        ctx.cmd->BindTransient(0, {Bind::Storage(0, ctx.graph->image(out)),
-                                   Bind::Sampled(1, ctx.graph->image(color)),
-                                   Bind::Sampled(2, ctx.graph->image(depth)),
-                                   Bind::Uniform(3, camera_[slot], 0, sizeof(CloudCamera))});
+        ctx.cmd->BindTransient(0, {gpu::Bind::Storage(0, ctx.graph->image(out)),
+                                   gpu::Bind::Sampled(1, ctx.graph->image(color)),
+                                   gpu::Bind::Sampled(2, ctx.graph->image(depth)),
+                                   gpu::Bind::Uniform(3, camera_[slot], 0, sizeof(CloudCamera))});
         ctx.cmd->Push(push);
         ctx.cmd->Dispatch2D(extent);
       });

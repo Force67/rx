@@ -35,55 +35,55 @@ struct CompositePush {
 
 }  // namespace
 
-bool DepthOfFieldPass::Initialize(Device& device) {
+bool DepthOfFieldPass::Initialize(gpu::Device& device) {
   focus_pipeline_ = device.CreateComputePipeline({
       .shader = RX_SHADER(k_dof_focus_cs_hlsl),
-      .sets = {{.slots = {{0, BindingType::kStorageImage},
-                          {1, BindingType::kSampledImage}}}},
-      .push_constant_size = PushSize<FocusPush>(),
+      .sets = {{.slots = {{0, gpu::BindingType::kStorageImage},
+                          {1, gpu::BindingType::kSampledImage}}}},
+      .push_constant_size = gpu::PushSize<FocusPush>(),
       .debug_name = "dof_focus",
   });
   coc_pipeline_ = device.CreateComputePipeline({
       .shader = RX_SHADER(k_dof_coc_cs_hlsl),
-      .sets = {{.slots = {{0, BindingType::kStorageImage},
-                          {1, BindingType::kSampledImage},
-                          {2, BindingType::kSampledImage}}}},
-      .push_constant_size = PushSize<CocPush>(),
+      .sets = {{.slots = {{0, gpu::BindingType::kStorageImage},
+                          {1, gpu::BindingType::kSampledImage},
+                          {2, gpu::BindingType::kSampledImage}}}},
+      .push_constant_size = gpu::PushSize<CocPush>(),
       .debug_name = "dof_coc",
   });
   gather_pipeline_ = device.CreateComputePipeline({
       .shader = RX_SHADER(k_dof_gather_cs_hlsl),
-      .sets = {{.slots = {{0, BindingType::kStorageImage},
-                          {1, BindingType::kCombinedTextureSampler},
-                          {2, BindingType::kCombinedTextureSampler}}}},
-      .push_constant_size = PushSize<GatherPush>(),
+      .sets = {{.slots = {{0, gpu::BindingType::kStorageImage},
+                          {1, gpu::BindingType::kCombinedTextureSampler},
+                          {2, gpu::BindingType::kCombinedTextureSampler}}}},
+      .push_constant_size = gpu::PushSize<GatherPush>(),
       .debug_name = "dof_gather",
   });
   composite_pipeline_ = device.CreateComputePipeline({
       .shader = RX_SHADER(k_dof_composite_cs_hlsl),
-      .sets = {{.slots = {{0, BindingType::kStorageImage},
-                          {1, BindingType::kSampledImage},
-                          {2, BindingType::kCombinedTextureSampler},
-                          {3, BindingType::kSampledImage}}}},
-      .push_constant_size = PushSize<CompositePush>(),
+      .sets = {{.slots = {{0, gpu::BindingType::kStorageImage},
+                          {1, gpu::BindingType::kSampledImage},
+                          {2, gpu::BindingType::kCombinedTextureSampler},
+                          {3, gpu::BindingType::kSampledImage}}}},
+      .push_constant_size = gpu::PushSize<CompositePush>(),
       .debug_name = "dof_composite",
   });
   if (!focus_pipeline_ || !coc_pipeline_ || !gather_pipeline_ || !composite_pipeline_) {
     RX_ERROR("dof pipeline creation failed");
     return false;
   }
-  focus_state_ = device.CreateImage2D(Format::kR32Float, {1, 1},
-                                     kTextureUsageStorage | kTextureUsageSampled);
-  focus_layout_ = ResourceState::kUndefined;
+  focus_state_ = device.CreateImage2D(gpu::Format::kR32Float, {1, 1},
+                                     gpu::kTextureUsageStorage | gpu::kTextureUsageSampled);
+  focus_layout_ = gpu::ResourceState::kUndefined;
   focus_valid_ = false;
   if (!focus_state_) return false;
-  sampler_ = device.GetSampler({.address_u = AddressMode::kClampToEdge,
-                                .address_v = AddressMode::kClampToEdge});
+  sampler_ = device.GetSampler({.address_u = gpu::AddressMode::kClampToEdge,
+                                .address_v = gpu::AddressMode::kClampToEdge});
   return true;
 }
 
-void DepthOfFieldPass::Destroy(Device& device) {
-  for (PipelineHandle* p : {&focus_pipeline_, &coc_pipeline_, &gather_pipeline_, &composite_pipeline_}) {
+void DepthOfFieldPass::Destroy(gpu::Device& device) {
+  for (gpu::PipelineHandle* p : {&focus_pipeline_, &coc_pipeline_, &gather_pipeline_, &composite_pipeline_}) {
     if (*p) device.DestroyPipeline(*p);
     *p = {};
   }
@@ -93,22 +93,22 @@ void DepthOfFieldPass::Destroy(Device& device) {
 }
 
 ResourceHandle DepthOfFieldPass::AddToGraph(RenderGraph& graph, ResourceHandle color,
-                                            ResourceHandle depth, Extent2D extent,
+                                            ResourceHandle depth, gpu::Extent2D extent,
                                             const Frame& frame) {
   if (!focus_state_ || !focus_pipeline_ || !coc_pipeline_ || !gather_pipeline_ ||
       !composite_pipeline_) return color;
   ResourceHandle focus = graph.ImportImage("dof_focus", focus_state_, &focus_layout_);
   const bool reset = !focus_valid_;
   focus_valid_ = true;
-  Extent2D half{(extent.width + 1) / 2, (extent.height + 1) / 2};
+  gpu::Extent2D half{(extent.width + 1) / 2, (extent.height + 1) / 2};
   ResourceHandle coc = graph.CreateTexture(
-      {.name = "dof_coc", .format = Format::kR16Float, .width = extent.width,
+      {.name = "dof_coc", .format = gpu::Format::kR16Float, .width = extent.width,
        .height = extent.height});
   ResourceHandle gathered = graph.CreateTexture(
-      {.name = "dof_gather", .format = Format::kRGBA16Float, .width = half.width,
+      {.name = "dof_gather", .format = gpu::Format::kRGBA16Float, .width = half.width,
        .height = half.height});
   ResourceHandle out = graph.CreateTexture(
-      {.name = "dof_out", .format = Format::kRGBA16Float, .width = extent.width,
+      {.name = "dof_out", .format = gpu::Format::kRGBA16Float, .width = extent.width,
        .height = extent.height});
 
   graph.AddPass(
@@ -120,8 +120,8 @@ ResourceHandle DepthOfFieldPass::AddToGraph(RenderGraph& graph, ResourceHandle c
       [this, focus, depth, frame, reset](PassContext& ctx) {
         FocusPush p{frame.near_plane, frame.focus_speed, frame.focus_distance, reset ? 1u : 0u};
         ctx.cmd->BindPipeline(focus_pipeline_);
-        ctx.cmd->BindTransient(0, {Bind::Storage(0, ctx.graph->image(focus)),
-                                   Bind::Sampled(1, ctx.graph->image(depth))});
+        ctx.cmd->BindTransient(0, {gpu::Bind::Storage(0, ctx.graph->image(focus)),
+                                   gpu::Bind::Sampled(1, ctx.graph->image(depth))});
         ctx.cmd->Push(p);
         ctx.cmd->Dispatch(1, 1, 1);
       });
@@ -141,9 +141,9 @@ ResourceHandle DepthOfFieldPass::AddToGraph(RenderGraph& graph, ResourceHandle c
         p.aperture = frame.aperture;
         p.max_coc = frame.max_coc;
         ctx.cmd->BindPipeline(coc_pipeline_);
-        ctx.cmd->BindTransient(0, {Bind::Storage(0, ctx.graph->image(coc)),
-                                   Bind::Sampled(1, ctx.graph->image(depth)),
-                                   Bind::Sampled(2, ctx.graph->image(focus))});
+        ctx.cmd->BindTransient(0, {gpu::Bind::Storage(0, ctx.graph->image(coc)),
+                                   gpu::Bind::Sampled(1, ctx.graph->image(depth)),
+                                   gpu::Bind::Sampled(2, ctx.graph->image(focus))});
         ctx.cmd->Push(p);
         ctx.cmd->Dispatch2D(extent);
       });
@@ -164,9 +164,9 @@ ResourceHandle DepthOfFieldPass::AddToGraph(RenderGraph& graph, ResourceHandle c
         p.max_coc = frame.max_coc;
         ctx.cmd->BindPipeline(gather_pipeline_);
         ctx.cmd->BindTransient(
-            0, {Bind::Storage(0, ctx.graph->image(gathered)),
-                Bind::Combined(1, ctx.graph->image(color).view, sampler_),
-                Bind::Combined(2, ctx.graph->image(coc).view, sampler_)});
+            0, {gpu::Bind::Storage(0, ctx.graph->image(gathered)),
+                gpu::Bind::Combined(1, ctx.graph->image(color).view, sampler_),
+                gpu::Bind::Combined(2, ctx.graph->image(coc).view, sampler_)});
         ctx.cmd->Push(p);
         ctx.cmd->Dispatch2D(half);
       });
@@ -186,10 +186,10 @@ ResourceHandle DepthOfFieldPass::AddToGraph(RenderGraph& graph, ResourceHandle c
         p.inv_size[1] = 1.0f / static_cast<f32>(extent.height);
         ctx.cmd->BindPipeline(composite_pipeline_);
         ctx.cmd->BindTransient(
-            0, {Bind::Storage(0, ctx.graph->image(out)),
-                Bind::Sampled(1, ctx.graph->image(color)),
-                Bind::Combined(2, ctx.graph->image(gathered).view, sampler_),
-                Bind::Sampled(3, ctx.graph->image(coc))});
+            0, {gpu::Bind::Storage(0, ctx.graph->image(out)),
+                gpu::Bind::Sampled(1, ctx.graph->image(color)),
+                gpu::Bind::Combined(2, ctx.graph->image(gathered).view, sampler_),
+                gpu::Bind::Sampled(3, ctx.graph->image(coc))});
         ctx.cmd->Push(p);
         ctx.cmd->Dispatch2D(extent);
       });

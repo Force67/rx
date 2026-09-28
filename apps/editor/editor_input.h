@@ -3,13 +3,16 @@
 
 #include "rxe/ui/events/input_actions.h"
 
+namespace rx::ui {
+class InputMap;
+}  // namespace rx::ui
+
 namespace rx {
 
-class InputMap;
 
 // The editor's action/axis set. The engine owns no verbs, so the app defines
 // them. Movement + vertical fly for the free camera; sprint for fast travel.
-enum class Action : ActionId {
+enum class Action : ui::ActionId {
   kMoveForward,
   kMoveBack,
   kMoveLeft,
@@ -24,9 +27,9 @@ enum class Action : ActionId {
   kCount,
 };
 
-enum class Axis : AxisId { kMoveX, kMoveY, kLookX, kLookY, kCount };
+enum class Axis : ui::AxisId { kMoveX, kMoveY, kLookX, kLookY, kCount };
 
-void RegisterEditorInput(InputMap& map);
+void RegisterEditorInput(ui::InputMap& map);
 
 }  // namespace rx
 

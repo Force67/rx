@@ -38,8 +38,8 @@ class LocalShadows {
     u32 slot = 0;  // atlas grid slot
   };
 
-  bool Initialize(Device& device);
-  void Destroy(Device& device);
+  bool Initialize(gpu::Device& device);
+  void Destroy(gpu::Device& device);
 
   // Scores shadow-casting point/spot lights, claims atlas faces for the best,
   // writes 1 + first face into each claimed light's params.w (0 otherwise)
@@ -50,19 +50,19 @@ class LocalShadows {
   // face, the light matrix pushed like the cascade path, draw invoked per
   // face for the caller's culled submissions. Handles the atlas transitions
   // (persistent image: shader-read between frames).
-  void Render(CommandList& cmd, PipelineHandle pipeline,
-              const base::Function<void(CommandList&, const Face&)>& draw);
+  void Render(gpu::CommandList& cmd, gpu::PipelineHandle pipeline,
+              const base::Function<void(gpu::CommandList&, const Face&)>& draw);
 
   u32 face_count() const { return face_count_; }
-  const GpuImage& atlas() const { return atlas_; }
-  const GpuBuffer& face_buffer(u32 frame_slot) const { return face_buffers_[frame_slot]; }
+  const gpu::GpuImage& atlas() const { return atlas_; }
+  const gpu::GpuBuffer& face_buffer(u32 frame_slot) const { return face_buffers_[frame_slot]; }
   u64 face_buffer_size() const { return kMaxFaces * sizeof(FaceData); }
 
  private:
   static constexpr u32 kFramesInFlight = 2;
 
-  GpuImage atlas_;
-  GpuBuffer face_buffers_[kFramesInFlight];
+  gpu::GpuImage atlas_;
+  gpu::GpuBuffer face_buffers_[kFramesInFlight];
   Face faces_[kMaxFaces];
   u32 face_count_ = 0;
   bool atlas_initialized_ = false;

@@ -1300,22 +1300,22 @@ void LookdevDemo::Create() {
   }
 }
 
-void LookdevDemo::Update(f32 dt, const InputState& input, const ActionState& actions,
+void LookdevDemo::Update(f32 dt, const ui::InputState& input, const ui::ActionState& actions,
                          bool allow_keyboard, bool allow_mouse) {
   (void)actions;
   (void)allow_mouse;
   if (!allow_keyboard) return;
-  if (input.key_pressed(Key::kArrowLeft)) impl_->SelectLight(impl_->light_index - 1);
-  if (input.key_pressed(Key::kArrowRight)) impl_->SelectLight(impl_->light_index + 1);
-  if (input.key_pressed(Key::kArrowUp)) impl_->SelectCamera(impl_->camera_index - 1);
-  if (input.key_pressed(Key::kArrowDown)) impl_->SelectCamera(impl_->camera_index + 1);
-  if (input.key_pressed(Key::kC)) {
+  if (input.key_pressed(ui::Key::kArrowLeft)) impl_->SelectLight(impl_->light_index - 1);
+  if (input.key_pressed(ui::Key::kArrowRight)) impl_->SelectLight(impl_->light_index + 1);
+  if (input.key_pressed(ui::Key::kArrowUp)) impl_->SelectCamera(impl_->camera_index - 1);
+  if (input.key_pressed(ui::Key::kArrowDown)) impl_->SelectCamera(impl_->camera_index + 1);
+  if (input.key_pressed(ui::Key::kC)) {
     auto& cs = impl_->ctx.renderer->reference_compare().settings();
     cs.mode = static_cast<Compare::Mode>((static_cast<int>(cs.mode) + 1) % 6);
   }
-  if (input.key_pressed(Key::kZ)) impl_->Undo();
-  if (input.key_pressed(Key::kX)) impl_->Redo();
-  if (input.key_pressed(Key::kR)) {
+  if (input.key_pressed(ui::Key::kZ)) impl_->Undo();
+  if (input.key_pressed(ui::Key::kX)) impl_->Redo();
+  if (input.key_pressed(ui::Key::kR)) {
     for (Impl::Part& part : impl_->parts)
       ReseedShaping(part.params, render::HumanPreset(part.region));
     impl_->dirty = true;

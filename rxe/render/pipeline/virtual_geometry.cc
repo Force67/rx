@@ -109,7 +109,7 @@ f32 Determinant3(const Mat4& t) {
 
 }  // namespace
 
-bool VirtualGeometryPass::Initialize(Device& device, Format color_format, Format depth_format) {
+bool VirtualGeometryPass::Initialize(gpu::Device& device, gpu::Format color_format, gpu::Format depth_format) {
   available_ = device.caps().mesh_shaders;
   if (!available_) return true;  // stays inert without mesh shaders
   gpu_driven_ = device.caps().buffer_atomics64;
@@ -117,18 +117,18 @@ bool VirtualGeometryPass::Initialize(Device& device, Format color_format, Format
   legacy_pipeline_ = device.CreateGraphicsPipeline({
       .fragment = RX_SHADER(k_meshlet_ps_hlsl),
       .mesh = RX_SHADER(k_vgeo_ms_hlsl),
-      .raster = {.cull = CullMode::kBack},
-      .depth = {.test = true, .write = true, .compare = CompareOp::kGreaterEqual,
+      .raster = {.cull = gpu::CullMode::kBack},
+      .depth = {.test = true, .write = true, .compare = gpu::CompareOp::kGreaterEqual,
                 .format = depth_format},
       .color_formats = {color_format},
-      .sets = {{.slots = {{0, BindingType::kStorageBuffer},
-                          {1, BindingType::kStorageBuffer},
-                          {2, BindingType::kStorageBuffer},
-                          {3, BindingType::kStorageBuffer},
-                          {4, BindingType::kStorageBuffer},
-                          {5, BindingType::kUniformBuffer}},  // LegacyCamera
-                .stages = kShaderStageMesh}},
-      .push_constant_size = PushSize<LegacyPush>(),
+      .sets = {{.slots = {{0, gpu::BindingType::kStorageBuffer},
+                          {1, gpu::BindingType::kStorageBuffer},
+                          {2, gpu::BindingType::kStorageBuffer},
+                          {3, gpu::BindingType::kStorageBuffer},
+                          {4, gpu::BindingType::kStorageBuffer},
+                          {5, gpu::BindingType::kUniformBuffer}},  // LegacyCamera
+                .stages = gpu::kShaderStageMesh}},
+      .push_constant_size = gpu::PushSize<LegacyPush>(),
       .debug_name = "vgeo_legacy",
   });
   if (!legacy_pipeline_) {
@@ -136,10 +136,10 @@ bool VirtualGeometryPass::Initialize(Device& device, Format color_format, Format
     return false;
   }
   for (u32 i = 0; i < kFramesInFlight; ++i) {
-    legacy_counters_[i] = device.CreateBuffer(16, kBufferUsageStorage, true);
+    legacy_counters_[i] = device.CreateBuffer(16, gpu::kBufferUsageStorage, true);
     // One per in-flight frame: the pass rewrites it while the previous frame
     // may still be reading its own copy.
-    legacy_camera_[i] = device.CreateBuffer(sizeof(LegacyCamera), kBufferUsageUniform, true);
+    legacy_camera_[i] = device.CreateBuffer(sizeof(LegacyCamera), gpu::kBufferUsageUniform, true);
     if (!legacy_camera_[i].mapped) return false;
   }
   if (!gpu_driven_) {
@@ -147,41 +147,41 @@ bool VirtualGeometryPass::Initialize(Device& device, Format color_format, Format
     return true;
   }
 
-  auto storage = [](u32 slot) { return BindingSlot{slot, BindingType::kStorageBuffer}; };
+  auto storage = [](u32 slot) { return gpu::BindingSlot{slot, gpu::BindingType::kStorageBuffer}; };
 
   cull_pipeline_ = device.CreateComputePipeline({
       .shader = RX_SHADER(k_vgeo_cull_cs_hlsl),
       .sets = {{.slots = {storage(0), storage(1), storage(2), storage(3), storage(4),
                           storage(5), storage(6), storage(7),
-                          {8, BindingType::kSampledImage}}}},
-      .push_constant_size = PushSize<u32>(),
+                          {8, gpu::BindingType::kSampledImage}}}},
+      .push_constant_size = gpu::PushSize<u32>(),
       .debug_name = "vgeo_cull",
   });
   args_pipeline_ = device.CreateComputePipeline({
       .shader = RX_SHADER(k_vgeo_args_cs_hlsl),
       .sets = {{.slots = {storage(0), storage(1), storage(2)}}},
-      .push_constant_size = PushSize<u32>(),
+      .push_constant_size = gpu::PushSize<u32>(),
       .debug_name = "vgeo_args",
   });
   clear_pipeline_ = device.CreateComputePipeline({
       .shader = RX_SHADER(k_vgeo_clear_cs_hlsl),
       .sets = {{.slots = {storage(0), storage(1)}}},
-      .push_constant_size = PushSize<u32>(),
+      .push_constant_size = gpu::PushSize<u32>(),
       .debug_name = "vgeo_clear",
   });
   sw_pipeline_ = device.CreateComputePipeline({
       .shader = RX_SHADER(k_vgeo_sw_cs_hlsl),
       .sets = {{.slots = {storage(0), storage(1), storage(2), storage(3), storage(4),
                           storage(5), storage(6), storage(7), storage(8), storage(9)}}},
-      .push_constant_size = PushSize<u32>(),
+      .push_constant_size = gpu::PushSize<u32>(),
       .debug_name = "vgeo_sw",
   });
   hzb_pipeline_ = device.CreateComputePipeline({
       .shader = RX_SHADER(k_vgeo_hzb_cs_hlsl),
       .sets = {{.slots = {storage(0),
-                          {1, BindingType::kSampledImage},
+                          {1, gpu::BindingType::kSampledImage},
                           storage(2),
-                          {3, BindingType::kStorageImage}}}},
+                          {3, gpu::BindingType::kStorageImage}}}},
       .debug_name = "vgeo_hzb",
   });
   vis_pipeline_ = device.CreateGraphicsPipeline({
@@ -189,23 +189,23 @@ bool VirtualGeometryPass::Initialize(Device& device, Format color_format, Format
       .mesh = RX_SHADER(k_vgeo_vis_ms_hlsl),
       // Safe because SetInstances refuses mirrored transforms; see the note
       // there before relaxing that.
-      .raster = {.cull = CullMode::kBack},
+      .raster = {.cull = gpu::CullMode::kBack},
       .sets = {{.slots = {storage(0), storage(1), storage(2), storage(3), storage(4),
                           storage(5), storage(6), storage(7), storage(8), storage(9)}}},
-      .push_constant_size = PushSize<u32>(),
+      .push_constant_size = gpu::PushSize<u32>(),
       .debug_name = "vgeo_vis",
   });
   resolve_pipeline_ = device.CreateGraphicsPipeline({
       .vertex = RX_SHADER(k_fullscreen_vs_slang),
       .fragment = RX_SHADER(k_vgeo_resolve_ps_hlsl),
-      .raster = {.cull = CullMode::kNone},
-      .depth = {.test = true, .write = true, .compare = CompareOp::kGreaterEqual,
+      .raster = {.cull = gpu::CullMode::kNone},
+      .depth = {.test = true, .write = true, .compare = gpu::CompareOp::kGreaterEqual,
                 .format = depth_format},
       .color_formats = {color_format},
       .sets = {{.slots = {storage(0), storage(1), storage(2), storage(3), storage(4),
                           storage(5), storage(6), storage(7),
-                          {8, BindingType::kCombinedTextureSampler}},
-                .stages = kShaderStageFragment}},
+                          {8, gpu::BindingType::kCombinedTextureSampler}},
+                .stages = gpu::kShaderStageFragment}},
       .debug_name = "vgeo_resolve",
   });
   if (!cull_pipeline_ || !args_pipeline_ || !clear_pipeline_ || !sw_pipeline_ ||
@@ -214,23 +214,23 @@ bool VirtualGeometryPass::Initialize(Device& device, Format color_format, Format
     return false;
   }
 
-  visible_ = device.CreateBuffer(kMaxVisible * sizeof(u32) * 2, kBufferUsageStorage);
-  sw_list_ = device.CreateBuffer(kMaxVisible * sizeof(u32), kBufferUsageStorage);
-  hw_list_ = device.CreateBuffer(kMaxVisible * sizeof(u32), kBufferUsageStorage);
-  occluded_ = device.CreateBuffer(kMaxVisible * sizeof(u32) * 2, kBufferUsageStorage);
+  visible_ = device.CreateBuffer(kMaxVisible * sizeof(u32) * 2, gpu::kBufferUsageStorage);
+  sw_list_ = device.CreateBuffer(kMaxVisible * sizeof(u32), gpu::kBufferUsageStorage);
+  hw_list_ = device.CreateBuffer(kMaxVisible * sizeof(u32), gpu::kBufferUsageStorage);
+  occluded_ = device.CreateBuffer(kMaxVisible * sizeof(u32) * 2, gpu::kBufferUsageStorage);
   counters_ = device.CreateBuffer(kCounterSlots * sizeof(u32),
-                                  kBufferUsageStorage | kBufferUsageTransferSrc);
+                                  gpu::kBufferUsageStorage | gpu::kBufferUsageTransferSrc);
   args_ = device.CreateBuffer(kArgsSlots * sizeof(u32),
-                              kBufferUsageStorage | kBufferUsageIndirect);
+                              gpu::kBufferUsageStorage | gpu::kBufferUsageIndirect);
   for (u32 i = 0; i < kFramesInFlight; ++i) {
-    params_[i] = device.CreateBuffer(sizeof(Params), kBufferUsageStorage, true);
+    params_[i] = device.CreateBuffer(sizeof(Params), gpu::kBufferUsageStorage, true);
     instances_[i] =
-        device.CreateBuffer(kMaxInstances * sizeof(Mat4), kBufferUsageStorage, true);
+        device.CreateBuffer(kMaxInstances * sizeof(Mat4), gpu::kBufferUsageStorage, true);
     readback_[i] = device.CreateBuffer(kCounterSlots * sizeof(u32),
-                                       kBufferUsageTransferDst, true);
+                                       gpu::kBufferUsageTransferDst, true);
   }
 
-  SamplerDesc albedo_sampler_desc{};
+  gpu::SamplerDesc albedo_sampler_desc{};
   if (device.caps().max_anisotropy > 1.0f) {
     albedo_sampler_desc.max_anisotropy = rx::Min(16.0f, device.caps().max_anisotropy);
   }
@@ -238,29 +238,29 @@ bool VirtualGeometryPass::Initialize(Device& device, Format color_format, Format
 
   // 1x1 fallback so the cull's hi-z descriptor is always valid; bound (with
   // occlusion disabled through the params) on frames without a real hi-z.
-  dummy_hiz_ = device.CreateImage2D(Format::kR32Float, {1, 1}, kTextureUsageSampled);
-  device.ImmediateSubmit([&](CommandList& cmd) {
-    cmd.Barrier(Transition(dummy_hiz_, ResourceState::kUndefined,
-                           ResourceState::kShaderReadAll));
+  dummy_hiz_ = device.CreateImage2D(gpu::Format::kR32Float, {1, 1}, gpu::kTextureUsageSampled);
+  device.ImmediateSubmit([&](gpu::CommandList& cmd) {
+    cmd.Barrier(gpu::Transition(dummy_hiz_, gpu::ResourceState::kUndefined,
+                           gpu::ResourceState::kShaderReadAll));
   });
   return true;
 }
 
-void VirtualGeometryPass::Destroy(Device& device) {
-  for (PipelineHandle* p : {&legacy_pipeline_, &cull_pipeline_, &args_pipeline_,
+void VirtualGeometryPass::Destroy(gpu::Device& device) {
+  for (gpu::PipelineHandle* p : {&legacy_pipeline_, &cull_pipeline_, &args_pipeline_,
                             &clear_pipeline_, &sw_pipeline_, &hzb_pipeline_, &vis_pipeline_,
                             &resolve_pipeline_}) {
     if (*p) device.DestroyPipeline(*p);
     *p = {};
   }
-  for (GpuBuffer* b : {&meshlets_, &meshlet_vertices_, &meshlet_triangles_, &vertices_,
+  for (gpu::GpuBuffer* b : {&meshlets_, &meshlet_vertices_, &meshlet_triangles_, &vertices_,
                        &visible_, &sw_list_, &hw_list_, &occluded_, &counters_, &args_,
                        &visbuffer_}) {
     if (*b) device.DestroyBuffer(*b);
     *b = {};
   }
   for (u32 i = 0; i < kFramesInFlight; ++i) {
-    for (GpuBuffer* b : {&params_[i], &instances_[i], &readback_[i], &legacy_counters_[i],
+    for (gpu::GpuBuffer* b : {&params_[i], &instances_[i], &readback_[i], &legacy_counters_[i],
                          &legacy_camera_[i]}) {
       if (*b) device.DestroyBuffer(*b);
       *b = {};
@@ -270,13 +270,13 @@ void VirtualGeometryPass::Destroy(Device& device) {
   dummy_hiz_ = {};
   if (albedo_) device.DestroyImage(albedo_);
   albedo_ = {};
-  for (GpuImage& img : hiz_img_) {
+  for (gpu::GpuImage& img : hiz_img_) {
     if (img) device.DestroyImage(img);
     img = {};
   }
 }
 
-void VirtualGeometryPass::Upload(Device& device, const asset::Mesh& mesh) {
+void VirtualGeometryPass::Upload(gpu::Device& device, const asset::Mesh& mesh) {
   if (!available_ || mesh.lods.empty()) return;
   const asset::MeshLod& lod = mesh.lods[0];
   const u32 vertex_count = static_cast<u32>(lod.vertices.size());
@@ -547,10 +547,10 @@ void VirtualGeometryPass::Upload(Device& device, const asset::Mesh& mesh) {
                      v.normal[2]});
   }
 
-  for (GpuBuffer* b : {&meshlets_, &meshlet_vertices_, &meshlet_triangles_, &vertices_}) {
+  for (gpu::GpuBuffer* b : {&meshlets_, &meshlet_vertices_, &meshlet_triangles_, &vertices_}) {
     if (*b) device.DestroyBuffer(*b);
   }
-  const BufferUsageFlags storage = kBufferUsageStorage;
+  const gpu::BufferUsageFlags storage = gpu::kBufferUsageStorage;
   meshlets_ =
       device.CreateBufferWithData(Span(dag.data(), dag.size() * sizeof(DagMeshlet)), storage);
   meshlet_vertices_ = device.CreateBufferWithData(
@@ -567,19 +567,19 @@ void VirtualGeometryPass::Upload(Device& device, const asset::Mesh& mesh) {
            gpu_driven_ ? "gpu-driven" : "single-pass");
 }
 
-void VirtualGeometryPass::SetAlbedo(Device& device, ByteSpan rgba_mips, u32 size,
+void VirtualGeometryPass::SetAlbedo(gpu::Device& device, ByteSpan rgba_mips, u32 size,
                                     f32 world_to_uv) {
   if (!gpu_driven_ || size == 0) return;
   u32 mips = 1;
   while ((size >> mips) > 0) ++mips;
   if (albedo_) device.DestroyImage(albedo_);
-  albedo_ = device.CreateImage2D(Format::kRGBA8Srgb, {size, size},
-                                 kTextureUsageSampled | kTextureUsageTransferDst, mips);
+  albedo_ = device.CreateImage2D(gpu::Format::kRGBA8Srgb, {size, size},
+                                 gpu::kTextureUsageSampled | gpu::kTextureUsageTransferDst, mips);
   if (!albedo_) return;
-  GpuBuffer staging = device.CreateBufferWithData(rgba_mips, kBufferUsageTransferSrc);
-  device.ImmediateSubmit([&](CommandList& cmd) {
-    cmd.Barrier(Transition(albedo_, ResourceState::kUndefined, ResourceState::kCopyDst));
-    base::Vector<BufferTextureCopy> regions;
+  gpu::GpuBuffer staging = device.CreateBufferWithData(rgba_mips, gpu::kBufferUsageTransferSrc);
+  device.ImmediateSubmit([&](gpu::CommandList& cmd) {
+    cmd.Barrier(gpu::Transition(albedo_, gpu::ResourceState::kUndefined, gpu::ResourceState::kCopyDst));
+    base::Vector<gpu::BufferTextureCopy> regions;
     u64 offset = 0;
     u32 extent = size;
     for (u32 mip = 0; mip < mips; ++mip) {
@@ -588,7 +588,7 @@ void VirtualGeometryPass::SetAlbedo(Device& device, ByteSpan rgba_mips, u32 size
       extent = rx::Max(1u, extent / 2);
     }
     cmd.CopyBufferToTexture(staging, albedo_, base::Span(regions.data(), regions.size()));
-    cmd.Barrier(Transition(albedo_, ResourceState::kCopyDst, ResourceState::kShaderReadAll));
+    cmd.Barrier(gpu::Transition(albedo_, gpu::ResourceState::kCopyDst, gpu::ResourceState::kShaderReadAll));
   });
   device.DestroyBuffer(staging);
   world_to_uv_ = world_to_uv;
@@ -623,13 +623,13 @@ void VirtualGeometryPass::SetInstances(base::Span<const Mat4> transforms) {
 
 VirtualGeometryPass::Stats VirtualGeometryPass::last_stats(u32 slot) const {
   if (!gpu_driven_) {
-    const GpuBuffer& counter = legacy_counters_[slot % kFramesInFlight];
+    const gpu::GpuBuffer& counter = legacy_counters_[slot % kFramesInFlight];
     Stats s;
     s.visible = counter.mapped ? static_cast<const u32*>(counter.mapped)[0] : 0;
     s.hw = s.visible;
     return s;
   }
-  const GpuBuffer& rb = readback_[slot % kFramesInFlight];
+  const gpu::GpuBuffer& rb = readback_[slot % kFramesInFlight];
   if (!rb.mapped) return {};
   const u32* c = static_cast<const u32*>(rb.mapped);
   Stats s;
@@ -640,16 +640,16 @@ VirtualGeometryPass::Stats VirtualGeometryPass::last_stats(u32 slot) const {
   return s;
 }
 
-void VirtualGeometryPass::EnsureTargets(Device& device, u32 width, u32 height) {
+void VirtualGeometryPass::EnsureTargets(gpu::Device& device, u32 width, u32 height) {
   const u32 hiz_w = (width + kHizDownsample - 1) / kHizDownsample;
   const u32 hiz_h = (height + kHizDownsample - 1) / kHizDownsample;
   if (!hiz_img_[0] || hiz_img_[0].extent.width != hiz_w ||
       hiz_img_[0].extent.height != hiz_h) {
     for (u32 i = 0; i < kFramesInFlight; ++i) {
       if (hiz_img_[i]) device.DestroyImage(hiz_img_[i]);
-      hiz_img_[i] = device.CreateImage2D(Format::kR32Float, {hiz_w, hiz_h},
-                                         kTextureUsageStorage | kTextureUsageSampled);
-      hiz_state_[i] = ResourceState::kUndefined;
+      hiz_img_[i] = device.CreateImage2D(gpu::Format::kR32Float, {hiz_w, hiz_h},
+                                         gpu::kTextureUsageStorage | gpu::kTextureUsageSampled);
+      hiz_state_[i] = gpu::ResourceState::kUndefined;
       hiz_dims_[i][0] = 0;  // stale until this slot's map is rebuilt
       hiz_dims_[i][1] = 0;
     }
@@ -661,12 +661,12 @@ void VirtualGeometryPass::EnsureTargets(Device& device, u32 width, u32 height) {
   }
   // Grow-only; genuine resizes go through the renderer's wait-idle path.
   if (visbuffer_) device.DestroyBuffer(visbuffer_);
-  visbuffer_ = device.CreateBuffer(u64(width) * height * sizeof(u64), kBufferUsageStorage);
+  visbuffer_ = device.CreateBuffer(u64(width) * height * sizeof(u64), gpu::kBufferUsageStorage);
   vis_width_ = width;
   vis_height_ = height;
 }
 
-void VirtualGeometryPass::AddToGraph(Device& device, RenderGraph& graph, const Frame& frame) {
+void VirtualGeometryPass::AddToGraph(gpu::Device& device, RenderGraph& graph, const Frame& frame) {
   if (!active()) return;
   if (!gpu_driven_) {
     AddLegacyPass(graph, frame);
@@ -742,30 +742,30 @@ void VirtualGeometryPass::AddToGraph(Device& device, RenderGraph& graph, const F
                                         &hiz_state_[prev_slot])
                     : kInvalidResource;
 
-  auto bind_cull = [this, slot](PassContext& ctx, TextureView hiz_view) {
+  auto bind_cull = [this, slot](PassContext& ctx, gpu::TextureView hiz_view) {
     ctx.cmd->BindPipeline(cull_pipeline_);
     ctx.cmd->BindTransient(
-        0, {Bind::StorageBuffer(0, params_[slot]), Bind::StorageBuffer(1, meshlets_),
-            Bind::StorageBuffer(2, instances_[slot]), Bind::StorageBuffer(3, visible_),
-            Bind::StorageBuffer(4, sw_list_), Bind::StorageBuffer(5, hw_list_),
-            Bind::StorageBuffer(6, occluded_), Bind::StorageBuffer(7, counters_),
-            Bind::SampledView(8, hiz_view)});
+        0, {gpu::Bind::StorageBuffer(0, params_[slot]), gpu::Bind::StorageBuffer(1, meshlets_),
+            gpu::Bind::StorageBuffer(2, instances_[slot]), gpu::Bind::StorageBuffer(3, visible_),
+            gpu::Bind::StorageBuffer(4, sw_list_), gpu::Bind::StorageBuffer(5, hw_list_),
+            gpu::Bind::StorageBuffer(6, occluded_), gpu::Bind::StorageBuffer(7, counters_),
+            gpu::Bind::SampledView(8, hiz_view)});
   };
   auto bind_sw = [this, slot](PassContext& ctx) {
     ctx.cmd->BindPipeline(sw_pipeline_);
     ctx.cmd->BindTransient(
-        0, {Bind::StorageBuffer(0, params_[slot]), Bind::StorageBuffer(1, meshlets_),
-            Bind::StorageBuffer(2, meshlet_vertices_),
-            Bind::StorageBuffer(3, meshlet_triangles_), Bind::StorageBuffer(4, vertices_),
-            Bind::StorageBuffer(5, instances_[slot]), Bind::StorageBuffer(6, visible_),
-            Bind::StorageBuffer(7, sw_list_), Bind::StorageBuffer(8, visbuffer_),
-            Bind::StorageBuffer(9, counters_)});
+        0, {gpu::Bind::StorageBuffer(0, params_[slot]), gpu::Bind::StorageBuffer(1, meshlets_),
+            gpu::Bind::StorageBuffer(2, meshlet_vertices_),
+            gpu::Bind::StorageBuffer(3, meshlet_triangles_), gpu::Bind::StorageBuffer(4, vertices_),
+            gpu::Bind::StorageBuffer(5, instances_[slot]), gpu::Bind::StorageBuffer(6, visible_),
+            gpu::Bind::StorageBuffer(7, sw_list_), gpu::Bind::StorageBuffer(8, visbuffer_),
+            gpu::Bind::StorageBuffer(9, counters_)});
   };
   auto bind_args = [this, slot](PassContext& ctx) {
     ctx.cmd->BindPipeline(args_pipeline_);
-    ctx.cmd->BindTransient(0, {Bind::StorageBuffer(0, params_[slot]),
-                               Bind::StorageBuffer(1, counters_),
-                               Bind::StorageBuffer(2, args_)});
+    ctx.cmd->BindTransient(0, {gpu::Bind::StorageBuffer(0, params_[slot]),
+                               gpu::Bind::StorageBuffer(1, counters_),
+                               gpu::Bind::StorageBuffer(2, args_)});
   };
   const u32 width = frame.width;
   const u32 height = frame.height;
@@ -775,12 +775,12 @@ void VirtualGeometryPass::AddToGraph(Device& device, RenderGraph& graph, const F
       "vgeo_clear", [](RenderGraph::PassBuilder&) {},
       [this, width, height](PassContext& ctx) {
         ctx.cmd->BindPipeline(clear_pipeline_);
-        ctx.cmd->BindTransient(0, {Bind::StorageBuffer(0, visbuffer_),
-                                   Bind::StorageBuffer(1, counters_)});
+        ctx.cmd->BindTransient(0, {gpu::Bind::StorageBuffer(0, visbuffer_),
+                                   gpu::Bind::StorageBuffer(1, counters_)});
         u32 pixels = width * height;
         ctx.cmd->Push(pixels);
         ctx.cmd->Dispatch((pixels + 63) / 64, 1, 1);
-        ctx.cmd->MemoryBarrier(BarrierScope::kComputeWrite, BarrierScope::kAllCommands);
+        ctx.cmd->MemoryBarrier(gpu::BarrierScope::kComputeWrite, gpu::BarrierScope::kAllCommands);
       });
 
   // 2: main cull - DAG cut, frustum, cone, then the previous frame's hi-z.
@@ -790,13 +790,13 @@ void VirtualGeometryPass::AddToGraph(Device& device, RenderGraph& graph, const F
         if (has_occlusion) b.Read(prev_hzb, ResourceUsage::kSampledCompute);
       },
       [this, bind_cull, prev_hzb, has_occlusion](PassContext& ctx) {
-        TextureView hiz_view =
+        gpu::TextureView hiz_view =
             has_occlusion ? ctx.graph->image(prev_hzb).view : dummy_hiz_.view;
         bind_cull(ctx, hiz_view);
         ctx.cmd->Push(0u);  // mode 0
         u32 total = meshlet_count_ * instance_count_;
         ctx.cmd->Dispatch((total + 63) / 64, 1, 1);
-        ctx.cmd->MemoryBarrier(BarrierScope::kComputeWrite, BarrierScope::kAllCommands);
+        ctx.cmd->MemoryBarrier(gpu::BarrierScope::kComputeWrite, gpu::BarrierScope::kAllCommands);
       });
 
   // 3: fold counts into indirect args.
@@ -806,7 +806,7 @@ void VirtualGeometryPass::AddToGraph(Device& device, RenderGraph& graph, const F
         bind_args(ctx);
         ctx.cmd->Push(0u);
         ctx.cmd->Dispatch(1, 1, 1);
-        ctx.cmd->MemoryBarrier(BarrierScope::kComputeWrite, BarrierScope::kAllCommands);
+        ctx.cmd->MemoryBarrier(gpu::BarrierScope::kComputeWrite, gpu::BarrierScope::kAllCommands);
       });
 
   // 4: main raster - compute for the small clusters, mesh shader for the rest.
@@ -821,12 +821,12 @@ void VirtualGeometryPass::AddToGraph(Device& device, RenderGraph& graph, const F
     ctx.cmd->BeginRendering({.extent = {width, height}});
     ctx.cmd->BindPipeline(vis_pipeline_);
     ctx.cmd->BindTransient(
-        0, {Bind::StorageBuffer(0, params_[slot]), Bind::StorageBuffer(1, meshlets_),
-            Bind::StorageBuffer(2, meshlet_vertices_),
-            Bind::StorageBuffer(3, meshlet_triangles_), Bind::StorageBuffer(4, vertices_),
-            Bind::StorageBuffer(5, instances_[slot]), Bind::StorageBuffer(6, visible_),
-            Bind::StorageBuffer(7, hw_list_), Bind::StorageBuffer(8, visbuffer_),
-            Bind::StorageBuffer(9, counters_)});
+        0, {gpu::Bind::StorageBuffer(0, params_[slot]), gpu::Bind::StorageBuffer(1, meshlets_),
+            gpu::Bind::StorageBuffer(2, meshlet_vertices_),
+            gpu::Bind::StorageBuffer(3, meshlet_triangles_), gpu::Bind::StorageBuffer(4, vertices_),
+            gpu::Bind::StorageBuffer(5, instances_[slot]), gpu::Bind::StorageBuffer(6, visible_),
+            gpu::Bind::StorageBuffer(7, hw_list_), gpu::Bind::StorageBuffer(8, visbuffer_),
+            gpu::Bind::StorageBuffer(9, counters_)});
     ctx.cmd->Push(mode);
     ctx.cmd->DrawMeshTasksIndirect(args_, args_offset * sizeof(u32), 1, 3 * sizeof(u32));
     ctx.cmd->EndRendering();
@@ -847,14 +847,14 @@ void VirtualGeometryPass::AddToGraph(Device& device, RenderGraph& graph, const F
           b.Write(hzb, ResourceUsage::kStorageWrite);
         },
         [this, slot, hzb, hiz_w, hiz_h, depth](PassContext& ctx) {
-          ctx.cmd->MemoryBarrier(BarrierScope::kComputeWrite, BarrierScope::kComputeRead);
-          ctx.cmd->MemoryBarrier(BarrierScope::kGraphicsStorageWrite,
-                                 BarrierScope::kComputeRead);
+          ctx.cmd->MemoryBarrier(gpu::BarrierScope::kComputeWrite, gpu::BarrierScope::kComputeRead);
+          ctx.cmd->MemoryBarrier(gpu::BarrierScope::kGraphicsStorageWrite,
+                                 gpu::BarrierScope::kComputeRead);
           ctx.cmd->BindPipeline(hzb_pipeline_);
-          ctx.cmd->BindTransient(0, {Bind::StorageBuffer(0, params_[slot]),
-                                     Bind::Sampled(1, ctx.graph->image(depth)),
-                                     Bind::StorageBuffer(2, visbuffer_),
-                                     Bind::Storage(3, ctx.graph->image(hzb))});
+          ctx.cmd->BindTransient(0, {gpu::Bind::StorageBuffer(0, params_[slot]),
+                                     gpu::Bind::Sampled(1, ctx.graph->image(depth)),
+                                     gpu::Bind::StorageBuffer(2, visbuffer_),
+                                     gpu::Bind::Storage(3, ctx.graph->image(hzb))});
           ctx.cmd->Dispatch2D({hiz_w, hiz_h});
         });
   };
@@ -868,7 +868,7 @@ void VirtualGeometryPass::AddToGraph(Device& device, RenderGraph& graph, const F
         bind_cull(ctx, ctx.graph->image(hzb).view);
         ctx.cmd->Push(1u);  // mode 1
         ctx.cmd->DispatchIndirect(args_, kArgsPostCull * sizeof(u32));
-        ctx.cmd->MemoryBarrier(BarrierScope::kComputeWrite, BarrierScope::kAllCommands);
+        ctx.cmd->MemoryBarrier(gpu::BarrierScope::kComputeWrite, gpu::BarrierScope::kAllCommands);
       });
   graph.AddPass(
       "vgeo_args_post", [](RenderGraph::PassBuilder&) {},
@@ -876,7 +876,7 @@ void VirtualGeometryPass::AddToGraph(Device& device, RenderGraph& graph, const F
         bind_args(ctx);
         ctx.cmd->Push(1u);
         ctx.cmd->Dispatch(1, 1, 1);
-        ctx.cmd->MemoryBarrier(BarrierScope::kComputeWrite, BarrierScope::kAllCommands);
+        ctx.cmd->MemoryBarrier(gpu::BarrierScope::kComputeWrite, gpu::BarrierScope::kAllCommands);
       });
   graph.AddPass(
       "vgeo_sw_post", [](RenderGraph::PassBuilder&) {},
@@ -898,23 +898,23 @@ void VirtualGeometryPass::AddToGraph(Device& device, RenderGraph& graph, const F
         b.Write(frame.depth, ResourceUsage::kDepthAttachment);
       },
       [this, slot, color = frame.color, depth = frame.depth](PassContext& ctx) {
-        ctx.cmd->MemoryBarrier(BarrierScope::kComputeWrite, BarrierScope::kGraphicsRead);
-        ctx.cmd->MemoryBarrier(BarrierScope::kGraphicsStorageWrite,
-                               BarrierScope::kGraphicsRead);
-        ColorAttachment att{.view = ctx.graph->image(color).view, .load = LoadOp::kLoad};
-        DepthAttachment depth_att{.view = ctx.graph->image(depth).view,
-                                  .load = LoadOp::kLoad};
+        ctx.cmd->MemoryBarrier(gpu::BarrierScope::kComputeWrite, gpu::BarrierScope::kGraphicsRead);
+        ctx.cmd->MemoryBarrier(gpu::BarrierScope::kGraphicsStorageWrite,
+                               gpu::BarrierScope::kGraphicsRead);
+        gpu::ColorAttachment att{.view = ctx.graph->image(color).view, .load = gpu::LoadOp::kLoad};
+        gpu::DepthAttachment depth_att{.view = ctx.graph->image(depth).view,
+                                  .load = gpu::LoadOp::kLoad};
         ctx.cmd->BeginRendering({.extent = ctx.graph->image(color).extent,
                                  .colors = base::Span(&att, 1),
                                  .depth = &depth_att});
         ctx.cmd->BindPipeline(resolve_pipeline_);
         ctx.cmd->BindTransient(
-            0, {Bind::StorageBuffer(0, params_[slot]), Bind::StorageBuffer(1, meshlets_),
-                Bind::StorageBuffer(2, meshlet_vertices_),
-                Bind::StorageBuffer(3, meshlet_triangles_), Bind::StorageBuffer(4, vertices_),
-                Bind::StorageBuffer(5, instances_[slot]), Bind::StorageBuffer(6, visible_),
-                Bind::StorageBuffer(7, visbuffer_),
-                Bind::Combined(8, albedo_ ? albedo_.view : dummy_hiz_.view, albedo_sampler_)});
+            0, {gpu::Bind::StorageBuffer(0, params_[slot]), gpu::Bind::StorageBuffer(1, meshlets_),
+                gpu::Bind::StorageBuffer(2, meshlet_vertices_),
+                gpu::Bind::StorageBuffer(3, meshlet_triangles_), gpu::Bind::StorageBuffer(4, vertices_),
+                gpu::Bind::StorageBuffer(5, instances_[slot]), gpu::Bind::StorageBuffer(6, visible_),
+                gpu::Bind::StorageBuffer(7, visbuffer_),
+                gpu::Bind::Combined(8, albedo_ ? albedo_.view : dummy_hiz_.view, albedo_sampler_)});
         ctx.cmd->Draw(3, 1, 0, 0);
         ctx.cmd->EndRendering();
       });
@@ -923,7 +923,7 @@ void VirtualGeometryPass::AddToGraph(Device& device, RenderGraph& graph, const F
   graph.AddPass(
       "vgeo_stats", [](RenderGraph::PassBuilder&) {},
       [this, slot](PassContext& ctx) {
-        ctx.cmd->MemoryBarrier(BarrierScope::kComputeWrite, BarrierScope::kTransferRead);
+        ctx.cmd->MemoryBarrier(gpu::BarrierScope::kComputeWrite, gpu::BarrierScope::kTransferRead);
         ctx.cmd->CopyBuffer(counters_, 0, readback_[slot], 0, kCounterSlots * sizeof(u32));
       });
 
@@ -952,25 +952,25 @@ void VirtualGeometryPass::AddLegacyPass(RenderGraph& graph, const Frame& frame) 
       },
       [this, color = frame.color, depth = frame.depth, push, view_proj = frame.view_proj,
        slot = frame.slot % kFramesInFlight](PassContext& ctx) {
-        const GpuBuffer& counter = legacy_counters_[slot];
+        const gpu::GpuBuffer& counter = legacy_counters_[slot];
         if (counter.mapped) static_cast<u32*>(counter.mapped)[0] = 0;
         const LegacyCamera camera{view_proj};
         base::MemCopy(legacy_camera_[slot].mapped, &camera, sizeof(camera));
 
-        ColorAttachment att{.view = ctx.graph->image(color).view, .load = LoadOp::kLoad};
-        DepthAttachment depth_att{.view = ctx.graph->image(depth).view,
-                                  .load = LoadOp::kLoad};
+        gpu::ColorAttachment att{.view = ctx.graph->image(color).view, .load = gpu::LoadOp::kLoad};
+        gpu::DepthAttachment depth_att{.view = ctx.graph->image(depth).view,
+                                  .load = gpu::LoadOp::kLoad};
         ctx.cmd->BeginRendering({.extent = ctx.graph->image(color).extent,
                                  .colors = base::Span(&att, 1),
                                  .depth = &depth_att});
         ctx.cmd->BindPipeline(legacy_pipeline_);
         ctx.cmd->BindTransient(
-            0, {Bind::StorageBuffer(0, meshlets_, 0, meshlets_.size),
-                Bind::StorageBuffer(1, meshlet_vertices_, 0, meshlet_vertices_.size),
-                Bind::StorageBuffer(2, meshlet_triangles_, 0, meshlet_triangles_.size),
-                Bind::StorageBuffer(3, vertices_, 0, vertices_.size),
-                Bind::StorageBuffer(4, counter, 0, counter.size),
-                Bind::Uniform(5, legacy_camera_[slot], 0, sizeof(LegacyCamera))});
+            0, {gpu::Bind::StorageBuffer(0, meshlets_, 0, meshlets_.size),
+                gpu::Bind::StorageBuffer(1, meshlet_vertices_, 0, meshlet_vertices_.size),
+                gpu::Bind::StorageBuffer(2, meshlet_triangles_, 0, meshlet_triangles_.size),
+                gpu::Bind::StorageBuffer(3, vertices_, 0, vertices_.size),
+                gpu::Bind::StorageBuffer(4, counter, 0, counter.size),
+                gpu::Bind::Uniform(5, legacy_camera_[slot], 0, sizeof(LegacyCamera))});
         ctx.cmd->Push(push);
         ctx.cmd->DrawMeshTasks(meshlet_count_, 1, 1);
         ctx.cmd->EndRendering();

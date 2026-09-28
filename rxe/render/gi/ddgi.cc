@@ -80,8 +80,8 @@ void FrameRotation(u32 frame_index, f32 out_rows[12]) {
 
 }  // namespace
 
-base::UniquePointer<DdgiSystem> DdgiSystem::Create(Device& device, TextureView sky_view,
-                                               SamplerHandle sky_sampler,
+base::UniquePointer<DdgiSystem> DdgiSystem::Create(gpu::Device& device, gpu::TextureView sky_view,
+                                               gpu::SamplerHandle sky_sampler,
                                                BindlessRegistry& bindless) {
   auto ddgi = base::UniquePointer<DdgiSystem>(new DdgiSystem(device));
   ddgi->sky_view_ = sky_view;
@@ -96,20 +96,20 @@ void DdgiSystem::Configure(const Settings& settings) {
   settings_ = settings;
 }
 
-bool DdgiSystem::CreateResources(TextureView sky_view, SamplerHandle sky_sampler) {
-  sampler_ = device_.GetSampler({.mip_filter = Filter::kNearest,
-                                 .address_u = AddressMode::kClampToEdge,
-                                 .address_v = AddressMode::kClampToEdge,
-                                 .address_w = AddressMode::kClampToEdge,
+bool DdgiSystem::CreateResources(gpu::TextureView sky_view, gpu::SamplerHandle sky_sampler) {
+  sampler_ = device_.GetSampler({.mip_filter = gpu::Filter::kNearest,
+                                 .address_u = gpu::AddressMode::kClampToEdge,
+                                 .address_v = gpu::AddressMode::kClampToEdge,
+                                 .address_w = gpu::AddressMode::kClampToEdge,
                                  .max_lod = 0.0f});
   if (!sampler_) return false;
 
-  TextureUsageFlags usage = kTextureUsageSampled | kTextureUsageStorage;
+  gpu::TextureUsageFlags usage = gpu::kTextureUsageSampled | gpu::kTextureUsageStorage;
   irradiance_ =
-      device_.CreateImage2D(Format::kRGBA16Float, {kIrradianceWidth, kIrradianceHeight}, usage);
+      device_.CreateImage2D(gpu::Format::kRGBA16Float, {kIrradianceWidth, kIrradianceHeight}, usage);
   distance_ =
-      device_.CreateImage2D(Format::kRGBA16Float, {kDistanceWidth, kDistanceHeight}, usage);
-  rays_ = device_.CreateImage2D(Format::kRGBA16Float, {kRaysPerProbe, kProbeCount}, usage);
+      device_.CreateImage2D(gpu::Format::kRGBA16Float, {kDistanceWidth, kDistanceHeight}, usage);
+  rays_ = device_.CreateImage2D(gpu::Format::kRGBA16Float, {kRaysPerProbe, kProbeCount}, usage);
   if (!irradiance_ || !distance_ || !rays_) return false;
 
   // The shaders declare (RW)Texture2DArray over the atlases, so bind them
@@ -118,8 +118,8 @@ bool DdgiSystem::CreateResources(TextureView sky_view, SamplerHandle sky_sampler
   distance_array_view_ = device_.CreateArrayView(distance_);
   if (!irradiance_array_view_ || !distance_array_view_) return false;
 
-  for (GpuBuffer& buffer : volume_buffers_) {
-    buffer = device_.CreateBuffer(sizeof(VolumeData), kBufferUsageUniform, true);
+  for (gpu::GpuBuffer& buffer : volume_buffers_) {
+    buffer = device_.CreateBuffer(sizeof(VolumeData), gpu::kBufferUsageUniform, true);
     if (!buffer.mapped) return false;
   }
   return true;
@@ -129,27 +129,27 @@ bool DdgiSystem::CreatePipelines() {
   // The rays pass resolves hit materials through the bindless set.
   rays_pipeline_ = device_.CreateComputePipeline({
       .shader = RX_SHADER(k_ddgi_rays_cs_hlsl),
-      .sets = {{.slots = {{0, BindingType::kStorageImage},
-                          {1, BindingType::kCombinedTextureSampler},
-                          {2, BindingType::kCombinedTextureSampler},
-                          {3, BindingType::kAccelStruct},
-                          {4, BindingType::kUniformBuffer}}},
+      .sets = {{.slots = {{0, gpu::BindingType::kStorageImage},
+                          {1, gpu::BindingType::kCombinedTextureSampler},
+                          {2, gpu::BindingType::kCombinedTextureSampler},
+                          {3, gpu::BindingType::kAccelStruct},
+                          {4, gpu::BindingType::kUniformBuffer}}},
                {.shared = bindless_->set_layout()}},
-      .push_constant_size = PushSize<RaysPush>(),
+      .push_constant_size = gpu::PushSize<RaysPush>(),
       .debug_name = "ddgi_rays",
   });
   blend_pipeline_ = device_.CreateComputePipeline({
       .shader = RX_SHADER(k_ddgi_blend_cs_hlsl),
-      .sets = {{.slots = {{0, BindingType::kStorageImage},
-                          {1, BindingType::kCombinedTextureSampler},
-                          {2, BindingType::kUniformBuffer}}}},
-      .push_constant_size = PushSize<BlendPush>(),
+      .sets = {{.slots = {{0, gpu::BindingType::kStorageImage},
+                          {1, gpu::BindingType::kCombinedTextureSampler},
+                          {2, gpu::BindingType::kUniformBuffer}}}},
+      .push_constant_size = gpu::PushSize<BlendPush>(),
       .debug_name = "ddgi_blend",
   });
   border_pipeline_ = device_.CreateComputePipeline({
       .shader = RX_SHADER(k_ddgi_border_cs_hlsl),
-      .sets = {{.slots = {{0, BindingType::kStorageImage}}}},
-      .push_constant_size = PushSize<BorderPush>(),
+      .sets = {{.slots = {{0, gpu::BindingType::kStorageImage}}}},
+      .push_constant_size = gpu::PushSize<BorderPush>(),
       .debug_name = "ddgi_border",
   });
   if (!rays_pipeline_ || !blend_pipeline_ || !border_pipeline_) {
@@ -165,7 +165,7 @@ EnvironmentSystem::DdgiBinding DdgiSystem::binding(u32 frame_index) const {
   result.distance = distance_array_view_;
   result.volume = volume_buffers_[frame_index % 2];
   result.volume_size = sizeof(VolumeData);
-  result.layout = ResourceState::kGeneral;  // atlases live in GENERAL
+  result.layout = gpu::ResourceState::kGeneral;  // atlases live in GENERAL
   return result;
 }
 
@@ -197,7 +197,7 @@ void DdgiSystem::AddToGraph(RenderGraph& graph, RayTracingContext& raytracing, u
   volume.params[1] = settings_.hysteresis;
   volume.params[2] = spacing * 4.0f;  // max ray distance
   volume.params[3] = settings_.energy_scale;
-  GpuBuffer& volume_buffer = volume_buffers_[frame_index % 2];
+  gpu::GpuBuffer& volume_buffer = volume_buffers_[frame_index % 2];
   base::MemCopy(volume_buffer.mapped, &volume, sizeof(volume));
 
   RaysPush rays_push{};
@@ -215,71 +215,71 @@ void DdgiSystem::AddToGraph(RenderGraph& graph, RayTracingContext& raytracing, u
   graph.AddPass(
       "ddgi", [async](RenderGraph::PassBuilder& b) { if (async) b.Async(); },
       [this, &raytracing, tlas_slot, rays_push, frame_index, reset](PassContext& ctx) {
-        const GpuBuffer& volume_buffer = volume_buffers_[frame_index % 2];
+        const gpu::GpuBuffer& volume_buffer = volume_buffers_[frame_index % 2];
 
         // Everything stays in GENERAL; first touch transitions from
         // UNDEFINED, after that plain memory barriers order the stages.
         if (!atlas_initialized_) {
           atlas_initialized_ = true;
-          TextureBarrier barriers[3] = {
-              Transition(irradiance_, ResourceState::kUndefined, ResourceState::kGeneral),
-              Transition(distance_, ResourceState::kUndefined, ResourceState::kGeneral),
-              Transition(rays_, ResourceState::kUndefined, ResourceState::kGeneral)};
+          gpu::TextureBarrier barriers[3] = {
+              gpu::Transition(irradiance_, gpu::ResourceState::kUndefined, gpu::ResourceState::kGeneral),
+              gpu::Transition(distance_, gpu::ResourceState::kUndefined, gpu::ResourceState::kGeneral),
+              gpu::Transition(rays_, gpu::ResourceState::kUndefined, gpu::ResourceState::kGeneral)};
           ctx.cmd->TextureBarriers(barriers);
         } else {
           // Last frame's fragment reads must finish before we rewrite.
-          ctx.cmd->MemoryBarrier(BarrierScope::kGraphicsRead, BarrierScope::kComputeWrite);
+          ctx.cmd->MemoryBarrier(gpu::BarrierScope::kGraphicsRead, gpu::BarrierScope::kComputeWrite);
         }
 
         // Probe rays.
         ctx.cmd->BindPipeline(rays_pipeline_);
-        ctx.cmd->BindTransient(0, {Bind::Storage(0, rays_),
-                                   Bind::Combined(1, sky_view_, sky_sampler_),
-                                   InGeneral(Bind::Combined(2, irradiance_array_view_, sampler_)),
-                                   Bind::Accel(3, raytracing.tlas(tlas_slot)),
-                                   Bind::Uniform(4, volume_buffer, 0, sizeof(VolumeData))});
+        ctx.cmd->BindTransient(0, {gpu::Bind::Storage(0, rays_),
+                                   gpu::Bind::Combined(1, sky_view_, sky_sampler_),
+                                   gpu::InGeneral(gpu::Bind::Combined(2, irradiance_array_view_, sampler_)),
+                                   gpu::Bind::Accel(3, raytracing.tlas(tlas_slot)),
+                                   gpu::Bind::Uniform(4, volume_buffer, 0, sizeof(VolumeData))});
         ctx.cmd->BindSet(1, bindless_->set());
         ctx.cmd->Push(rays_push);
         ctx.cmd->Dispatch((kRaysPerProbe + 31) / 32, kProbeCount, 1);
 
-        ctx.cmd->MemoryBarrier(BarrierScope::kComputeWrite, BarrierScope::kComputeRead);
+        ctx.cmd->MemoryBarrier(gpu::BarrierScope::kComputeWrite, gpu::BarrierScope::kComputeRead);
 
         // Blend rays into both atlases.
-        auto blend = [&](TextureView atlas_view, u32 mode, u32 width, u32 height) {
+        auto blend = [&](gpu::TextureView atlas_view, u32 mode, u32 width, u32 height) {
           BlendPush push{};
           base::MemCopy(push.rotation, rays_push.rotation, sizeof(push.rotation));
           push.mode = mode;
           push.ray_count = kRaysPerProbe;
           push.reset = reset ? 1u : 0u;
           ctx.cmd->BindPipeline(blend_pipeline_);
-          ctx.cmd->BindTransient(0, {Bind::StorageView(0, atlas_view),
-                                     InGeneral(Bind::Combined(1, rays_.view, sampler_)),
-                                     Bind::Uniform(2, volume_buffer, 0, sizeof(VolumeData))});
+          ctx.cmd->BindTransient(0, {gpu::Bind::StorageView(0, atlas_view),
+                                     gpu::InGeneral(gpu::Bind::Combined(1, rays_.view, sampler_)),
+                                     gpu::Bind::Uniform(2, volume_buffer, 0, sizeof(VolumeData))});
           ctx.cmd->Push(push);
           ctx.cmd->Dispatch2D({width, height});
         };
         blend(irradiance_array_view_, 0, kIrradianceWidth, kIrradianceHeight);
         blend(distance_array_view_, 1, kDistanceWidth, kDistanceHeight);
 
-        ctx.cmd->MemoryBarrier(BarrierScope::kComputeWrite, BarrierScope::kComputeRead);
+        ctx.cmd->MemoryBarrier(gpu::BarrierScope::kComputeWrite, gpu::BarrierScope::kComputeRead);
 
         // Octahedral borders for bilinear wrap.
-        auto border = [&](TextureView atlas_view, u32 texels, u32 width, u32 height) {
+        auto border = [&](gpu::TextureView atlas_view, u32 texels, u32 width, u32 height) {
           BorderPush push{texels, kProbesX * kProbesZ, kProbesY, 0};
           ctx.cmd->BindPipeline(border_pipeline_);
-          ctx.cmd->BindTransient(0, {Bind::StorageView(0, atlas_view)});
+          ctx.cmd->BindTransient(0, {gpu::Bind::StorageView(0, atlas_view)});
           ctx.cmd->Push(push);
           ctx.cmd->Dispatch2D({width, height});
         };
         border(irradiance_array_view_, kIrradianceTexels, kIrradianceWidth, kIrradianceHeight);
         border(distance_array_view_, kDistanceTexels, kDistanceWidth, kDistanceHeight);
 
-        ctx.cmd->MemoryBarrier(BarrierScope::kComputeWrite, BarrierScope::kGraphicsRead);
+        ctx.cmd->MemoryBarrier(gpu::BarrierScope::kComputeWrite, gpu::BarrierScope::kGraphicsRead);
       });
 }
 
 DdgiSystem::~DdgiSystem() {
-  for (PipelineHandle* p : {&rays_pipeline_, &blend_pipeline_, &border_pipeline_}) {
+  for (gpu::PipelineHandle* p : {&rays_pipeline_, &blend_pipeline_, &border_pipeline_}) {
     device_.DestroyPipeline(*p);
     *p = {};
   }
@@ -288,7 +288,7 @@ DdgiSystem::~DdgiSystem() {
   device_.DestroyImage(irradiance_);
   device_.DestroyImage(distance_);
   device_.DestroyImage(rays_);
-  for (GpuBuffer& buffer : volume_buffers_) device_.DestroyBuffer(buffer);
+  for (gpu::GpuBuffer& buffer : volume_buffers_) device_.DestroyBuffer(buffer);
   // sampler_ is device-cached, never destroyed by callers.
 }
 

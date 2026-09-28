@@ -21,7 +21,7 @@ class ShadowPass {
   static constexpr u32 kMaxCascades = 4;
   // D16 is enough for the tightened per-cascade ortho ranges and halves the
   // atlas bandwidth; the graph texture and the pipelines must agree.
-  static constexpr Format kAtlasFormat = Format::kD16Unorm;
+  static constexpr gpu::Format kAtlasFormat = gpu::Format::kD16Unorm;
 
   // Mirrors PushData in shadow.vs. The per-draw model matrix lives in the
   // frame's DrawRecord arena (set 1) instead of the push range, which is what
@@ -63,8 +63,8 @@ class ShadowPass {
 
   // material_layout is set 0 here (the mesh pipeline's material set), bound per
   // submesh so the fragment stage can alpha-test masked casters.
-  bool Initialize(Device& device, BindingLayoutHandle material_layout, Format local_depth_format);
-  void Destroy(Device& device);
+  bool Initialize(gpu::Device& device, gpu::BindingLayoutHandle material_layout, gpu::Format local_depth_format);
+  void Destroy(gpu::Device& device);
   void Configure(const Settings& settings);
 
   u32 atlas_width() const { return settings_.resolution * settings_.cascade_count; }
@@ -80,31 +80,31 @@ class ShadowPass {
   // per cascade with that cascade's light_view_proj pushed; the caller emits its
   // opaque draws inside, binding pipeline() for static and skinned_pipeline()
   // for animated casters (both share one binding/push interface).
-  void Render(CommandList& cmd, TextureView atlas_view,
-              const base::Function<void(CommandList&, const Mat4&)>& draw);
+  void Render(gpu::CommandList& cmd, gpu::TextureView atlas_view,
+              const base::Function<void(gpu::CommandList&, const Mat4&)>& draw);
 
-  const GpuBuffer& cascade_buffer(u32 frame_slot) const { return cascades_[frame_slot]; }
+  const gpu::GpuBuffer& cascade_buffer(u32 frame_slot) const { return cascades_[frame_slot]; }
   u64 cascade_buffer_size() const { return sizeof(CascadeData); }
   // masked = alpha-tested caster (binds the discard fragment + material set);
   // opaque casters get the depth-only pipeline (no fragment shader at all), so
   // the discard's presence never costs them early-Z.
-  PipelineHandle pipeline(bool masked = true) const {
+  gpu::PipelineHandle pipeline(bool masked = true) const {
     return masked || !opaque_pipeline_ ? pipeline_ : opaque_pipeline_;
   }
-  PipelineHandle skinned_pipeline(bool masked = true) const {
+  gpu::PipelineHandle skinned_pipeline(bool masked = true) const {
     return masked || !skinned_opaque_pipeline_ ? skinned_pipeline_ : skinned_opaque_pipeline_;
   }
-  PipelineHandle instanced_pipeline(bool masked = true) const {
+  gpu::PipelineHandle instanced_pipeline(bool masked = true) const {
     return masked || !instanced_opaque_pipeline_ ? instanced_pipeline_ : instanced_opaque_pipeline_;
   }
-  PipelineHandle local_pipeline(bool masked = true) const {
+  gpu::PipelineHandle local_pipeline(bool masked = true) const {
     return masked || !local_opaque_pipeline_ ? local_pipeline_ : local_opaque_pipeline_;
   }
-  PipelineHandle local_skinned_pipeline(bool masked = true) const {
+  gpu::PipelineHandle local_skinned_pipeline(bool masked = true) const {
     return masked || !local_skinned_opaque_pipeline_ ? local_skinned_pipeline_
                                                      : local_skinned_opaque_pipeline_;
   }
-  PipelineHandle local_instanced_pipeline(bool masked = true) const {
+  gpu::PipelineHandle local_instanced_pipeline(bool masked = true) const {
     return masked || !local_instanced_opaque_pipeline_ ? local_instanced_pipeline_
                                                        : local_instanced_opaque_pipeline_;
   }
@@ -113,19 +113,19 @@ class ShadowPass {
   static constexpr u32 kFramesInFlight = 2;
 
   Settings settings_;
-  PipelineHandle pipeline_;
-  PipelineHandle skinned_pipeline_;
-  PipelineHandle opaque_pipeline_;  // depth-only, no fragment stage
-  PipelineHandle skinned_opaque_pipeline_;
-  PipelineHandle instanced_pipeline_;
-  PipelineHandle instanced_opaque_pipeline_;
-  PipelineHandle local_pipeline_;
-  PipelineHandle local_skinned_pipeline_;
-  PipelineHandle local_opaque_pipeline_;
-  PipelineHandle local_skinned_opaque_pipeline_;
-  PipelineHandle local_instanced_pipeline_;
-  PipelineHandle local_instanced_opaque_pipeline_;
-  GpuBuffer cascades_[kFramesInFlight];
+  gpu::PipelineHandle pipeline_;
+  gpu::PipelineHandle skinned_pipeline_;
+  gpu::PipelineHandle opaque_pipeline_;  // depth-only, no fragment stage
+  gpu::PipelineHandle skinned_opaque_pipeline_;
+  gpu::PipelineHandle instanced_pipeline_;
+  gpu::PipelineHandle instanced_opaque_pipeline_;
+  gpu::PipelineHandle local_pipeline_;
+  gpu::PipelineHandle local_skinned_pipeline_;
+  gpu::PipelineHandle local_opaque_pipeline_;
+  gpu::PipelineHandle local_skinned_opaque_pipeline_;
+  gpu::PipelineHandle local_instanced_pipeline_;
+  gpu::PipelineHandle local_instanced_opaque_pipeline_;
+  gpu::GpuBuffer cascades_[kFramesInFlight];
   CascadeData current_{};
 };
 

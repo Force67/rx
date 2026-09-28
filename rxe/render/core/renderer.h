@@ -109,7 +109,7 @@ struct VulkanDeviceExtras {
 };
 
 struct RendererDesc {
-  Backend backend = Backend::kAuto;
+  gpu::Backend backend = gpu::Backend::kAuto;
   bool enable_validation = false;
   AntiAliasingMode aa_mode = AntiAliasingMode::kTaa;
   UpscalerKind upscaler = UpscalerKind::kNone;
@@ -149,30 +149,30 @@ enum class ScenePhase : u8 {
 // only.
 struct SceneHookContext {
   ScenePhase phase = ScenePhase::kOpaque;
-  CommandList *cmd = nullptr;
-  Device *device = nullptr;
+  gpu::CommandList *cmd = nullptr;
+  gpu::Device *device = nullptr;
 
   // Color target. kOpaque: rx's scene color (opaque + sky), HDR-linear RGBA16F.
   // kTransparent: the composited scene the app blends its translucents over.
-  const GpuImage *color = nullptr;
-  TextureView color_view;
-  Format color_format = Format::kRGBA16Float;
+  const gpu::GpuImage *color = nullptr;
+  gpu::TextureView color_view;
+  gpu::Format color_format = gpu::Format::kRGBA16Float;
   // Reversed-Z hardware depth (D32, clear 0 = far) with rx geometry already in
   // it. Depth-test GREATER_OR_EQUAL to interleave with rx geometry; writing it
   // (kOpaque) lets the app's geometry occlude rx's downstream draws too.
-  const GpuImage *depth = nullptr;
-  TextureView depth_view;
-  Format depth_format = Format::kD32Float;
+  const gpu::GpuImage *depth = nullptr;
+  gpu::TextureView depth_view;
+  gpu::Format depth_format = gpu::Format::kD32Float;
   // kOpaque only (null in kTransparent): the R32F depth copy rx's depth-aware
   // passes (sky/fog/aerial/SSAO/SSR) sample - the depth attachment itself is
   // never sampled (nvidia compression). Write it as a second color attachment
   // (SV_Position.z) so those passes respect the app's opaque geometry; skip it
   // and rx treats those pixels as background behind the effects.
-  const GpuImage *depth_export = nullptr;
-  TextureView depth_export_view;
-  Format depth_export_format = Format::kR32Float;
+  const gpu::GpuImage *depth_export = nullptr;
+  gpu::TextureView depth_export_view;
+  gpu::Format depth_export_format = gpu::Format::kR32Float;
 
-  Extent2D extent{};  // render resolution
+  gpu::Extent2D extent{};  // render resolution
   u32 frame_slot = 0; // 0..frames_in_flight-1, index per-slot resources
   u32 frames_in_flight = 1;
 
@@ -199,9 +199,9 @@ struct SceneHookContext {
   // kTransparent bind it as the second color attachment and alpha-blend it so
   // moving translucents overwrite the opaque/sky velocity beneath them; skip it
   // and those pixels keep the underlying velocity, ghosting under camera motion.
-  const GpuImage *motion = nullptr;
-  TextureView motion_view;
-  Format motion_format = Format::kRG16Float;
+  const gpu::GpuImage *motion = nullptr;
+  gpu::TextureView motion_view;
+  gpu::Format motion_format = gpu::Format::kRG16Float;
   // Last frame's un-jittered view_proj (== view_proj on the first frame), the
   // exact matrix rx's own geometry reprojects with for its motion vectors.
   Mat4 prev_view_proj = Mat4::Identity();
@@ -213,12 +213,12 @@ struct SceneHookContext {
 // (output size when an upscaler is active), so overlays stay crisp and require
 // neither depth nor motion-vector output.
 struct HdrOverlayContext {
-  CommandList* cmd = nullptr;
-  Device* device = nullptr;
-  const GpuImage* color = nullptr;
-  TextureView color_view;
-  Format color_format = Format::kRGBA16Float;
-  Extent2D extent{};
+  gpu::CommandList* cmd = nullptr;
+  gpu::Device* device = nullptr;
+  const gpu::GpuImage* color = nullptr;
+  gpu::TextureView color_view;
+  gpu::Format color_format = gpu::Format::kRGBA16Float;
+  gpu::Extent2D extent{};
   u32 frame_slot = 0;
   u32 frames_in_flight = 1;
 };
@@ -391,8 +391,8 @@ struct FrameView {
   // Recorded inside the final ui pass with the backbuffer bound as the
   // color attachment. hud_draw (the libultragui HUD/menu) records first, then
   // ui_draw (the debug ImGui overlay) on top.
-  base::Function<void(CommandList &)> hud_draw;
-  base::Function<void(CommandList &)> ui_draw;
+  base::Function<void(gpu::CommandList &)> hud_draw;
+  base::Function<void(gpu::CommandList &)> ui_draw;
 
   // App-provided GPU passes recorded into the scene, depth-interleaved with
   // rx's own geometry (a game with its own GPU-driven pipeline: compute cull,
@@ -430,8 +430,8 @@ struct FrameView {
   // before those closures run.
   bool needs_blur = false;
   // Filled by the renderer during the (const) frame record, hence mutable.
-  mutable TextureView blur_source;
-  mutable SamplerHandle blur_sampler;
+  mutable gpu::TextureView blur_source;
+  mutable gpu::SamplerHandle blur_sampler;
 
   // Back to defaults, but the gather lists keep their capacity: a FrameView
   // held across frames (app::Host does) stops re-allocating every list every
@@ -467,7 +467,7 @@ public:
   Renderer();
   ~Renderer();
 
-  bool Initialize(const RendererDesc &desc, Window &window);
+  bool Initialize(const RendererDesc &desc, ui::Window &window);
   // Windowless bringup for offscreen capture (--headless --shot, CI): a
   // surfaceless device (Device::CreateOffscreen) with no presentation surface,
   // so every frame renders into the capture image and completes through the
@@ -651,10 +651,10 @@ public:
   u32 AcquireSkinnedRt();
   void ReleaseSkinnedRt(u32 actor);
 
-  const DeviceCaps *caps() const;
+  const gpu::DeviceCaps *caps() const;
   bool raytracing_available() const { return rt_available_; }
-  Device *device() { return device_.Get_UseOnlyIfYouKnowWhatYouareDoing(); }
-  Format swapchain_format() const;
+  gpu::Device *device() { return device_.Get_UseOnlyIfYouKnowWhatYouareDoing(); }
+  gpu::Format swapchain_format() const;
   u32 swapchain_image_count() const;
   u32 render_width() const { return render_width_; }
   u32 render_height() const { return render_height_; }
@@ -679,7 +679,7 @@ public:
   void LogTextureMemory() const;
 
   // Per-pass GPU timings from the last resolved frame, for the debug overlay.
-  const base::Vector<GpuProfiler::PassTiming> &pass_timings() const {
+  const base::Vector<gpu::GpuProfiler::PassTiming> &pass_timings() const {
     return profiler_.results();
   }
   f32 gpu_frame_ms() const { return profiler_.total_ms(); }
@@ -717,30 +717,30 @@ private:
   // and the draw keeps the rigid-only motion it had before this existed.
   u32 PrevSkinOffset(const DrawItem &item) const;
 
-  static constexpr u32 kFramesInFlight = Device::kMaxFramesInFlight;
-  static constexpr Format kSceneColorFormat = Format::kRGBA16Float;
-  static constexpr Format kMotionFormat = Format::kRG16Float;
+  static constexpr u32 kFramesInFlight = gpu::Device::kMaxFramesInFlight;
+  static constexpr gpu::Format kSceneColorFormat = gpu::Format::kRGBA16Float;
+  static constexpr gpu::Format kMotionFormat = gpu::Format::kRG16Float;
   // Oct normal in rg, material roughness in b (denoiser guides + the
   // reflection trace need real roughness), a free.
-  static constexpr Format kNormalFormat = Format::kRGBA16Float;
-  static constexpr Format kDepthFormat = Format::kD32Float;
+  static constexpr gpu::Format kNormalFormat = gpu::Format::kRGBA16Float;
+  static constexpr gpu::Format kDepthFormat = gpu::Format::kD32Float;
 
   // Per frame-in-flight host-visible buffers. Command recording, sync and the
   // transient descriptor pools live inside the rhi Device's frame ring.
   struct FrameResources {
-    GpuBuffer globals; // host visible FrameGlobals
-    GpuBuffer
+    gpu::GpuBuffer globals; // host visible FrameGlobals
+    gpu::GpuBuffer
         bone_palette; // host visible skinning matrices, read by device address
-    GpuBuffer
+    gpu::GpuBuffer
         morph_weights; // host visible MorphWeight pairs, read by device address
-    GpuBuffer lights;  // host visible PointLight array
-    GpuBuffer decals;  // host visible Decal array
+    gpu::GpuBuffer lights;  // host visible PointLight array
+    gpu::GpuBuffer decals;  // host visible Decal array
     // Host visible DrawRecord arena: one per FrameView draw (plus the zeroed
     // record 0), indexed by the record id every mesh / shadow / water push carries
     // instead of the 128 bytes of matrices that used to ride in the block.
     // Grown on demand, never clamped - a dropped record would silently render
     // a draw at the origin.
-    GpuBuffer draw_records;
+    gpu::GpuBuffer draw_records;
     u32 draw_record_capacity = 0;
   };
   // Max bones across all skinned draws in one frame.
@@ -751,14 +751,14 @@ private:
 
   // Shared bringup for both entry points. `window` is null for the offscreen
   // path, which also decides the device factory and the swapchain stand-in.
-  bool InitializeCommon(const RendererDesc &desc, Window *window, u32 width, u32 height);
+  bool InitializeCommon(const RendererDesc &desc, ui::Window *window, u32 width, u32 height);
   bool CreateFrameResources();
   void DestroyFrameResources();
   // Fills this slot's DrawRecord arena from view.draws (growing it first) and
   // returns the buffer the passes bind. Record 0 stays zeroed: instanced draws
   // take their matrices from vertex streams and used to push an all-zero model,
   // and the fragment stage's model-space-normal branch rejects it the same way.
-  const GpuBuffer &UploadDrawRecords(FrameResources &frame, const FrameView &view);
+  const gpu::GpuBuffer &UploadDrawRecords(FrameResources &frame, const FrameView &view);
   void RecreateSwapchain();
   // Whether the swapchain should request an HDR format: the hdr_output setting
   // gated on the OS actually compositing the window in HDR (Window::
@@ -777,7 +777,7 @@ private:
   // Records the frame's opaque casters depth-only with ShadowPass's caster
   // pipelines (static/skinned/instanced, masked + opaque variants). Shared by
   // the sun cascade render and the precipitation sky-occlusion map.
-  void RecordDepthOnlyScene(CommandList &cmd, const Mat4 &light_view_proj,
+  void RecordDepthOnlyScene(gpu::CommandList &cmd, const Mat4 &light_view_proj,
                             const FrameResources &frame, const FrameView &view);
   // Builds the blas + bindless geometry for grass-like (no_rt) meshes uploaded
   // while path tracing was off, so enabling it later still gets the
@@ -789,11 +789,11 @@ private:
   // LOD's bindless index (custom_index for the TLAS instance) or kInvalidIndex
   // when the LOD has no RT geometry / cannot be built (caller falls back to
   // LOD0). Called at frame-build time, so a one-time build stall is acceptable.
-  u32 EnsureLodRtGeometry(u64 mesh_key, GpuMesh &mesh, u32 lod);
+  u32 EnsureLodRtGeometry(u64 mesh_key, gpu::GpuMesh &mesh, u32 lod);
 
   RendererDesc desc_;
   RenderSettings settings_;
-  Window *window_ = nullptr;
+  ui::Window *window_ = nullptr;
   // Windowless run (InitializeOffscreen): there is nothing to present to, so
   // every frame takes the capture path below, armed or not. The warm-up frames
   // a non-black capture needs (sky/atmosphere bakes, temporal history, streamed
@@ -802,8 +802,8 @@ private:
   // The HDR request the current swapchain was built with; when WantHdrSwapchain
   // diverges (OS toggle flipped, setting changed) the frame loop rebuilds.
   bool swapchain_hdr_request_ = false;
-  base::UniquePointer<Device> device_;
-  base::UniquePointer<Swapchain> swapchain_;
+  base::UniquePointer<gpu::Device> device_;
+  base::UniquePointer<gpu::Swapchain> swapchain_;
   base::UniquePointer<TransientPool> transient_pool_;
   base::UniquePointer<BindlessRegistry> bindless_;
   base::Vector<u32> retired_bindless_meshes_[kFramesInFlight];
@@ -838,15 +838,15 @@ private:
   base::UniquePointer<PostPass> post_;
   base::UniquePointer<UiBlurPass>
       ui_blur_; // frosted-glass backdrop blur for the UI
-  base::UnorderedMap<u64, GpuMesh> meshes_;
+  base::UnorderedMap<u64, gpu::GpuMesh> meshes_;
   FrameResources frames_[kFramesInFlight];
   // Per-slot persistent sets, rewritten each frame once the slot's fence fired:
   // frame globals (uniform + tlas + hi-z) and the two environment-set variants
   // (the scene and transparent passes bind different ao / opaque-color views).
-  BindingSetHandle globals_sets_[kFramesInFlight];
-  BindingSetHandle env_scene_sets_[kFramesInFlight];
-  BindingSetHandle env_transparent_sets_[kFramesInFlight];
-  BindingSetHandle env_prepass_sets_[kFramesInFlight]; // dummies + ocean maps
+  gpu::BindingSetHandle globals_sets_[kFramesInFlight];
+  gpu::BindingSetHandle env_scene_sets_[kFramesInFlight];
+  gpu::BindingSetHandle env_transparent_sets_[kFramesInFlight];
+  gpu::BindingSetHandle env_prepass_sets_[kFramesInFlight]; // dummies + ocean maps
   base::UniquePointer<Upscaler> upscaler_;
   // FSR3 frame generation (RX_FRAMEGEN): lazily created when the FSR3
   // upscaler is active (its dilated guides are reused); the present-rate
@@ -865,7 +865,7 @@ private:
   // when the compositor is not releasing swapchain images. Allocated on first
   // need and reused; the frame renders into it and is submitted without a
   // present. See RenderFrame.
-  GpuImage capture_image_;
+  gpu::GpuImage capture_image_;
   bool capture_offscreen_ = false;  // this frame targets capture_image_
   // Latched when an acquire times out during a capture run, so the rest of the
   // run stops paying the timeout per frame. Cleared once the captures are
@@ -901,21 +901,21 @@ private:
   // baker can pose its bakes against the geometry that is actually on screen.
   base::Vector<DecalBaker::Target> decal_targets_;
   bool vrs_active_ = false; // rate image attached to this frame's scene pass
-  PipelineHandle light_cluster_pipeline_;
-  PipelineHandle contact_shadow_pipeline_;
-  PipelineHandle cloud_shadow_pipeline_;
-  PipelineHandle sss_pipeline_;
-  SamplerHandle sss_sampler_;
-  GpuBuffer cluster_counts_;
-  GpuBuffer cluster_indices_;
-  GpuBuffer decal_cluster_indices_;
+  gpu::PipelineHandle light_cluster_pipeline_;
+  gpu::PipelineHandle contact_shadow_pipeline_;
+  gpu::PipelineHandle cloud_shadow_pipeline_;
+  gpu::PipelineHandle sss_pipeline_;
+  gpu::SamplerHandle sss_sampler_;
+  gpu::GpuBuffer cluster_counts_;
+  gpu::GpuBuffer cluster_indices_;
+  gpu::GpuBuffer decal_cluster_indices_;
   // Contact-shadow camera matrices, too big for the push block; one per
   // in-flight frame since the pass rewrites it while the previous frame reads.
-  GpuBuffer contact_camera_[kFramesInFlight];
+  gpu::GpuBuffer contact_camera_[kFramesInFlight];
   // Decal atlas: set once by the engine/demo via SetDecalAtlas (asset id of an
   // uploaded texture); empty binds white.
-  TextureView decal_atlas_view_;
-  TextureView decal_normal_atlas_view_;
+  gpu::TextureView decal_atlas_view_;
+  gpu::TextureView decal_normal_atlas_view_;
   SsaoPass ssao_;
   SsrPass ssr_;
   SsgiPass ssgi_;
@@ -934,7 +934,7 @@ private:
   BloomPass bloom_;
   ExposurePass exposure_;
   ReferenceCompare reference_compare_;
-  GpuProfiler profiler_;
+  gpu::GpuProfiler profiler_;
   PathTracer path_tracer_;
   ReconPathTracer recon_path_tracer_;
   VolumetricFog volumetric_fog_;
@@ -980,7 +980,7 @@ private:
   bool shore_wetting_active_ = false; // shore wetting field valid this frame
   bool water_caustics_active_ =
       false;              // caustic map valid + flag set this frame
-  GpuImage ms_dummy_hiz_; // 1x1 fallback bound to the mesh-shader cull when
+  gpu::GpuImage ms_dummy_hiz_; // 1x1 fallback bound to the mesh-shader cull when
                           // occlusion is off
   Mat4 pt_prev_view_proj_ = Mat4::Identity();
   f32 pt_prev_sun_intensity_ = 0;
@@ -1014,10 +1014,10 @@ private:
   // standard single-sampled path). Diverging from the settings-derived value
   // rebuilds them through a device idle, like an upscaler swap.
   u32 applied_msaa_samples_ = 1;
-  PipelineHandle msaa_resolve_pipeline_; // sample-0 guide resolve (compute)
-  PipelineHandle depth_copy_pipeline_;   // rebuilds 1x hw depth post-resolve
-  PipelineHandle hdr_overlay_copy_pipeline_;
-  SamplerHandle hdr_overlay_sampler_;
+  gpu::PipelineHandle msaa_resolve_pipeline_; // sample-0 guide resolve (compute)
+  gpu::PipelineHandle depth_copy_pipeline_;   // rebuilds 1x hw depth post-resolve
+  gpu::PipelineHandle hdr_overlay_copy_pipeline_;
+  gpu::SamplerHandle hdr_overlay_sampler_;
   AntiAliasingMode applied_aa_ = AntiAliasingMode::kTaa;
   bool applied_vsync_ = false;
   // This frame's sun, as every sun-lit pass reads it.
@@ -1038,11 +1038,11 @@ private:
   // Editor debug-line pass: a line-list pipeline (lazily built) drawing
   // FrameView::debug_lines/overlay from per-frame host-visible vertex buffers.
   void BuildDebugLinePipelines();
-  void DrawDebugLines(CommandList &cmd, const FrameView &view,
-                      const Mat4 &view_proj, Extent2D extent);
-  PipelineHandle debug_line_pipeline_;         // depth-tested
-  PipelineHandle debug_line_overlay_pipeline_; // always on top
-  GpuBuffer debug_line_vbo_[kFramesInFlight];  // host-visible, one per slot
+  void DrawDebugLines(gpu::CommandList &cmd, const FrameView &view,
+                      const Mat4 &view_proj, gpu::Extent2D extent);
+  gpu::PipelineHandle debug_line_pipeline_;         // depth-tested
+  gpu::PipelineHandle debug_line_overlay_pipeline_; // always on top
+  gpu::GpuBuffer debug_line_vbo_[kFramesInFlight];  // host-visible, one per slot
   u32 debug_line_vbo_capacity_[kFramesInFlight] = {}; // in vertices
 
   // Editor picking: an R32_UINT id pass over the opaque draws, read back at the
@@ -1054,14 +1054,14 @@ private:
   u32 pick_x_ = 0, pick_y_ = 0;
   bool pick_result_ready_ = false;
   u32 pick_result_id_ = 0;
-  PipelineHandle pick_pipeline_;
-  GpuImage pick_id_image_;    // R32_UINT, render resolution
-  GpuImage pick_depth_image_; // D32, render resolution
+  gpu::PipelineHandle pick_pipeline_;
+  gpu::GpuImage pick_id_image_;    // R32_UINT, render resolution
+  gpu::GpuImage pick_depth_image_; // D32, render resolution
   u32 pick_image_w_ = 0, pick_image_h_ = 0;
 
   void WriteBackbufferPng(const base::String &path);
   void WriteScreenshot();
-  void DumpFgImage(const GpuImage &image, ResourceState state, bool bgra,
+  void DumpFgImage(const gpu::GpuImage &image, gpu::ResourceState state, bool bgra,
                    const char *path);
   void WriteHdr(); // reads back the captured linear hdr buffer to a .hdr file
 
@@ -1083,8 +1083,8 @@ private:
   bool hdr_pending_ =
       false; // the copy pass ran this frame; read it back after submit
   u32 hdr_width_ = 0, hdr_height_ = 0;
-  GpuBuffer hdr_readback_; // host-visible rgba32f, one float4 per pixel
-  PipelineHandle hdr_pipeline_;
+  gpu::GpuBuffer hdr_readback_; // host-visible rgba32f, one float4 per pixel
+  gpu::PipelineHandle hdr_pipeline_;
   Mat4 prev_view_proj_ = Mat4::Identity();
   Mat4 prev_view_ = Mat4::Identity();
   Mat4 prev_proj_ = Mat4::Identity();

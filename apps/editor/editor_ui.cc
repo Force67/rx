@@ -183,7 +183,7 @@ bool Editor::UiInit() {
   else
     RX_WARN("editor: no system font found; text will not render");
 
-  render::VulkanHandles vk = render::GetVulkanHandles(*renderer_->device());
+  gpu::VulkanHandles vk = gpu::GetVulkanHandles(*renderer_->device());
   if (!vk.device) {
     RX_WARN("editor: renderer is not on the Vulkan backend; ugui disabled");
     return false;
@@ -194,8 +194,8 @@ bool Editor::UiInit() {
   bi.device = vk.device;
   bi.queue_family = vk.graphics_family;
   bi.queue = vk.graphics_queue;
-  bi.color_format = render::GetVkFormat(renderer_->swapchain_format());
-  bi.frames_in_flight = render::GetVulkanFramesInFlight(*renderer_->device());
+  bi.color_format = gpu::GetVkFormat(renderer_->swapchain_format());
+  bi.frames_in_flight = gpu::GetVulkanFramesInFlight(*renderer_->device());
   if (!backend_.Init(bi))
     return false;
   ui_.set_texture_backend(&backend_);
@@ -223,7 +223,7 @@ void Editor::UiShutdown() {
 
 // Input feeding
 void Editor::UiFeedInput(f32) {
-  const InputState &in = window_->input();
+  const ui::InputState &in = window_->input();
   host_state_.window_width = (f32)window_->width();
   host_state_.window_height = (f32)window_->height();
   // The canvas above is pixels, so every px size in the .ugui documents has to
@@ -238,8 +238,8 @@ void Editor::UiFeedInput(f32) {
   const ugui::MouseButton ub[3] = {ugui::MouseButton::kLeft,
                                    ugui::MouseButton::kRight,
                                    ugui::MouseButton::kMiddle};
-  const MouseButton rb[3] = {MouseButton::kLeft, MouseButton::kRight,
-                             MouseButton::kMiddle};
+  const ui::MouseButton rb[3] = {ui::MouseButton::kLeft, ui::MouseButton::kRight,
+                             ui::MouseButton::kMiddle};
   static bool prev[3] = {false, false, false};
   for (int i = 0; i < 3; ++i) {
     bool down = in.button(rb[i]);
@@ -251,19 +251,19 @@ void Editor::UiFeedInput(f32) {
     q.PushScroll({0, in.wheel});
 
   // Text + editing keys (GLFW codes, as the ugui text-input expects).
-  int shift = in.key(Key::kLeftShift) ? 0x0001 : 0;
-  auto key_edge = [&](Key k) { return in.key_pressed(k); };
-  if (key_edge(Key::kBackspace))
+  int shift = in.key(ui::Key::kLeftShift) ? 0x0001 : 0;
+  auto key_edge = [&](ui::Key k) { return in.key_pressed(k); };
+  if (key_edge(ui::Key::kBackspace))
     q.PushKey(259, 0, true, false, shift);
-  if (key_edge(Key::kReturn))
+  if (key_edge(ui::Key::kReturn))
     q.PushKey(257, 0, true, false, shift);
-  if (key_edge(Key::kTab))
+  if (key_edge(ui::Key::kTab))
     q.PushKey(258, 0, true, false, shift);
-  if (key_edge(Key::kDelete))
+  if (key_edge(ui::Key::kDelete))
     q.PushKey(261, 0, true, false, shift);
-  if (key_edge(Key::kArrowLeft))
+  if (key_edge(ui::Key::kArrowLeft))
     q.PushKey(263, 0, true, false, shift);
-  if (key_edge(Key::kArrowRight))
+  if (key_edge(ui::Key::kArrowRight))
     q.PushKey(262, 0, true, false, shift);
   // UTF-8 text this pump -> codepoints.
   for (u8 i = 0; i < in.text_len;) {
@@ -1423,11 +1423,11 @@ void Editor::OnBuildView(f32 dt, render::FrameView &view) {
     font_revision_ = ui_.text_engine().atlas_revision();
   }
   backend_.NewFrame();
-  view.hud_draw = [this, &view](render::CommandList &cmd) {
-    backend_.SetBackdrop(render::GetVkImageView(view.blur_source),
-                         render::GetVkSampler(view.blur_sampler));
+  view.hud_draw = [this, &view](gpu::CommandList &cmd) {
+    backend_.SetBackdrop(gpu::GetVkImageView(view.blur_source),
+                         gpu::GetVkSampler(view.blur_sampler));
     if (draw_data_)
-      backend_.Render(*draw_data_, render::GetVkCommandBuffer(cmd));
+      backend_.Render(*draw_data_, gpu::GetVkCommandBuffer(cmd));
   };
 }
 
@@ -1492,7 +1492,7 @@ bool Editor::TryStartScrub(f32 mx) {
 void Editor::UpdateScrub() {
   if (!scrub_.active)
     return;
-  const InputState &in = window_->input();
+  const ui::InputState &in = window_->input();
   f32 dx = in.mouse_x - scrub_.start_mouse;
   f32 nv = scrub_.base_value + dx * scrub_.step;
 

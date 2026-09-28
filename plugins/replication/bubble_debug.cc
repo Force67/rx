@@ -41,7 +41,7 @@ bool BubbleVisualizer::Init(render::Renderer& renderer) {
   renderer_ = &renderer;
   device_ = renderer.device();
   if (!device_) return false;
-  const render::VulkanHandles vk = render::GetVulkanHandles(*device_);
+  const gpu::VulkanHandles vk = gpu::GetVulkanHandles(*device_);
   if (vk.device == VK_NULL_HANDLE) {
     RX_WARN("net: bubble visualizer needs the vulkan backend, staying inert");
     return false;
@@ -59,9 +59,9 @@ bool BubbleVisualizer::BuildPipeline(const render::SceneHookContext& ctx) {
   if (vkCreatePipelineLayout(vk_, &lci, nullptr, &layout_) != VK_SUCCESS) return false;
 
   VkShaderModule vs =
-      render::CreateShaderModule(vk_, k_bubble_wire_vs_hlsl, sizeof(k_bubble_wire_vs_hlsl));
+      gpu::CreateShaderModule(vk_, k_bubble_wire_vs_hlsl, sizeof(k_bubble_wire_vs_hlsl));
   VkShaderModule ps =
-      render::CreateShaderModule(vk_, k_bubble_wire_ps_hlsl, sizeof(k_bubble_wire_ps_hlsl));
+      gpu::CreateShaderModule(vk_, k_bubble_wire_ps_hlsl, sizeof(k_bubble_wire_ps_hlsl));
   if (!vs || !ps) {
     if (vs) vkDestroyShaderModule(vk_, vs, nullptr);
     if (ps) vkDestroyShaderModule(vk_, ps, nullptr);
@@ -124,12 +124,12 @@ bool BubbleVisualizer::BuildPipeline(const render::SceneHookContext& ctx) {
       .pDynamicStates = dyn_states};
 
   // The transparent-phase targets exactly as the hook reports them.
-  VkFormat color_format = render::GetVkFormat(ctx.color_format);
+  VkFormat color_format = gpu::GetVkFormat(ctx.color_format);
   VkPipelineRenderingCreateInfo rendering{
       .sType = VK_STRUCTURE_TYPE_PIPELINE_RENDERING_CREATE_INFO,
       .colorAttachmentCount = 1,
       .pColorAttachmentFormats = &color_format,
-      .depthAttachmentFormat = render::GetVkFormat(ctx.depth_format)};
+      .depthAttachmentFormat = gpu::GetVkFormat(ctx.depth_format)};
 
   VkGraphicsPipelineCreateInfo gpci{.sType = VK_STRUCTURE_TYPE_GRAPHICS_PIPELINE_CREATE_INFO};
   gpci.pNext = &rendering;
@@ -160,9 +160,9 @@ void BubbleVisualizer::Record(const render::SceneHookContext& ctx) {
   }
   if (!pipeline_) return;
 
-  VkCommandBuffer cb = render::GetVkCommandBuffer(*ctx.cmd);
-  render::ColorAttachment color{.view = ctx.color_view, .load = render::LoadOp::kLoad};
-  render::DepthAttachment depth{.view = ctx.depth_view, .load = render::LoadOp::kLoad};
+  VkCommandBuffer cb = gpu::GetVkCommandBuffer(*ctx.cmd);
+  gpu::ColorAttachment color{.view = ctx.color_view, .load = gpu::LoadOp::kLoad};
+  gpu::DepthAttachment depth{.view = ctx.depth_view, .load = gpu::LoadOp::kLoad};
   ctx.cmd->BeginRendering({.extent = ctx.extent, .colors = base::Span(&color, 1), .depth = &depth});
   vkCmdBindPipeline(cb, VK_PIPELINE_BIND_POINT_GRAPHICS, pipeline_);
 

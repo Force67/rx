@@ -15,8 +15,8 @@ namespace rx::render {
 
 class MotionBlurPass {
  public:
-  bool Initialize(Device& device);
-  void Destroy(Device& device);
+  bool Initialize(gpu::Device& device);
+  void Destroy(gpu::Device& device);
 
   struct Frame {
     f32 shutter = 0.5f;      // fraction of frame the shutter is open (180deg = 0.5)
@@ -30,12 +30,12 @@ class MotionBlurPass {
 
   // Returns the blurred color target (same size as input).
   ResourceHandle AddToGraph(RenderGraph& graph, ResourceHandle color, ResourceHandle motion,
-                            Extent2D color_extent, const Frame& frame);
+                            gpu::Extent2D color_extent, const Frame& frame);
 
  private:
-  PipelineHandle tilemax_pipeline_;
-  PipelineHandle blur_pipeline_;
-  SamplerHandle sampler_;
+  gpu::PipelineHandle tilemax_pipeline_;
+  gpu::PipelineHandle blur_pipeline_;
+  gpu::SamplerHandle sampler_;
 };
 
 }  // namespace rx::render

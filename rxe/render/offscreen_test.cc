@@ -20,7 +20,7 @@
 #include "shaders/offscreen_tri_vs_slang.h"
 #include "shaders/offscreen_tri_ps_slang.h"
 
-using namespace rx::render;
+namespace gpu = rx::gpu;
 
 namespace {
 
@@ -32,47 +32,47 @@ int Fail(const char* msg) {
 }  // namespace
 
 int main() {
-  DeviceDesc desc;
+  gpu::DeviceDesc desc;
   const char* rhi = ::getenv("RX_RHI");
-  desc.backend = (rhi && ::strcmp(rhi, "d3d12") == 0) ? Backend::kD3D12 : Backend::kVulkan;
+  desc.backend = (rhi && ::strcmp(rhi, "d3d12") == 0) ? gpu::Backend::kD3D12 : gpu::Backend::kVulkan;
   desc.enable_validation = true;
   desc.request_raytracing = false;  // not needed; keeps the adapter requirements minimal
-  base::UniquePointer<Device> device = Device::CreateOffscreen(desc);
+  base::UniquePointer<gpu::Device> device = gpu::Device::CreateOffscreen(desc);
   if (!device) return Fail("CreateOffscreen returned null");
 
   if (device->is_stub()) {
     // No driver for the requested backend on this machine (plain ctest without
     // vkrun). A skip, not a failure - the real pixel path is proven under vkrun.
     ::printf("offscreen_test: no %s driver, skipping (null backend)\n",
-                BackendName(desc.backend));
+                gpu::BackendName(desc.backend));
     return 77;
   }
 
   ::printf("offscreen_test: device '%s'\n", device->caps().adapter_name.c_str());
 
   constexpr u32 kW = 64, kH = 64;
-  const Format kFmt = Format::kRGBA8Unorm;
+  const gpu::Format kFmt = gpu::Format::kRGBA8Unorm;
 
-  GpuImage image = device->CreateImage2D(
+  gpu::GpuImage image = device->CreateImage2D(
       kFmt, {kW, kH},
-      kTextureUsageColorTarget | kTextureUsageTransferSrc);
+      gpu::kTextureUsageColorTarget | gpu::kTextureUsageTransferSrc);
   if (!image) return Fail("CreateImage2D returned null");
 
-  GraphicsPipelineDesc pd;
+  gpu::GraphicsPipelineDesc pd;
   pd.vertex = RX_SHADER(k_offscreen_tri_vs_slang);
   pd.fragment = RX_SHADER(k_offscreen_tri_ps_slang);
   pd.color_formats.push_back(kFmt);
-  pd.raster.cull = CullMode::kNone;  // winding-agnostic
+  pd.raster.cull = gpu::CullMode::kNone;  // winding-agnostic
   pd.debug_name = "offscreen_tri";
-  PipelineHandle pipeline = device->CreateGraphicsPipeline(pd);
+  gpu::PipelineHandle pipeline = device->CreateGraphicsPipeline(pd);
   if (!pipeline) return Fail("CreateGraphicsPipeline returned null");
 
   const f32 kBg[4] = {0.0f, 0.0f, 1.0f, 1.0f};  // blue background
 
-  CommandList* cmd = device->BeginFrame(0);
+  gpu::CommandList* cmd = device->BeginFrame(0);
   if (!cmd) return Fail("BeginFrame returned null");
-  cmd->Barrier(Transition(image, ResourceState::kUndefined, ResourceState::kColorTarget));
-  ColorAttachment color{.view = image.view, .load = LoadOp::kClear, .store = StoreOp::kStore};
+  cmd->Barrier(gpu::Transition(image, gpu::ResourceState::kUndefined, gpu::ResourceState::kColorTarget));
+  gpu::ColorAttachment color{.view = image.view, .load = gpu::LoadOp::kClear, .store = gpu::StoreOp::kStore};
   color.clear[0] = kBg[0];
   color.clear[1] = kBg[1];
   color.clear[2] = kBg[2];
@@ -85,7 +85,7 @@ int main() {
   device->WaitIdle();
 
   base::Vector<u8> pixels(static_cast<size_t>(kW) * kH * 4);
-  if (!device->ReadbackImage(image, ResourceState::kColorTarget, pixels.data(), pixels.size()))
+  if (!device->ReadbackImage(image, gpu::ResourceState::kColorTarget, pixels.data(), pixels.size()))
     return Fail("ReadbackImage returned false");
 
   auto at = [&](u32 x, u32 y) -> const u8* {

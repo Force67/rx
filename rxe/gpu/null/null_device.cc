@@ -8,7 +8,7 @@
 #include "rxe/gpu/rhi/device.h"
 #include "rxe/gpu/rhi/swapchain.h"
 
-namespace rx::render::null {
+namespace rx::gpu::null {
 namespace {
 
 class NullCommandList final : public CommandList {
@@ -55,7 +55,7 @@ class NullDevice final : public Device {
   NullDevice() { caps_.backend = Backend::kNull; }
 
   void WaitIdle() override {}
-  bool RecreateSurface(Window&) override { return false; }
+  bool RecreateSurface(ui::Window&) override { return false; }
   void DestroySurface() override {}
   base::UniquePointer<Swapchain> CreateSwapchain(u32, u32, bool, bool) override { return nullptr; }
   MemoryBudget memory_budget() const override { return {}; }
@@ -107,4 +107,4 @@ class NullDevice final : public Device {
 
 base::UniquePointer<Device> CreateNullDevice() { return base::MakeUnique<NullDevice>(); }
 
-}  // namespace rx::render::null
+}  // namespace rx::gpu::null

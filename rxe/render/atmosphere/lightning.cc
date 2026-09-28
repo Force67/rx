@@ -12,7 +12,7 @@
 namespace rx::render {
 namespace {
 
-constexpr Format kLightningMotionFormat = Format::kRG16Float;  // == kMotionFormat
+constexpr gpu::Format kLightningMotionFormat = gpu::Format::kRG16Float;  // == kMotionFormat
 
 // Mirrors LightningPush in lightning_common.hlsli.
 struct LightningPush {
@@ -45,22 +45,22 @@ f32 LightningSystem::Envelope(f32 age, u32 seed) {
   return LightningEnvelope(age, seed);
 }
 
-bool LightningSystem::Initialize(Device& device, Format color_format) {
+bool LightningSystem::Initialize(gpu::Device& device, gpu::Format color_format) {
   // Slot 0 is the prepass depth (pixel stage, soft occlusion test).
-  base::Vector<PipelineBindings> sets;
-  sets.push_back({.slots = {{0, BindingType::kSampledImage}}});
+  base::Vector<gpu::PipelineBindings> sets;
+  sets.push_back({.slots = {{0, gpu::BindingType::kSampledImage}}});
 
   // Attachment 0 = lit colour (additive: the bolt only adds energy), 1 =
   // motion (alpha-weighted: the solid core pins zero motion for TAA).
-  GraphicsPipelineDesc desc{
+  gpu::GraphicsPipelineDesc desc{
       .vertex = RX_SHADER(k_lightning_bolt_vs_hlsl),
       .fragment = RX_SHADER(k_lightning_bolt_ps_hlsl),
-      .topology = PrimitiveTopology::kTriangleStrip,
-      .raster = {.cull = CullMode::kNone},
+      .topology = gpu::PrimitiveTopology::kTriangleStrip,
+      .raster = {.cull = gpu::CullMode::kNone},
       .color_formats = {color_format, kLightningMotionFormat},
-      .blend = {BlendMode::kAdditive, BlendMode::kAlpha},
+      .blend = {gpu::BlendMode::kAdditive, gpu::BlendMode::kAlpha},
       .sets = sets,
-      .push_constant_size = PushSize<LightningPush>(),
+      .push_constant_size = gpu::PushSize<LightningPush>(),
       .debug_name = "lightning_bolt",
   };
   pipeline_ = device.CreateGraphicsPipeline(desc);
@@ -71,7 +71,7 @@ bool LightningSystem::Initialize(Device& device, Format color_format) {
   return true;
 }
 
-void LightningSystem::Destroy(Device& device) {
+void LightningSystem::Destroy(gpu::Device& device) {
   device.DestroyPipeline(pipeline_);
   pipeline_ = {};
 }
@@ -130,13 +130,13 @@ void LightningSystem::AddToGraph(RenderGraph& graph, ResourceHandle color, Resou
         push.jitter[0] = frame.jitter[0];
         push.jitter[1] = frame.jitter[1];
 
-        const GpuImage& target = ctx.graph->image(color);
-        ColorAttachment attachments[2];
-        attachments[0] = {.view = target.view, .load = LoadOp::kLoad};
-        attachments[1] = {.view = ctx.graph->image(motion).view, .load = LoadOp::kLoad};
+        const gpu::GpuImage& target = ctx.graph->image(color);
+        gpu::ColorAttachment attachments[2];
+        attachments[0] = {.view = target.view, .load = gpu::LoadOp::kLoad};
+        attachments[1] = {.view = ctx.graph->image(motion).view, .load = gpu::LoadOp::kLoad};
         ctx.cmd->BeginRendering({.extent = target.extent, .colors = attachments});
         ctx.cmd->BindPipeline(pipeline_);
-        ctx.cmd->BindTransient(0, {Bind::Sampled(0, ctx.graph->image(depth))});
+        ctx.cmd->BindTransient(0, {gpu::Bind::Sampled(0, ctx.graph->image(depth))});
         ctx.cmd->Push(push);
         ctx.cmd->Draw(4, kSegmentInstances, 0, 0);
         ctx.cmd->EndRendering();

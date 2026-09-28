@@ -9,7 +9,7 @@
 #include "rxe/gpu/rhi/resources.h"
 #include "rxe/gpu/rhi/types.h"
 
-namespace rx::render {
+namespace rx::gpu {
 
 // Image state transition. `before` must match the image's actual state
 // (kUndefined discards). Mip range for mip-generation blit chains; count 0
@@ -275,6 +275,6 @@ class CommandList {
   CommandList& operator=(const CommandList&) = delete;
 };
 
-}  // namespace rx::render
+}  // namespace rx::gpu
 
 #endif  // RX_RENDER_RHI_COMMAND_LIST_H_

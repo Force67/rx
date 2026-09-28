@@ -5,7 +5,7 @@
 #include <stdio.h>
 #include <string.h>
 
-namespace rx::render {
+namespace rx::asset {
 namespace {
 
 // The platform is little-endian x86_64 and EXR stores little-endian, so scalars
@@ -102,4 +102,4 @@ bool WriteExrRgbF32(const base::String& path, u32 width, u32 height, const f32* 
   return written == out.size();
 }
 
-}  // namespace rx::render
+}  // namespace rx::asset

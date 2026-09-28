@@ -14,8 +14,8 @@
 namespace rx::render {
 namespace {
 
-constexpr Format kAccumFormat = Format::kRGBA16Float;
-constexpr Format kRevealFormat = Format::kR16Float;
+constexpr gpu::Format kAccumFormat = gpu::Format::kRGBA16Float;
+constexpr gpu::Format kRevealFormat = gpu::Format::kR16Float;
 
 // Only model and color differ between the instance draws. The view projection
 // and the two lighting parameter blocks are the same for the whole pass, and
@@ -38,7 +38,7 @@ struct WboitPush {
 
 }  // namespace
 
-bool WboitPass::Initialize(Device& device, Format color_format, Format depth_format) {
+bool WboitPass::Initialize(gpu::Device& device, gpu::Format color_format, gpu::Format depth_format) {
   color_format_ = color_format;
   asset::Mesh sphere = asset::MakeSphere(1.0f, 40, 60, asset::MakeAssetId("builtin/oit/sphere"));
   const asset::MeshLod& lod = sphere.lods[0];
@@ -46,10 +46,10 @@ bool WboitPass::Initialize(Device& device, Format color_format, Format depth_for
   vertices_ = device.CreateBufferWithData(
       ByteSpan(reinterpret_cast<const u8*>(lod.vertices.data()),
                lod.vertices.size() * sizeof(asset::Vertex)),
-      kBufferUsageVertex);
+      gpu::kBufferUsageVertex);
   indices_ = device.CreateBufferWithData(
       ByteSpan(reinterpret_cast<const u8*>(lod.indices.data()), lod.indices.size() * sizeof(u32)),
-      kBufferUsageIndex);
+      gpu::kBufferUsageIndex);
 
   // Geometry pipeline: accumulate into the two oit targets.
   // accum: additive. revealage: dst *= (1 - src.r).
@@ -57,24 +57,24 @@ bool WboitPass::Initialize(Device& device, Format color_format, Format depth_for
       .vertex = RX_SHADER(k_wboit_vs_hlsl),
       .fragment = RX_SHADER(k_wboit_ps_hlsl),
       .vertex_buffers = {{.stride = sizeof(asset::Vertex),
-                          .attributes = {{0, Format::kRGB32Float,
+                          .attributes = {{0, gpu::Format::kRGB32Float,
                                           offsetof(asset::Vertex, position)},
-                                         {1, Format::kRGB32Float,
+                                         {1, gpu::Format::kRGB32Float,
                                           offsetof(asset::Vertex, normal)}}}},
-      .raster = {.cull = CullMode::kNone,  // see through both faces
-                 .front = FrontFace::kCounterClockwise},
+      .raster = {.cull = gpu::CullMode::kNone,  // see through both faces
+                 .front = gpu::FrontFace::kCounterClockwise},
       .depth = {.test = true,
                 .write = false,
-                .compare = CompareOp::kGreaterEqual,  // reversed z, occluded by opaque
+                .compare = gpu::CompareOp::kGreaterEqual,  // reversed z, occluded by opaque
                 .format = depth_format},
       .color_formats = {kAccumFormat, kRevealFormat},
-      .blend = {BlendMode::kWboitAccum, BlendMode::kWboitReveal},
-      .sets = {{.slots = {{0, BindingType::kStorageBuffer},
-                          {1, BindingType::kStorageBuffer},
-                          {2, BindingType::kStorageBuffer},
-                          {3, BindingType::kCombinedTextureSampler},
-                          {4, BindingType::kUniformBuffer}}}},
-      .push_constant_size = PushSize<WboitPush>(),
+      .blend = {gpu::BlendMode::kWboitAccum, gpu::BlendMode::kWboitReveal},
+      .sets = {{.slots = {{0, gpu::BindingType::kStorageBuffer},
+                          {1, gpu::BindingType::kStorageBuffer},
+                          {2, gpu::BindingType::kStorageBuffer},
+                          {3, gpu::BindingType::kCombinedTextureSampler},
+                          {4, gpu::BindingType::kUniformBuffer}}}},
+      .push_constant_size = gpu::PushSize<WboitPush>(),
       .debug_name = "wboit_geom",
   });
   if (!geom_pipeline_) {
@@ -84,8 +84,8 @@ bool WboitPass::Initialize(Device& device, Format color_format, Format depth_for
 
   // One per in-flight frame: the pass rewrites it while the previous frame may
   // still be reading its own copy.
-  for (GpuBuffer& frame : frames_) {
-    frame = device.CreateBuffer(sizeof(WboitFrame), kBufferUsageUniform, true);
+  for (gpu::GpuBuffer& frame : frames_) {
+    frame = device.CreateBuffer(sizeof(WboitFrame), gpu::kBufferUsageUniform, true);
     if (!frame.mapped) {
       RX_ERROR("wboit frame uniform allocation failed");
       return false;
@@ -93,23 +93,23 @@ bool WboitPass::Initialize(Device& device, Format color_format, Format depth_for
   }
 
   // Resolve pipeline: composite the oit targets over the scene.
-  sampler_ = device.GetSampler({.min_filter = Filter::kNearest,
-                                .mag_filter = Filter::kNearest,
-                                .mip_filter = Filter::kNearest,
-                                .address_u = AddressMode::kClampToEdge,
-                                .address_v = AddressMode::kClampToEdge,
-                                .address_w = AddressMode::kClampToEdge});
+  sampler_ = device.GetSampler({.min_filter = gpu::Filter::kNearest,
+                                .mag_filter = gpu::Filter::kNearest,
+                                .mip_filter = gpu::Filter::kNearest,
+                                .address_u = gpu::AddressMode::kClampToEdge,
+                                .address_v = gpu::AddressMode::kClampToEdge,
+                                .address_w = gpu::AddressMode::kClampToEdge});
 
   resolve_pipeline_ = device.CreateGraphicsPipeline({
       .vertex = RX_SHADER(k_fullscreen_vs_slang),
       .fragment = RX_SHADER(k_wboit_resolve_ps_hlsl),
-      .raster = {.cull = CullMode::kNone, .front = FrontFace::kCounterClockwise},
+      .raster = {.cull = gpu::CullMode::kNone, .front = gpu::FrontFace::kCounterClockwise},
       .color_formats = {color_format_},
-      .blend = {BlendMode::kOpaque},
-      .sets = {{.slots = {{0, BindingType::kCombinedTextureSampler},
-                          {1, BindingType::kCombinedTextureSampler},
-                          {2, BindingType::kCombinedTextureSampler}},
-                .stages = kShaderStageFragment}},
+      .blend = {gpu::BlendMode::kOpaque},
+      .sets = {{.slots = {{0, gpu::BindingType::kCombinedTextureSampler},
+                          {1, gpu::BindingType::kCombinedTextureSampler},
+                          {2, gpu::BindingType::kCombinedTextureSampler}},
+                .stages = gpu::kShaderStageFragment}},
       .debug_name = "wboit_resolve",
   });
   if (!resolve_pipeline_) {
@@ -159,28 +159,28 @@ ResourceHandle WboitPass::AddToGraph(RenderGraph& graph, ResourceHandle color, R
       },
       [this, accum, reveal, depth, instances, base, constants, slot, width, height,
        lighting](PassContext& ctx) {
-        ColorAttachment colors[2];
+        gpu::ColorAttachment colors[2];
         colors[0] = {.view = ctx.graph->image(accum).view,
-                     .load = LoadOp::kClear,
+                     .load = gpu::LoadOp::kClear,
                      .clear = {0.0f, 0.0f, 0.0f, 0.0f}};
         colors[1] = {.view = ctx.graph->image(reveal).view,
-                     .load = LoadOp::kClear,
+                     .load = gpu::LoadOp::kClear,
                      .clear = {1.0f, 0.0f, 0.0f, 0.0f}};  // full transmittance
-        DepthAttachment depth_att{.view = ctx.graph->image(depth).view, .load = LoadOp::kLoad};
+        gpu::DepthAttachment depth_att{.view = ctx.graph->image(depth).view, .load = gpu::LoadOp::kLoad};
 
         ctx.cmd->BeginRendering(
             {.extent = {width, height}, .colors = colors, .depth = &depth_att});
         ctx.cmd->BindPipeline(geom_pipeline_);
         base::MemCopy(frames_[slot].mapped, &constants, sizeof(constants));
         ctx.cmd->BindTransient(
-            0, {Bind::StorageBuffer(0, lighting.lights, 0, lighting.lights.size),
-                Bind::StorageBuffer(1, lighting.cluster_counts, 0, lighting.cluster_counts.size),
-                Bind::StorageBuffer(2, lighting.cluster_indices, 0,
+            0, {gpu::Bind::StorageBuffer(0, lighting.lights, 0, lighting.lights.size),
+                gpu::Bind::StorageBuffer(1, lighting.cluster_counts, 0, lighting.cluster_counts.size),
+                gpu::Bind::StorageBuffer(2, lighting.cluster_indices, 0,
                                     lighting.cluster_indices.size),
-                InGeneral(Bind::Combined(3, lighting.froxel_volume, lighting.froxel_sampler)),
-                Bind::Uniform(4, frames_[slot], 0, sizeof(WboitFrame))});
+                gpu::InGeneral(gpu::Bind::Combined(3, lighting.froxel_volume, lighting.froxel_sampler)),
+                gpu::Bind::Uniform(4, frames_[slot], 0, sizeof(WboitFrame))});
         ctx.cmd->BindVertexBuffer(0, vertices_, 0);
-        ctx.cmd->BindIndexBuffer(indices_, 0, IndexType::kUint32);
+        ctx.cmd->BindIndexBuffer(indices_, 0, gpu::IndexType::kUint32);
         for (const WboitInstance& inst : instances) {
           WboitPush push = base;
           push.model = inst.model;
@@ -203,28 +203,28 @@ ResourceHandle WboitPass::AddToGraph(RenderGraph& graph, ResourceHandle color, R
         builder.Write(composite, ResourceUsage::kColorAttachment);
       },
       [this, accum, reveal, color, composite, width, height](PassContext& ctx) {
-        ColorAttachment att[] = {{.view = ctx.graph->image(composite).view,
-                                  .load = LoadOp::kDontCare}};
+        gpu::ColorAttachment att[] = {{.view = ctx.graph->image(composite).view,
+                                  .load = gpu::LoadOp::kDontCare}};
         ctx.cmd->BeginRendering({.extent = {width, height}, .colors = att});
         ctx.cmd->BindPipeline(resolve_pipeline_);
         ctx.cmd->BindTransient(
-            0, {Bind::Combined(0, ctx.graph->image(accum).view, sampler_),
-                Bind::Combined(1, ctx.graph->image(reveal).view, sampler_),
-                Bind::Combined(2, ctx.graph->image(color).view, sampler_)});
+            0, {gpu::Bind::Combined(0, ctx.graph->image(accum).view, sampler_),
+                gpu::Bind::Combined(1, ctx.graph->image(reveal).view, sampler_),
+                gpu::Bind::Combined(2, ctx.graph->image(color).view, sampler_)});
         ctx.cmd->Draw(3, 1, 0, 0);
         ctx.cmd->EndRendering();
       });
   return composite;
 }
 
-void WboitPass::Destroy(Device& device) {
+void WboitPass::Destroy(gpu::Device& device) {
   device.DestroyPipeline(geom_pipeline_);
   geom_pipeline_ = {};
   device.DestroyPipeline(resolve_pipeline_);
   resolve_pipeline_ = {};
   device.DestroyBuffer(vertices_);
   device.DestroyBuffer(indices_);
-  for (GpuBuffer& frame : frames_) {
+  for (gpu::GpuBuffer& frame : frames_) {
     if (frame) device.DestroyBuffer(frame);
     frame = {};
   }

@@ -73,8 +73,8 @@ class WaterField {
     f32 render_size[2] = {0, 0};      // depth buffer resolution (for the depth Load)
   };
 
-  bool Initialize(Device& device);
-  void Destroy(Device& device);
+  bool Initialize(gpu::Device& device);
+  void Destroy(gpu::Device& device);
   bool available() const { return static_cast<bool>(pipeline_); }
 
   // Recenter+advect+decay, ripple wave step (ring 0), and injection, per ring.
@@ -86,15 +86,15 @@ class WaterField {
   // (always valid when the field is active; the caller must schedule this pass
   // after the prepass writes it); it is only read when params.interaction is set.
   void AddToGraph(RenderGraph& graph, const UpdateParams& params,
-                  TextureView ocean_normal_foam, TextureView ocean_displacement,
+                  gpu::TextureView ocean_normal_foam, gpu::TextureView ocean_displacement,
                   ResourceHandle opaque_depth);
 
   // This frame's written texture for a ring, kept in GENERAL by the compute
   // chain (bind through EnvironmentSystem::InGeneral).
-  TextureView ring_view(u32 ring) const { return rings_[ring][write_].view; }
+  gpu::TextureView ring_view(u32 ring) const { return rings_[ring][write_].view; }
   // Per-frame-slot uniform buffer holding the ring origins/extents the water
   // shader needs to map world XZ into each ring.
-  const GpuBuffer& params_buffer(u32 frame_slot) const { return params_[frame_slot]; }
+  const gpu::GpuBuffer& params_buffer(u32 frame_slot) const { return params_[frame_slot]; }
 
  private:
   // Matches the shader's WaterFieldParams CB (env slot 32).
@@ -105,14 +105,14 @@ class WaterField {
   // through the storage buffer keyed by GpuParams-independent layout above.
   static constexpr u32 kMaxDisturbances = 256;
 
-  PipelineHandle pipeline_;
-  SamplerHandle sampler_;               // linear clamp, for the resample
-  GpuImage rings_[kRingCount][2];       // ping-pong per ring
-  GpuImage mask_[2];                    // ring-0 waterline intersection band, ping-pong
-  GpuBuffer params_[Device::kMaxFramesInFlight];
+  gpu::PipelineHandle pipeline_;
+  gpu::SamplerHandle sampler_;               // linear clamp, for the resample
+  gpu::GpuImage rings_[kRingCount][2];       // ping-pong per ring
+  gpu::GpuImage mask_[2];                    // ring-0 waterline intersection band, ping-pong
+  gpu::GpuBuffer params_[gpu::Device::kMaxFramesInFlight];
   // Interaction view_proj/inv_view_proj, too big for the push block.
-  GpuBuffer camera_[Device::kMaxFramesInFlight];
-  GpuBuffer disturbances_[Device::kMaxFramesInFlight];
+  gpu::GpuBuffer camera_[gpu::Device::kMaxFramesInFlight];
+  gpu::GpuBuffer disturbances_[gpu::Device::kMaxFramesInFlight];
   f32 origin_[kRingCount][2] = {};      // snapped world origin xz, persisted
   u32 write_ = 0;                       // ping-pong index of this frame's target
   bool centered_ = false;               // first frame has no history

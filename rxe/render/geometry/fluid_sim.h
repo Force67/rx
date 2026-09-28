@@ -51,8 +51,8 @@ class FluidSim {
   static constexpr f32 kSubstepDt = 1.0f / 120.0f;  // fixed, deterministic
   static constexpr u32 kMaxSubsteps = 4;            // per frame cap
 
-  bool Initialize(Device& device);  // pipeline only; images on first Configure
-  void Destroy(Device& device);
+  bool Initialize(gpu::Device& device);  // pipeline only; images on first Configure
+  void Destroy(gpu::Device& device);
   bool available() const { return static_cast<bool>(pipeline_); }
 
   struct UpdateParams {
@@ -69,12 +69,12 @@ class FluidSim {
   void AddToGraph(RenderGraph& graph, const UpdateParams& params);
 
   bool active() const { return configured_ && have_domain_; }  // last AddToGraph had a domain
-  TextureView bed_view() const { return bed_.view; }           // R32F
-  TextureView state_view() const { return state_[read_].view; }  // RGBA32F: dw, dl, T, C
-  TextureView velocity_view() const { return velocity_.view; }   // RGBA16F: water uv, lava uv
+  gpu::TextureView bed_view() const { return bed_.view; }           // R32F
+  gpu::TextureView state_view() const { return state_[read_].view; }  // RGBA32F: dw, dl, T, C
+  gpu::TextureView velocity_view() const { return velocity_.view; }   // RGBA16F: water uv, lava uv
   const FluidDomainDesc& domain() const { return domain_; }
-  const GpuBuffer& params_buffer(u32 frame_slot) const {
-    return params_[frame_slot % Device::kMaxFramesInFlight];
+  const gpu::GpuBuffer& params_buffer(u32 frame_slot) const {
+    return params_[frame_slot % gpu::Device::kMaxFramesInFlight];
   }
 
  private:
@@ -91,19 +91,19 @@ class FluidSim {
 
   // Recreate the domain images and upload the initial bed/water. Called on the
   // first frame with a domain and whenever resolution/extent/origin change.
-  void Configure(Device& device, const FluidDomainDesc& desc);
-  void UploadBed(Device& device, const FluidDomainDesc& desc);
-  void DestroyImages(Device& device);
+  void Configure(gpu::Device& device, const FluidDomainDesc& desc);
+  void UploadBed(gpu::Device& device, const FluidDomainDesc& desc);
+  void DestroyImages(gpu::Device& device);
 
-  Device* device_ = nullptr;  // remembered so AddToGraph can (re)configure
-  PipelineHandle pipeline_;
-  GpuImage bed_;              // R32F static terrain + obstacles
-  GpuImage state_[2];        // ping-pong RGBA32F: r=dw g=dl b=T a=C
-  GpuImage flux_water_;      // RGBA32F outflow, updated in place
-  GpuImage flux_lava_;       // RGBA32F outflow, updated in place
-  GpuImage velocity_;        // RGBA16F: xy water uv, zw lava uv
-  GpuBuffer params_[Device::kMaxFramesInFlight];
-  GpuBuffer sources_[Device::kMaxFramesInFlight];
+  gpu::Device* device_ = nullptr;  // remembered so AddToGraph can (re)configure
+  gpu::PipelineHandle pipeline_;
+  gpu::GpuImage bed_;              // R32F static terrain + obstacles
+  gpu::GpuImage state_[2];        // ping-pong RGBA32F: r=dw g=dl b=T a=C
+  gpu::GpuImage flux_water_;      // RGBA32F outflow, updated in place
+  gpu::GpuImage flux_lava_;       // RGBA32F outflow, updated in place
+  gpu::GpuImage velocity_;        // RGBA16F: xy water uv, zw lava uv
+  gpu::GpuBuffer params_[gpu::Device::kMaxFramesInFlight];
+  gpu::GpuBuffer sources_[gpu::Device::kMaxFramesInFlight];
 
   FluidDomainDesc domain_{};  // last configured domain (bed ptr not retained)
   u64 bed_version_ = ~0ull;   // forces the first upload
@@ -118,8 +118,8 @@ class FluidSim {
 // (which the public API only surfaces as sampled views) so a test can
 // ReadbackImage them. Not part of the renderer/demo API.
 struct FluidSimProbe {
-  static const GpuImage& state(const FluidSim& sim);
-  static const GpuImage& velocity(const FluidSim& sim);
+  static const gpu::GpuImage& state(const FluidSim& sim);
+  static const gpu::GpuImage& velocity(const FluidSim& sim);
 };
 
 }  // namespace rx::render

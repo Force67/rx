@@ -8,7 +8,7 @@
 #include "shaders/recon_atrous_cs_hlsl.h"
 
 using namespace rx;
-using namespace rx::render;
+namespace gpu = rx::gpu;
 
 namespace {
 constexpr u32 kSize = 64, kPixels = kSize * kSize;
@@ -27,34 +27,34 @@ f32 Half(u16 b) {
 }
 
 int main() {
-  DeviceDesc desc;
+  gpu::DeviceDesc desc;
   const char* backend = ::getenv("RX_RHI");
-  desc.backend = backend && ::strcmp(backend, "d3d12") == 0 ? Backend::kD3D12 : Backend::kVulkan;
+  desc.backend = backend && ::strcmp(backend, "d3d12") == 0 ? gpu::Backend::kD3D12 : gpu::Backend::kVulkan;
   desc.request_raytracing = false;
   desc.enable_validation = true;
-  auto device = Device::CreateOffscreen(desc);
+  auto device = gpu::Device::CreateOffscreen(desc);
   if (!device || device->is_stub()) {
     ::printf("recon_atrous_test: SKIP, GPU unavailable\n");
     return 77;
   }
-  PipelineHandle pipeline = device->CreateComputePipeline({
+  gpu::PipelineHandle pipeline = device->CreateComputePipeline({
       .shader = RX_SHADER(k_recon_atrous_cs_hlsl),
-      .sets = {{.slots = {{0, BindingType::kStorageImage}, {1, BindingType::kSampledImage},
-                          {2, BindingType::kSampledImage}, {3, BindingType::kSampledImage},
-                          {4, BindingType::kSampledImage}}}},
+      .sets = {{.slots = {{0, gpu::BindingType::kStorageImage}, {1, gpu::BindingType::kSampledImage},
+                          {2, gpu::BindingType::kSampledImage}, {3, gpu::BindingType::kSampledImage},
+                          {4, gpu::BindingType::kSampledImage}}}},
       .push_constant_size = sizeof(Push)});
   if (!pipeline) return 1;
-  base::Vector<GpuImage> owned;
-  auto input = [&](Format format, const base::Vector<f32>& data) {
-    GpuImage image = device->CreateImage2D(format, {kSize, kSize}, kTextureUsageSampled | kTextureUsageTransferDst);
-    GpuBuffer staging = device->CreateBufferWithData(
-        ByteSpan(reinterpret_cast<const u8*>(data.data()), data.size() * sizeof(f32)), kBufferUsageTransferSrc);
+  base::Vector<gpu::GpuImage> owned;
+  auto input = [&](gpu::Format format, const base::Vector<f32>& data) {
+    gpu::GpuImage image = device->CreateImage2D(format, {kSize, kSize}, gpu::kTextureUsageSampled | gpu::kTextureUsageTransferDst);
+    gpu::GpuBuffer staging = device->CreateBufferWithData(
+        ByteSpan(reinterpret_cast<const u8*>(data.data()), data.size() * sizeof(f32)), gpu::kBufferUsageTransferSrc);
     if (!image || !staging) ::exit(1);
-    device->ImmediateSubmit([&](CommandList& cmd) {
-      cmd.Barrier(Transition(image, ResourceState::kUndefined, ResourceState::kCopyDst));
-      BufferTextureCopy copy{.extent = {kSize, kSize}};
+    device->ImmediateSubmit([&](gpu::CommandList& cmd) {
+      cmd.Barrier(gpu::Transition(image, gpu::ResourceState::kUndefined, gpu::ResourceState::kCopyDst));
+      gpu::BufferTextureCopy copy{.extent = {kSize, kSize}};
       cmd.CopyBufferToTexture(staging, image, base::Span(&copy, 1));
-      cmd.Barrier(Transition(image, ResourceState::kCopyDst, ResourceState::kShaderReadCompute));
+      cmd.Barrier(gpu::Transition(image, gpu::ResourceState::kCopyDst, gpu::ResourceState::kShaderReadCompute));
     });
     device->DestroyBuffer(staging);
     owned.push_back(image);
@@ -76,30 +76,30 @@ int main() {
       normals[p * 4 + 3] = .2f;
       if (mode == 2 && p % kSize >= kSize / 2) depths[p] = 10;
     }
-    GpuImage current = input(Format::kRGBA32Float, colors);
-    GpuImage nr = input(Format::kRGBA32Float, normals);
-    GpuImage vz = input(Format::kR32Float, depths);
-    GpuImage last;
+    gpu::GpuImage current = input(gpu::Format::kRGBA32Float, colors);
+    gpu::GpuImage nr = input(gpu::Format::kRGBA32Float, normals);
+    gpu::GpuImage vz = input(gpu::Format::kR32Float, depths);
+    gpu::GpuImage last;
     for (u32 pass = 0; pass < 4; ++pass) {
-      GpuImage output = device->CreateImage2D(Format::kRGBA16Float, {kSize, kSize},
-          kTextureUsageStorage | kTextureUsageSampled | kTextureUsageTransferSrc);
+      gpu::GpuImage output = device->CreateImage2D(gpu::Format::kRGBA16Float, {kSize, kSize},
+          gpu::kTextureUsageStorage | gpu::kTextureUsageSampled | gpu::kTextureUsageTransferSrc);
       if (!output) return 1;
       owned.push_back(output);
       Push push;
       push.step = 1u << pass;
-      device->ImmediateSubmit([&](CommandList& cmd) {
-        cmd.Barrier(Transition(output, ResourceState::kUndefined, ResourceState::kGeneral));
+      device->ImmediateSubmit([&](gpu::CommandList& cmd) {
+        cmd.Barrier(gpu::Transition(output, gpu::ResourceState::kUndefined, gpu::ResourceState::kGeneral));
         cmd.BindPipeline(pipeline);
-        cmd.BindTransient(0, {Bind::Storage(0, output), Bind::Sampled(1, current),
-                              Bind::Sampled(2, nr), Bind::Sampled(3, vz), Bind::Sampled(4, current)});
+        cmd.BindTransient(0, {gpu::Bind::Storage(0, output), gpu::Bind::Sampled(1, current),
+                              gpu::Bind::Sampled(2, nr), gpu::Bind::Sampled(3, vz), gpu::Bind::Sampled(4, current)});
         cmd.Push(push);
         cmd.Dispatch(kSize / 8, kSize / 8, 1);
-        cmd.Barrier(Transition(output, ResourceState::kGeneral, ResourceState::kShaderReadCompute));
+        cmd.Barrier(gpu::Transition(output, gpu::ResourceState::kGeneral, gpu::ResourceState::kShaderReadCompute));
       });
       current = last = output;
     }
     base::Vector<u16> pixels(kPixels * 4);
-    if (!device->ReadbackImage(last, ResourceState::kShaderReadCompute, pixels.data(), pixels.size() * sizeof(u16))) return 1;
+    if (!device->ReadbackImage(last, gpu::ResourceState::kShaderReadCompute, pixels.data(), pixels.size() * sizeof(u16))) return 1;
     double mse = 0, mean = 0;
     bool finite = true;
     for (u32 p = 0; p < kPixels; ++p) {

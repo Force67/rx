@@ -175,7 +175,7 @@ int TestAnimatedMorphCube(const char* path) {
 // layout, evaluates weights {0: 0.65, 1: 0.35} on the GPU through morph.hlsli
 // and compares against the CPU accumulation.
 int TestGpuEvaluation(const char* path) {
-  using namespace rx::render;
+  using namespace rx::gpu;
   if (const char* rhi = ::getenv("RX_RHI")) {
     if (::strcmp(rhi, "vulkan") != 0) {
       ::printf("morph_test: gpu section is vulkan-only (bda compute), skipping\n");
@@ -190,10 +190,10 @@ int TestGpuEvaluation(const char* path) {
   const u32 verts = static_cast<u32>(lod.vertices.size());
   const u32 targets = static_cast<u32>(mesh.morph_targets.size());
 
-  DeviceDesc desc;
-  desc.backend = Backend::kVulkan;
+  gpu::DeviceDesc desc;
+  desc.backend = gpu::Backend::kVulkan;
   desc.request_raytracing = false;
-  base::UniquePointer<Device> device = Device::CreateOffscreen(desc);
+  base::UniquePointer<gpu::Device> device = gpu::Device::CreateOffscreen(desc);
   if (!device) return Fail("CreateOffscreen returned null");
   if (device->is_stub()) {
     ::printf("morph_test: no vulkan driver, skipping the gpu section\n");
@@ -232,22 +232,22 @@ int TestGpuEvaluation(const char* path) {
   auto bytes = [](const void* data, size_t size) {
     return ByteSpan(static_cast<const u8*>(data), size);
   };
-  GpuBuffer delta_buffer = device->CreateBufferWithData(
+  gpu::GpuBuffer delta_buffer = device->CreateBufferWithData(
       bytes(deltas.data(), deltas.size() * sizeof(f32)),
-      kBufferUsageStorage | kBufferUsageDeviceAddress);
-  GpuBuffer weight_buffer = device->CreateBufferWithData(
-      bytes(pairs, sizeof(pairs)), kBufferUsageStorage | kBufferUsageDeviceAddress);
-  GpuBuffer base_buffer = device->CreateBufferWithData(
-      bytes(base.data(), base.size() * sizeof(f32)), kBufferUsageStorage);
-  GpuBuffer out_buffer =
-      device->CreateBuffer(base.size() * sizeof(f32), kBufferUsageStorage, true);
+      gpu::kBufferUsageStorage | gpu::kBufferUsageDeviceAddress);
+  gpu::GpuBuffer weight_buffer = device->CreateBufferWithData(
+      bytes(pairs, sizeof(pairs)), gpu::kBufferUsageStorage | gpu::kBufferUsageDeviceAddress);
+  gpu::GpuBuffer base_buffer = device->CreateBufferWithData(
+      bytes(base.data(), base.size() * sizeof(f32)), gpu::kBufferUsageStorage);
+  gpu::GpuBuffer out_buffer =
+      device->CreateBuffer(base.size() * sizeof(f32), gpu::kBufferUsageStorage, true);
   if (!delta_buffer.address || !weight_buffer.address || !out_buffer.mapped) {
     return Fail("buffer creation");
   }
 
-  ComputePipelineDesc pd;
+  gpu::ComputePipelineDesc pd;
   pd.shader = RX_SHADER(k_morph_apply_cs_hlsl);
-  pd.sets.push_back({.slots = {{0, BindingType::kByteBuffer}, {1, BindingType::kStorageBuffer}}});
+  pd.sets.push_back({.slots = {{0, gpu::BindingType::kByteBuffer}, {1, gpu::BindingType::kStorageBuffer}}});
   struct Push {
     rx::u64 delta_address;
     rx::u64 weight_address;
@@ -256,16 +256,16 @@ int TestGpuEvaluation(const char* path) {
   } push{delta_buffer.address, weight_buffer.address, 2, verts};
   pd.push_constant_size = sizeof(Push);
   pd.debug_name = "morph_apply";
-  PipelineHandle pipeline = device->CreateComputePipeline(pd);
+  gpu::PipelineHandle pipeline = device->CreateComputePipeline(pd);
   if (!pipeline) return Fail("CreateComputePipeline returned null");
 
-  CommandList* cmd = device->BeginFrame(0);
+  gpu::CommandList* cmd = device->BeginFrame(0);
   if (!cmd) return Fail("BeginFrame returned null");
   cmd->BindPipeline(pipeline);
-  cmd->BindTransient(0, {Bind::ByteBuffer(0, base_buffer), Bind::StorageBuffer(1, out_buffer)});
+  cmd->BindTransient(0, {gpu::Bind::ByteBuffer(0, base_buffer), gpu::Bind::StorageBuffer(1, out_buffer)});
   cmd->Push(push);
   cmd->Dispatch((verts + 63) / 64, 1, 1);
-  cmd->MemoryBarrier(BarrierScope::kComputeWrite, BarrierScope::kHostRead);
+  cmd->MemoryBarrier(gpu::BarrierScope::kComputeWrite, gpu::BarrierScope::kHostRead);
   device->SubmitFrame(cmd);
   device->WaitIdle();
 

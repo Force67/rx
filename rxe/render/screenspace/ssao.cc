@@ -23,19 +23,19 @@ struct SsaoPush {
 
 }  // namespace
 
-bool SsaoPass::Initialize(Device& device) {
+bool SsaoPass::Initialize(gpu::Device& device) {
   pipeline_ = device.CreateComputePipeline({
       .shader = RX_SHADER(k_ssao_cs_hlsl),
-      .sets = {{.slots = {{0, BindingType::kStorageImage},
-                          {1, BindingType::kSampledImage},
-                          {2, BindingType::kSampledImage}}}},
-      .push_constant_size = PushSize<SsaoPush>(),
+      .sets = {{.slots = {{0, gpu::BindingType::kStorageImage},
+                          {1, gpu::BindingType::kSampledImage},
+                          {2, gpu::BindingType::kSampledImage}}}},
+      .push_constant_size = gpu::PushSize<SsaoPush>(),
       .debug_name = "ssao",
   });
   return static_cast<bool>(pipeline_);
 }
 
-void SsaoPass::Destroy(Device& device) {
+void SsaoPass::Destroy(gpu::Device& device) {
   device.DestroyPipeline(pipeline_);
   pipeline_ = {};
 }
@@ -71,9 +71,9 @@ ResourceHandle SsaoPass::AddToGraph(RenderGraph& graph, ResourceHandle depth,
         push.sample_count = settings_.sample_count;
 
         ctx.cmd->BindPipeline(pipeline_);
-        ctx.cmd->BindTransient(0, {Bind::Storage(0, ctx.graph->image(ao)),
-                                   Bind::Sampled(1, ctx.graph->image(depth)),
-                                   Bind::Sampled(2, ctx.graph->image(normals))});
+        ctx.cmd->BindTransient(0, {gpu::Bind::Storage(0, ctx.graph->image(ao)),
+                                   gpu::Bind::Sampled(1, ctx.graph->image(depth)),
+                                   gpu::Bind::Sampled(2, ctx.graph->image(normals))});
         ctx.cmd->Push(push);
         ctx.cmd->Dispatch2D(extent_);
       });

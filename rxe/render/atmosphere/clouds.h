@@ -5,9 +5,12 @@
 #include "rxe/render/core/render_graph.h"
 #include "rxe/gpu/rhi/resources.h"
 
+namespace rx::gpu {
+class Device;
+}  // namespace rx::gpu
+
 namespace rx::render {
 
-class Device;
 
 // Volumetric clouds: a raymarched cloud layer composited over the lit scene
 // (depth-aware, so terrain occludes clouds). Procedural density with Beer's-law
@@ -34,15 +37,15 @@ class Clouds {
     u32 light_steps = 6;
   };
 
-  bool Initialize(Device& device);
-  void Destroy(Device& device);
+  bool Initialize(gpu::Device& device);
+  void Destroy(gpu::Device& device);
 
   ResourceHandle AddToGraph(RenderGraph& graph, ResourceHandle color, ResourceHandle depth,
-                            Extent2D extent, const Frame& frame);
+                            gpu::Extent2D extent, const Frame& frame);
 
  private:
-  PipelineHandle pipeline_;
-  GpuBuffer camera_[2];      // inv_view_proj, too big for the push block
+  gpu::PipelineHandle pipeline_;
+  gpu::GpuBuffer camera_[2];      // inv_view_proj, too big for the push block
   u32 uniform_slot_ = 0;     // flips per pass; the other copy may still be in flight
 };
 

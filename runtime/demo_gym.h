@@ -43,7 +43,7 @@ class GymDemo {
   // from input, runs the character + camera-rig pipeline in the README's staged
   // order, and maintains the dropped-item lifecycle. Called from the Viewer's
   // OnUpdate (windowed). `allow_*` are false while imgui owns that device.
-  void Update(f32 dt, const InputState& input, const ActionState& actions, bool allow_keyboard,
+  void Update(f32 dt, const ui::InputState& input, const ui::ActionState& actions, bool allow_keyboard,
               bool allow_mouse);
 
   // Writes the resolved character camera into the frame view, emits the player
@@ -59,7 +59,7 @@ class GymDemo {
  private:
   void BuildContent();
   void BuildPlayer();
-  void FillIntent(const InputState& input, const ActionState& actions, bool allow_keyboard,
+  void FillIntent(const ui::InputState& input, const ui::ActionState& actions, bool allow_keyboard,
                   bool allow_mouse, f32 dt);
   void RunScript(f32 dt);
   void SyncViewSettingsToRig();

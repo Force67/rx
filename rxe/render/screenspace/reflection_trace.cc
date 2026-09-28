@@ -59,28 +59,28 @@ static_assert(sizeof(UpscalePush) == 32, "UpscalePush must match the shader layo
 
 }  // namespace
 
-bool ReflectionTrace::Initialize(Device& device, BindingLayoutHandle bindless_layout) {
+bool ReflectionTrace::Initialize(gpu::Device& device, gpu::BindingLayoutHandle bindless_layout) {
   if (!bindless_layout) return false;
   pipeline_ = device.CreateComputePipeline({
       .shader = RX_SHADER(k_reflection_trace_cs_hlsl),
-      .sets = {{.slots = {{0, BindingType::kStorageImage},
-                          {1, BindingType::kSampledImage},
-                          {2, BindingType::kSampledImage},
-                          {3, BindingType::kAccelStruct},
-                          {4, BindingType::kCombinedTextureSampler},
-                          {5, BindingType::kCombinedTextureSampler},
-                          {6, BindingType::kUniformBuffer},
-                          {7, BindingType::kSampledImage},
-                          {8, BindingType::kSampledImage},
-                          {9, BindingType::kSampledImage},
-                          {10, BindingType::kUniformBuffer},           // RcgiGlobals
-                          {11, BindingType::kCombinedTextureSampler},  // rcgi irradiance atlas
-                          {12, BindingType::kCombinedTextureSampler},  // rcgi visibility atlas
-                          {13, BindingType::kStorageBuffer},           // rcgi probe meta
-                          {14, BindingType::kStorageBuffer},           // rcgi interior volumes
-                          {15, BindingType::kUniformBuffer}}},         // ReflectionCamera
+      .sets = {{.slots = {{0, gpu::BindingType::kStorageImage},
+                          {1, gpu::BindingType::kSampledImage},
+                          {2, gpu::BindingType::kSampledImage},
+                          {3, gpu::BindingType::kAccelStruct},
+                          {4, gpu::BindingType::kCombinedTextureSampler},
+                          {5, gpu::BindingType::kCombinedTextureSampler},
+                          {6, gpu::BindingType::kUniformBuffer},
+                          {7, gpu::BindingType::kSampledImage},
+                          {8, gpu::BindingType::kSampledImage},
+                          {9, gpu::BindingType::kSampledImage},
+                          {10, gpu::BindingType::kUniformBuffer},           // RcgiGlobals
+                          {11, gpu::BindingType::kCombinedTextureSampler},  // rcgi irradiance atlas
+                          {12, gpu::BindingType::kCombinedTextureSampler},  // rcgi visibility atlas
+                          {13, gpu::BindingType::kStorageBuffer},           // rcgi probe meta
+                          {14, gpu::BindingType::kStorageBuffer},           // rcgi interior volumes
+                          {15, gpu::BindingType::kUniformBuffer}}},         // ReflectionCamera
                {.shared = bindless_layout}},
-      .push_constant_size = PushSize<ReflectionPush>(),
+      .push_constant_size = gpu::PushSize<ReflectionPush>(),
       .debug_name = "reflection_trace",
   });
   if (!pipeline_) {
@@ -89,8 +89,8 @@ bool ReflectionTrace::Initialize(Device& device, BindingLayoutHandle bindless_la
   }
   // One per in-flight frame: the pass rewrites it while the previous frame may
   // still be reading its own copy.
-  for (GpuBuffer& camera : camera_) {
-    camera = device.CreateBuffer(sizeof(ReflectionCamera), kBufferUsageUniform, true);
+  for (gpu::GpuBuffer& camera : camera_) {
+    camera = device.CreateBuffer(sizeof(ReflectionCamera), gpu::kBufferUsageUniform, true);
     if (!camera.mapped) {
       Destroy(device);
       return false;
@@ -98,11 +98,11 @@ bool ReflectionTrace::Initialize(Device& device, BindingLayoutHandle bindless_la
   }
   upscale_pipeline_ = device.CreateComputePipeline({
       .shader = RX_SHADER(k_reflection_upscale_cs_hlsl),
-      .sets = {{.slots = {{0, BindingType::kStorageImage},
-                          {1, BindingType::kSampledImage},
-                          {2, BindingType::kSampledImage},
-                          {3, BindingType::kSampledImage}}}},
-      .push_constant_size = PushSize<UpscalePush>(),
+      .sets = {{.slots = {{0, gpu::BindingType::kStorageImage},
+                          {1, gpu::BindingType::kSampledImage},
+                          {2, gpu::BindingType::kSampledImage},
+                          {3, gpu::BindingType::kSampledImage}}}},
+      .push_constant_size = gpu::PushSize<UpscalePush>(),
       .debug_name = "reflection_upscale",
   });
   if (!upscale_pipeline_) {
@@ -113,7 +113,7 @@ bool ReflectionTrace::Initialize(Device& device, BindingLayoutHandle bindless_la
   return true;
 }
 
-void ReflectionTrace::Destroy(Device& device) {
+void ReflectionTrace::Destroy(gpu::Device& device) {
   if (pipeline_) {
     device.DestroyPipeline(pipeline_);
     pipeline_ = {};
@@ -122,29 +122,29 @@ void ReflectionTrace::Destroy(Device& device) {
     device.DestroyPipeline(upscale_pipeline_);
     upscale_pipeline_ = {};
   }
-  for (GpuBuffer& camera : camera_) {
+  for (gpu::GpuBuffer& camera : camera_) {
     if (camera) device.DestroyBuffer(camera);
     camera = {};
   }
 }
 
 ResourceHandle ReflectionTrace::AddToGraph(
-    RenderGraph& graph, RayTracingContext& raytracing, u32 tlas_slot, BindingSetHandle bindless_set,
-    ResourceHandle depth, ResourceHandle normals, TextureView prefiltered,
-    TextureView ddgi_irradiance, bool ddgi_in_general, const GpuBuffer& ddgi_volume,
-    u64 ddgi_volume_size, SamplerHandle sampler, Extent2D extent, ResourceHandle sh_r,
-    ResourceHandle sh_g, ResourceHandle sh_b, Extent2D sh_extent, const RcgiBinding& rcgi,
+    RenderGraph& graph, RayTracingContext& raytracing, u32 tlas_slot, gpu::BindingSetHandle bindless_set,
+    ResourceHandle depth, ResourceHandle normals, gpu::TextureView prefiltered,
+    gpu::TextureView ddgi_irradiance, bool ddgi_in_general, const gpu::GpuBuffer& ddgi_volume,
+    u64 ddgi_volume_size, gpu::SamplerHandle sampler, gpu::Extent2D extent, ResourceHandle sh_r,
+    ResourceHandle sh_g, ResourceHandle sh_b, gpu::Extent2D sh_extent, const RcgiBinding& rcgi,
     const Frame& frame) {
   // Trace at half resolution when requested (quarters the ray count). Guides
   // stay full-res; the shader maps each half-res pixel to a full-res texel.
   const u32 step = frame.half_res ? 2u : 1u;
   const u32 slot = frame.frame_index % 2;  // in-flight parity for the camera buffer
-  Extent2D trace{(extent.width + step - 1) / step, (extent.height + step - 1) / step};
+  gpu::Extent2D trace{(extent.width + step - 1) / step, (extent.height + step - 1) / step};
   const bool sh_valid = sh_r != kInvalidResource && sh_g != kInvalidResource &&
                         sh_b != kInvalidResource && frame.sh_skip;
 
   ResourceHandle raw = graph.CreateTexture({.name = "spec_reflection_raw",
-                                            .format = Format::kRGBA16Float,
+                                            .format = gpu::Format::kRGBA16Float,
                                             .width = trace.width,
                                             .height = trace.height});
   // Placeholder for the SH slots when RCGI is off (never read: flag stays clear).
@@ -166,13 +166,13 @@ ResourceHandle ReflectionTrace::AddToGraph(
       [this, &raytracing, tlas_slot, bindless_set, raw, depth, normals, prefiltered, ddgi_irradiance,
        ddgi_in_general, ddgi_volume, ddgi_volume_size, sampler, extent, trace, step, slot, sh_valid,
        sh0, sh1, sh2, sh_extent, rcgi, frame](PassContext& ctx) {
-        BindingItem ddgi_item = Bind::Combined(5, ddgi_irradiance, sampler);
-        if (ddgi_in_general) ddgi_item = InGeneral(ddgi_item);
-        BindingItem rcgi_irr = Bind::Combined(11, rcgi.irradiance, rcgi.sampler);
-        BindingItem rcgi_vis = Bind::Combined(12, rcgi.visibility, rcgi.sampler);
+        gpu::BindingItem ddgi_item = gpu::Bind::Combined(5, ddgi_irradiance, sampler);
+        if (ddgi_in_general) ddgi_item = gpu::InGeneral(ddgi_item);
+        gpu::BindingItem rcgi_irr = gpu::Bind::Combined(11, rcgi.irradiance, rcgi.sampler);
+        gpu::BindingItem rcgi_vis = gpu::Bind::Combined(12, rcgi.visibility, rcgi.sampler);
         if (rcgi.in_general) {
-          rcgi_irr = InGeneral(rcgi_irr);
-          rcgi_vis = InGeneral(rcgi_vis);
+          rcgi_irr = gpu::InGeneral(rcgi_irr);
+          rcgi_vis = gpu::InGeneral(rcgi_vis);
         }
         ReflectionCamera camera{};
         camera.inv_view_proj = frame.inv_view_proj;
@@ -181,23 +181,23 @@ ResourceHandle ReflectionTrace::AddToGraph(
         camera.camera_pos[2] = frame.camera_pos.z;
         base::MemCopy(camera_[slot].mapped, &camera, sizeof(camera));
 
-        base::Vector<BindingItem> items;
-        items.push_back(Bind::Storage(0, ctx.graph->image(raw)));
-        items.push_back(Bind::Sampled(1, ctx.graph->image(depth)));
-        items.push_back(Bind::Sampled(2, ctx.graph->image(normals)));
-        items.push_back(Bind::Accel(3, raytracing.tlas(tlas_slot)));
-        items.push_back(Bind::Combined(4, prefiltered, sampler));
+        base::Vector<gpu::BindingItem> items;
+        items.push_back(gpu::Bind::Storage(0, ctx.graph->image(raw)));
+        items.push_back(gpu::Bind::Sampled(1, ctx.graph->image(depth)));
+        items.push_back(gpu::Bind::Sampled(2, ctx.graph->image(normals)));
+        items.push_back(gpu::Bind::Accel(3, raytracing.tlas(tlas_slot)));
+        items.push_back(gpu::Bind::Combined(4, prefiltered, sampler));
         items.push_back(ddgi_item);
-        items.push_back(Bind::Uniform(6, ddgi_volume, 0, ddgi_volume_size));
-        items.push_back(Bind::Sampled(7, ctx.graph->image(sh0)));
-        items.push_back(Bind::Sampled(8, ctx.graph->image(sh1)));
-        items.push_back(Bind::Sampled(9, ctx.graph->image(sh2)));
-        items.push_back(Bind::Uniform(10, *rcgi.globals));
+        items.push_back(gpu::Bind::Uniform(6, ddgi_volume, 0, ddgi_volume_size));
+        items.push_back(gpu::Bind::Sampled(7, ctx.graph->image(sh0)));
+        items.push_back(gpu::Bind::Sampled(8, ctx.graph->image(sh1)));
+        items.push_back(gpu::Bind::Sampled(9, ctx.graph->image(sh2)));
+        items.push_back(gpu::Bind::Uniform(10, *rcgi.globals));
         items.push_back(rcgi_irr);
         items.push_back(rcgi_vis);
-        items.push_back(Bind::StorageBuffer(13, *rcgi.probe_meta));
-        items.push_back(Bind::StorageBuffer(14, *rcgi.interior_vols));
-        items.push_back(Bind::Uniform(15, camera_[slot], 0, sizeof(ReflectionCamera)));
+        items.push_back(gpu::Bind::StorageBuffer(13, *rcgi.probe_meta));
+        items.push_back(gpu::Bind::StorageBuffer(14, *rcgi.interior_vols));
+        items.push_back(gpu::Bind::Uniform(15, camera_[slot], 0, sizeof(ReflectionCamera)));
 
         ReflectionPush p{};
         Vec3 sun = Normalize(frame.sun_direction);
@@ -244,7 +244,7 @@ ResourceHandle ReflectionTrace::AddToGraph(
 
   // Bilateral upscale half-res -> full-res before NRD consumes it.
   ResourceHandle full = graph.CreateTexture({.name = "spec_reflection_full",
-                                             .format = Format::kRGBA16Float,
+                                             .format = gpu::Format::kRGBA16Float,
                                              .width = extent.width,
                                              .height = extent.height});
   graph.AddPass(
@@ -267,10 +267,10 @@ ResourceHandle ReflectionTrace::AddToGraph(
         p.params[1] = static_cast<f32>(frame.frame_index % 64u);
         p.params[2] = static_cast<f32>(frame.half_res ? 2u : 1u);
         ctx.cmd->BindPipeline(upscale_pipeline_);
-        ctx.cmd->BindTransient(0, {Bind::Storage(0, ctx.graph->image(full)),
-                                   Bind::Sampled(1, ctx.graph->image(raw)),
-                                   Bind::Sampled(2, ctx.graph->image(depth)),
-                                   Bind::Sampled(3, ctx.graph->image(normals))});
+        ctx.cmd->BindTransient(0, {gpu::Bind::Storage(0, ctx.graph->image(full)),
+                                   gpu::Bind::Sampled(1, ctx.graph->image(raw)),
+                                   gpu::Bind::Sampled(2, ctx.graph->image(depth)),
+                                   gpu::Bind::Sampled(3, ctx.graph->image(normals))});
         ctx.cmd->Push(p);
         ctx.cmd->Dispatch2D(extent);
       });

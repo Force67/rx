@@ -2,7 +2,7 @@
 
 #include <math.h>
 
-namespace rx {
+namespace rx::app {
 
 namespace {
 
@@ -54,4 +54,4 @@ SkyLighting ComputeSkyLighting(f32 hour) {
   return out;
 }
 
-}  // namespace rx
+}  // namespace rx::app

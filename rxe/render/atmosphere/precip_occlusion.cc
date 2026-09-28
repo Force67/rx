@@ -7,14 +7,14 @@
 
 namespace rx::render {
 
-bool PrecipOcclusion::Initialize(Device& device) {
+bool PrecipOcclusion::Initialize(gpu::Device& device) {
   map_ = device.CreateImage2D(
       kFormat, {kResolution, kResolution},
-      kTextureUsageDepthTarget | kTextureUsageSampled | kTextureUsageTransferDst);
-  sampler_ = device.GetSampler({.min_filter = Filter::kLinear,
-                                .mag_filter = Filter::kLinear,
-                                .address_u = AddressMode::kClampToEdge,
-                                .address_v = AddressMode::kClampToEdge});
+      gpu::kTextureUsageDepthTarget | gpu::kTextureUsageSampled | gpu::kTextureUsageTransferDst);
+  sampler_ = device.GetSampler({.min_filter = gpu::Filter::kLinear,
+                                .mag_filter = gpu::Filter::kLinear,
+                                .address_u = gpu::AddressMode::kClampToEdge,
+                                .address_v = gpu::AddressMode::kClampToEdge});
   if (!map_ || !sampler_) {
     RX_WARN("precipitation occlusion map allocation failed; feature disabled");
     Destroy(device);
@@ -23,15 +23,15 @@ bool PrecipOcclusion::Initialize(Device& device) {
   // Park the map shader-readable so consumers can bind it before the first
   // render (the far-plane clear reads as "open sky" only after one render;
   // until then dirty_ forces one on the first active frame anyway).
-  device.ImmediateSubmit([&](CommandList& cmd) {
-    cmd.Barrier(Transition(map_, ResourceState::kUndefined, ResourceState::kCopyDst));
+  device.ImmediateSubmit([&](gpu::CommandList& cmd) {
+    cmd.Barrier(gpu::Transition(map_, gpu::ResourceState::kUndefined, gpu::ResourceState::kCopyDst));
     cmd.ClearDepth(map_, 1.0f);
-    cmd.Barrier(Transition(map_, ResourceState::kCopyDst, ResourceState::kShaderReadAll));
+    cmd.Barrier(gpu::Transition(map_, gpu::ResourceState::kCopyDst, gpu::ResourceState::kShaderReadAll));
   });
   return true;
 }
 
-void PrecipOcclusion::Destroy(Device& device) {
+void PrecipOcclusion::Destroy(gpu::Device& device) {
   if (map_) device.DestroyImage(map_);
   map_ = {};
   rendered_ = false;
@@ -61,7 +61,7 @@ void PrecipOcclusion::Params(f32 out[4]) const {
 }
 
 void PrecipOcclusion::AddToGraph(RenderGraph& graph,
-                                 const base::Function<void(CommandList&, const Mat4&)>& draw) {
+                                 const base::Function<void(gpu::CommandList&, const Mat4&)>& draw) {
   if (!available() || !dirty_) return;
   dirty_ = false;
 
@@ -88,14 +88,14 @@ void PrecipOcclusion::AddToGraph(RenderGraph& graph,
       [this, vp, draw](PassContext& ctx) {
         // Persistent map: shader-read between renders, depth target while
         // writing (same manual-barrier pattern as the local shadow atlas).
-        TextureBarrier to_write = Transition(
-            map_, rendered_ ? ResourceState::kShaderReadAll : ResourceState::kUndefined,
-            ResourceState::kDepthTarget);
+        gpu::TextureBarrier to_write = gpu::Transition(
+            map_, rendered_ ? gpu::ResourceState::kShaderReadAll : gpu::ResourceState::kUndefined,
+            gpu::ResourceState::kDepthTarget);
         rendered_ = true;
         ctx.cmd->TextureBarriers(base::Span(&to_write, 1));
 
-        DepthAttachment depth{
-            .view = map_.view, .load = LoadOp::kClear, .store = StoreOp::kStore, .clear = 1.0f};
+        gpu::DepthAttachment depth{
+            .view = map_.view, .load = gpu::LoadOp::kClear, .store = gpu::StoreOp::kStore, .clear = 1.0f};
         ctx.cmd->BeginRendering({.extent = {kResolution, kResolution}, .depth = &depth});
         ctx.cmd->SetViewport(0.0f, 0.0f, static_cast<f32>(kResolution),
                              static_cast<f32>(kResolution));
@@ -105,10 +105,10 @@ void PrecipOcclusion::AddToGraph(RenderGraph& graph,
 
         // Sampled by the precipitation vertex stages and the surface-weather
         // compute; kShaderReadAll covers both.
-        TextureBarrier to_read =
-            Transition(map_, ResourceState::kDepthTarget, ResourceState::kShaderReadAll);
+        gpu::TextureBarrier to_read =
+            gpu::Transition(map_, gpu::ResourceState::kDepthTarget, gpu::ResourceState::kShaderReadAll);
         ctx.cmd->TextureBarriers(base::Span(&to_read, 1));
-        ctx.cmd->MemoryBarrier(BarrierScope::kAllCommands, BarrierScope::kComputeRead);
+        ctx.cmd->MemoryBarrier(gpu::BarrierScope::kAllCommands, gpu::BarrierScope::kComputeRead);
       });
 }
 

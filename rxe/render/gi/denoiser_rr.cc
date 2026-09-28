@@ -17,7 +17,7 @@
 
 namespace rx::render {
 
-bool RrDenoiser::Initialize(Device& device, Extent2D extent) {
+bool RrDenoiser::Initialize(gpu::Device& device, gpu::Extent2D extent) {
   if (!ngx::Acquire(device)) return false;
   ngx_acquired_ = true;
 
@@ -50,12 +50,12 @@ bool RrDenoiser::Initialize(Device& device, Extent2D extent) {
   return true;
 }
 
-bool RrDenoiser::CreateFeature(Device& device, Extent2D extent) {
+bool RrDenoiser::CreateFeature(gpu::Device& device, gpu::Extent2D extent) {
   extent_ = extent;
   has_history_ = false;
-  VulkanHandles h = GetVulkanHandles(device);
+  gpu::VulkanHandles h = gpu::GetVulkanHandles(device);
   bool created = false;
-  device.ImmediateSubmit([&](CommandList& cmd) {
+  device.ImmediateSubmit([&](gpu::CommandList& cmd) {
     NVSDK_NGX_DLSSD_Create_Params create{};
     create.InDenoiseMode = NVSDK_NGX_DLSS_Denoise_Mode_DLUnified;
     create.InRoughnessMode = NVSDK_NGX_DLSS_Roughness_Mode_Packed;  // normals.w
@@ -70,7 +70,7 @@ bool RrDenoiser::CreateFeature(Device& device, Extent2D extent) {
                                   NVSDK_NGX_DLSS_Feature_Flags_DepthInverted |
                                   NVSDK_NGX_DLSS_Feature_Flags_MVLowRes |
                                   NVSDK_NGX_DLSS_Feature_Flags_AutoExposure;
-    NVSDK_NGX_Result r = NGX_VULKAN_CREATE_DLSSD_EXT1(h.device, GetVkCommandBuffer(cmd), 1, 1,
+    NVSDK_NGX_Result r = NGX_VULKAN_CREATE_DLSSD_EXT1(h.device, gpu::GetVkCommandBuffer(cmd), 1, 1,
                                                       &handle_, params_, &create);
     created = r == NVSDK_NGX_Result_Success;
     if (!created) {
@@ -88,7 +88,7 @@ void RrDenoiser::ReleaseFeature() {
   }
 }
 
-void RrDenoiser::Resize(Device& device, Extent2D extent) {
+void RrDenoiser::Resize(gpu::Device& device, gpu::Extent2D extent) {
   if (!available()) return;
   if (extent == extent_) return;
   device.WaitIdle();
@@ -99,7 +99,7 @@ void RrDenoiser::Resize(Device& device, Extent2D extent) {
   }
 }
 
-void RrDenoiser::Destroy(Device& device) {
+void RrDenoiser::Destroy(gpu::Device& device) {
   (void)device;  // the renderer waits for idle before teardown
   ReleaseFeature();
   if (params_) {
@@ -126,9 +126,9 @@ void RrDenoiser::AddToGraph(RenderGraph& graph, const Inputs& inputs, ResourceHa
       [this, inputs, output, frame](PassContext& ctx) {
         VkImageSubresourceRange range{VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 1};
         auto wrap = [&](ResourceHandle handle, bool read_write) {
-          const GpuImage& image = ctx.graph->image(handle);
+          const gpu::GpuImage& image = ctx.graph->image(handle);
           return NVSDK_NGX_Create_ImageView_Resource_VK(
-              GetVkImageView(image.view), GetVkImage(image), range, GetVkFormat(image.format),
+              gpu::GetVkImageView(image.view), gpu::GetVkImage(image), range, gpu::GetVkFormat(image.format),
               image.extent.width, image.extent.height, read_write);
         };
         NVSDK_NGX_Resource_VK color = wrap(inputs.color, false);
@@ -166,7 +166,7 @@ void RrDenoiser::AddToGraph(RenderGraph& graph, const Inputs& inputs, ResourceHa
         eval.InFrameTimeDeltaInMsec = frame.frame_delta_ms;
 
         NVSDK_NGX_Result r =
-            NGX_VULKAN_EVALUATE_DLSSD_EXT(GetVkCommandBuffer(*ctx.cmd), handle_, params_, &eval);
+            NGX_VULKAN_EVALUATE_DLSSD_EXT(gpu::GetVkCommandBuffer(*ctx.cmd), handle_, params_, &eval);
         if (r != NVSDK_NGX_Result_Success) {
           has_history_ = false;
           RX_ERROR("dlss-rr: evaluate failed ({:#x})", static_cast<u32>(r));

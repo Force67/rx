@@ -5,9 +5,12 @@
 #include "rxe/render/core/render_graph.h"
 #include "rxe/gpu/rhi/resources.h"
 
+namespace rx::gpu {
+class Device;
+}  // namespace rx::gpu
+
 namespace rx::render {
 
-class Device;
 class RayTracingContext;
 
 // Ray-marched volumetric fog with shadowed sun single-scattering (god rays).
@@ -30,17 +33,17 @@ class VolumetricFog {
     u32 frame_index = 0;
   };
 
-  bool Initialize(Device& device);
-  void Destroy(Device& device);
+  bool Initialize(gpu::Device& device);
+  void Destroy(gpu::Device& device);
 
   // Marches color (the lit scene) against depth, returns a fogged copy.
   ResourceHandle AddToGraph(RenderGraph& graph, RayTracingContext& raytracing, u32 tlas_slot,
-                            ResourceHandle color, ResourceHandle depth, Extent2D extent,
+                            ResourceHandle color, ResourceHandle depth, gpu::Extent2D extent,
                             const Frame& frame);
 
  private:
-  PipelineHandle pipeline_;
-  GpuBuffer camera_[2];  // inv_view_proj, too big for the push block
+  gpu::PipelineHandle pipeline_;
+  gpu::GpuBuffer camera_[2];  // inv_view_proj, too big for the push block
 };
 
 }  // namespace rx::render

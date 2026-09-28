@@ -10,9 +10,9 @@ Vec3 FlyCamera::forward() const {
   return {::cosf(pitch_) * ::sinf(yaw_), ::sinf(pitch_), -::cosf(pitch_) * ::cosf(yaw_)};
 }
 
-void FlyCamera::Update(const InputState& input, const FlyCameraInput& intent, bool allow_mouse,
+void FlyCamera::Update(const ui::InputState& input, const FlyCameraInput& intent, bool allow_mouse,
                        bool allow_keyboard, f32 dt) {
-  looking_ = allow_mouse && input.button(MouseButton::kRight);
+  looking_ = allow_mouse && input.button(ui::MouseButton::kRight);
 
   if (looking_) {
     yaw_ += input.mouse_dx * sensitivity;

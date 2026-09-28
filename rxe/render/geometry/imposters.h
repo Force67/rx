@@ -44,20 +44,20 @@ class ImposterPass {
   // One submesh's albedo source for a bake. A null image bakes that submesh
   // from its vertex colours, which is what an untextured mesh wants.
   struct BakeMaterial {
-    const GpuImage* base_color = nullptr;
+    const gpu::GpuImage* base_color = nullptr;
     f32 alpha_cutoff = 0.0f;  // 0 = no cutout
   };
 
-  bool Initialize(Device& device, Format color_format, Format depth_format);
-  void Destroy(Device& device);
+  bool Initialize(gpu::Device& device, gpu::Format color_format, gpu::Format depth_format);
+  void Destroy(gpu::Device& device);
   bool active() const { return instance_count_ > 0 && mesh_count_ > 0; }
 
   // Bakes one mesh into the shared atlas and returns the index instances name
   // it by, or kNoMesh when the atlas is full or the mesh is empty. `materials`
   // is parallel to lod 0's submeshes; a short span leaves the rest untextured.
-  u32 Bake(Device& device, const asset::Mesh& mesh,
+  u32 Bake(gpu::Device& device, const asset::Mesh& mesh,
            base::Span<const BakeMaterial> materials = {});
-  void SetInstances(Device& device, base::Span<const Instance> instances);
+  void SetInstances(gpu::Device& device, base::Span<const Instance> instances);
 
   struct Frame {
     Mat4 view_proj;
@@ -69,7 +69,7 @@ class ImposterPass {
   };
 
   void AddToGraph(RenderGraph& graph, ResourceHandle color, ResourceHandle depth,
-                  Extent2D extent, const Frame& frame);
+                  gpu::Extent2D extent, const Frame& frame);
 
  private:
   // Per baked mesh, mirrored into mesh_params_ for the draw shader.
@@ -79,16 +79,16 @@ class ImposterPass {
     f32 tile[2] = {0, 0}; // tile origin in atlas uv
   };
 
-  void UploadMeshParams(Device& device);
+  void UploadMeshParams(gpu::Device& device);
 
-  PipelineHandle bake_pipeline_;
-  PipelineHandle draw_pipeline_;
-  GpuImage albedo_atlas_;  // RGBA8: albedo + coverage alpha, kMaxMeshes tiles
-  GpuImage normal_atlas_;  // RGBA8: bake-space world normal * 0.5 + 0.5
-  GpuImage white_;         // 1x1, stands in for a submesh with no base-colour map
-  SamplerHandle sampler_;
-  GpuBuffer instances_;
-  GpuBuffer mesh_params_;
+  gpu::PipelineHandle bake_pipeline_;
+  gpu::PipelineHandle draw_pipeline_;
+  gpu::GpuImage albedo_atlas_;  // RGBA8: albedo + coverage alpha, kMaxMeshes tiles
+  gpu::GpuImage normal_atlas_;  // RGBA8: bake-space world normal * 0.5 + 0.5
+  gpu::GpuImage white_;         // 1x1, stands in for a submesh with no base-colour map
+  gpu::SamplerHandle sampler_;
+  gpu::GpuBuffer instances_;
+  gpu::GpuBuffer mesh_params_;
   MeshParams meshes_[kMaxMeshes];
   u32 mesh_count_ = 0;
   u32 instance_count_ = 0;

@@ -33,30 +33,30 @@ constexpr f64 kStatScale = 65536.0;
 
 }  // namespace
 
-bool ReferenceCompare::Initialize(Device& device) {
+bool ReferenceCompare::Initialize(gpu::Device& device) {
   device_ = &device;
   pipeline_ = device.CreateComputePipeline({
       .shader = RX_SHADER(k_reference_compare_cs_hlsl),
-      .sets = {{.slots = {{0, BindingType::kStorageImage},
-                          {1, BindingType::kCombinedTextureSampler},
-                          {2, BindingType::kCombinedTextureSampler},
-                          {3, BindingType::kStorageBuffer},
-                          {4, BindingType::kCombinedTextureSampler}}}},
-      .push_constant_size = PushSize<ComparePush>(),
+      .sets = {{.slots = {{0, gpu::BindingType::kStorageImage},
+                          {1, gpu::BindingType::kCombinedTextureSampler},
+                          {2, gpu::BindingType::kCombinedTextureSampler},
+                          {3, gpu::BindingType::kStorageBuffer},
+                          {4, gpu::BindingType::kCombinedTextureSampler}}}},
+      .push_constant_size = gpu::PushSize<ComparePush>(),
       .debug_name = "reference_compare",
   });
   if (!pipeline_) return false;
-  sampler_ = device.GetSampler({.min_filter = Filter::kLinear,
-                                .mag_filter = Filter::kLinear,
-                                .address_u = AddressMode::kClampToEdge,
-                                .address_v = AddressMode::kClampToEdge});
+  sampler_ = device.GetSampler({.min_filter = gpu::Filter::kLinear,
+                                .mag_filter = gpu::Filter::kLinear,
+                                .address_u = gpu::AddressMode::kClampToEdge,
+                                .address_v = gpu::AddressMode::kClampToEdge});
   // Host-visible so the fitting loop can read the metric without a staging
   // round trip; it is under half a kilobyte. TransferDst because the pass
   // clears its own ring slot on the GPU - clearing it from the CPU at record
   // time races the dispatches still in flight from earlier frames.
   const u64 stats_bytes = u64(kStatWordsPerFrame) * kStatRing * sizeof(u32);
   stats_buffer_ =
-      device.CreateBuffer(stats_bytes, kBufferUsageStorage | kBufferUsageTransferDst, true);
+      device.CreateBuffer(stats_bytes, gpu::kBufferUsageStorage | gpu::kBufferUsageTransferDst, true);
   if (!stats_buffer_.mapped) {
     device.DestroyPipeline(pipeline_);
     pipeline_ = {};
@@ -67,25 +67,25 @@ bool ReferenceCompare::Initialize(Device& device) {
   // "No mask loaded" must mean "every region is everywhere", not "nothing is
   // anything" - otherwise turning stats on before authoring a mask silently
   // reports zero error.
-  white_mask_ = device.CreateImage2D(Format::kRGBA8Unorm, {1, 1},
-                                     kTextureUsageSampled | kTextureUsageTransferDst);
+  white_mask_ = device.CreateImage2D(gpu::Format::kRGBA8Unorm, {1, 1},
+                                     gpu::kTextureUsageSampled | gpu::kTextureUsageTransferDst);
   if (white_mask_) {
     const u8 px[4] = {255, 255, 255, 255};
-    GpuBuffer staging = device.CreateBuffer(4, kBufferUsageTransferSrc, true);
+    gpu::GpuBuffer staging = device.CreateBuffer(4, gpu::kBufferUsageTransferSrc, true);
     base::MemCopy(staging.mapped, px, 4);
-    device.ImmediateSubmit([&](CommandList& cmd) {
-      cmd.Barrier(Transition(white_mask_, ResourceState::kUndefined, ResourceState::kCopyDst));
-      BufferTextureCopy region{};
+    device.ImmediateSubmit([&](gpu::CommandList& cmd) {
+      cmd.Barrier(gpu::Transition(white_mask_, gpu::ResourceState::kUndefined, gpu::ResourceState::kCopyDst));
+      gpu::BufferTextureCopy region{};
       cmd.CopyBufferToTexture(staging, white_mask_, base::Span(&region, 1));
-      cmd.Barrier(Transition(white_mask_, ResourceState::kCopyDst,
-                             ResourceState::kShaderReadFragment));
+      cmd.Barrier(gpu::Transition(white_mask_, gpu::ResourceState::kCopyDst,
+                             gpu::ResourceState::kShaderReadFragment));
     });
     device.DestroyBuffer(staging);
   }
   return true;
 }
 
-void ReferenceCompare::Destroy(Device& device) {
+void ReferenceCompare::Destroy(gpu::Device& device) {
   device.DestroyPipeline(pipeline_);
   pipeline_ = {};
   device.DestroyImage(reference_);
@@ -105,22 +105,22 @@ namespace {
 // Uploads float rgba into a fresh RGBA32F image. Reference frames are the one
 // place in the engine where full float is worth the memory: a 16-bit reference
 // quantizes exactly the shadow detail the terminator fit lives in.
-GpuImage UploadFloatImage(Device& device, const f32* rgba, u32 width, u32 height) {
-  GpuImage image = device.CreateImage2D(Format::kRGBA32Float, {width, height},
-                                        kTextureUsageSampled | kTextureUsageTransferDst);
+gpu::GpuImage UploadFloatImage(gpu::Device& device, const f32* rgba, u32 width, u32 height) {
+  gpu::GpuImage image = device.CreateImage2D(gpu::Format::kRGBA32Float, {width, height},
+                                        gpu::kTextureUsageSampled | gpu::kTextureUsageTransferDst);
   if (!image) return {};
   const u64 bytes = static_cast<u64>(width) * height * 4 * sizeof(f32);
-  GpuBuffer staging = device.CreateBuffer(bytes, kBufferUsageTransferSrc, true);
+  gpu::GpuBuffer staging = device.CreateBuffer(bytes, gpu::kBufferUsageTransferSrc, true);
   if (!staging.mapped) {
     device.DestroyImage(image);
     return {};
   }
   base::MemCopy(staging.mapped, rgba, bytes);
-  device.ImmediateSubmit([&](CommandList& cmd) {
-    cmd.Barrier(Transition(image, ResourceState::kUndefined, ResourceState::kCopyDst));
-    BufferTextureCopy region{};
+  device.ImmediateSubmit([&](gpu::CommandList& cmd) {
+    cmd.Barrier(gpu::Transition(image, gpu::ResourceState::kUndefined, gpu::ResourceState::kCopyDst));
+    gpu::BufferTextureCopy region{};
     cmd.CopyBufferToTexture(staging, image, base::Span(&region, 1));
-    cmd.Barrier(Transition(image, ResourceState::kCopyDst, ResourceState::kShaderReadFragment));
+    cmd.Barrier(gpu::Transition(image, gpu::ResourceState::kCopyDst, gpu::ResourceState::kShaderReadFragment));
   });
   device.DestroyBuffer(staging);
   return image;
@@ -128,7 +128,7 @@ GpuImage UploadFloatImage(Device& device, const f32* rgba, u32 width, u32 height
 
 }  // namespace
 
-bool ReferenceCompare::LoadReference(Device& device, const base::String& path) {
+bool ReferenceCompare::LoadReference(gpu::Device& device, const base::String& path) {
   int w = 0, h = 0, comp = 0;
   // stbi_loadf returns scene-linear for .hdr and de-gammas 8-bit sources on the
   // way in, which is the contract this pass needs: everything downstream of
@@ -138,7 +138,7 @@ bool ReferenceCompare::LoadReference(Device& device, const base::String& path) {
     RX_WARN("reference compare: cannot read {} ({})", path, stbi_failure_reason());
     return false;
   }
-  GpuImage image = UploadFloatImage(device, pixels, static_cast<u32>(w), static_cast<u32>(h));
+  gpu::GpuImage image = UploadFloatImage(device, pixels, static_cast<u32>(w), static_cast<u32>(h));
   stbi_image_free(pixels);
   if (!image) return false;
   device.DestroyImageDeferred(reference_);
@@ -147,14 +147,14 @@ bool ReferenceCompare::LoadReference(Device& device, const base::String& path) {
   return true;
 }
 
-bool ReferenceCompare::LoadRegionMask(Device& device, const base::String& path) {
+bool ReferenceCompare::LoadRegionMask(gpu::Device& device, const base::String& path) {
   int w = 0, h = 0, comp = 0;
   f32* pixels = stbi_loadf(path.c_str(), &w, &h, &comp, 4);
   if (!pixels) {
     RX_WARN("reference compare: cannot read region mask {}", path);
     return false;
   }
-  GpuImage image = UploadFloatImage(device, pixels, static_cast<u32>(w), static_cast<u32>(h));
+  gpu::GpuImage image = UploadFloatImage(device, pixels, static_cast<u32>(w), static_cast<u32>(h));
   stbi_image_free(pixels);
   if (!image) return false;
   device.DestroyImageDeferred(region_mask_);
@@ -163,11 +163,11 @@ bool ReferenceCompare::LoadRegionMask(Device& device, const base::String& path) 
 }
 
 ResourceHandle ReferenceCompare::AddToGraph(RenderGraph& graph, ResourceHandle scene_color,
-                                            Extent2D extent, u32 tonemap_op) {
+                                            gpu::Extent2D extent, u32 tonemap_op) {
   if (!pipeline_ || settings_.mode == Mode::kOff || !reference_) return scene_color;
 
   ResourceHandle out = graph.CreateTexture({.name = "reference_compare",
-                                            .format = Format::kRGBA16Float,
+                                            .format = gpu::Format::kRGBA16Float,
                                             .width = extent.width,
                                             .height = extent.height});
   Settings s = settings_;
@@ -176,7 +176,7 @@ ResourceHandle ReferenceCompare::AddToGraph(RenderGraph& graph, ResourceHandle s
   // has certainly retired sits that many frames back - which is the one stats()
   // may read without a stall.
   const u32 write_slot = stats_frame_ % kStatRing;
-  stats_read_slot_ = (stats_frame_ + kStatRing - Device::kMaxFramesInFlight) % kStatRing;
+  stats_read_slot_ = (stats_frame_ + kStatRing - gpu::Device::kMaxFramesInFlight) % kStatRing;
   ++stats_frame_;
   const u32 stats_base = write_slot * kStatWordsPerFrame;
   graph.AddPass(
@@ -194,7 +194,7 @@ ResourceHandle ReferenceCompare::AddToGraph(RenderGraph& graph, ResourceHandle s
         if (s.collect_stats) {
           ctx.cmd->FillBuffer(stats_buffer_, u64(stats_base) * sizeof(u32),
                               u64(kStatWordsPerFrame) * sizeof(u32), 0);
-          ctx.cmd->MemoryBarrier(BarrierScope::kTransferWrite, BarrierScope::kComputeRead);
+          ctx.cmd->MemoryBarrier(gpu::BarrierScope::kTransferWrite, gpu::BarrierScope::kComputeRead);
         }
         ComparePush push{};
         push.size[0] = extent.width;
@@ -215,14 +215,14 @@ ResourceHandle ReferenceCompare::AddToGraph(RenderGraph& graph, ResourceHandle s
         push.exposure_scale = s.exposure_scale;
         push.stats_base = stats_base;
 
-        const GpuImage& mask = region_mask_ ? region_mask_ : white_mask_;
+        const gpu::GpuImage& mask = region_mask_ ? region_mask_ : white_mask_;
         ctx.cmd->BindPipeline(pipeline_);
         ctx.cmd->BindTransient(
-            0, {Bind::Storage(0, ctx.graph->image(out)),
-                Bind::Combined(1, reference_.view, sampler_),
-                Bind::Combined(2, mask.view, sampler_),
-                Bind::StorageBuffer(3, stats_buffer_),
-                Bind::Combined(4, ctx.graph->image(scene_color).view, sampler_)});
+            0, {gpu::Bind::Storage(0, ctx.graph->image(out)),
+                gpu::Bind::Combined(1, reference_.view, sampler_),
+                gpu::Bind::Combined(2, mask.view, sampler_),
+                gpu::Bind::StorageBuffer(3, stats_buffer_),
+                gpu::Bind::Combined(4, ctx.graph->image(scene_color).view, sampler_)});
         ctx.cmd->Push(push);
         ctx.cmd->Dispatch2D(extent);
       });

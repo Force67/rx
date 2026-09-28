@@ -41,9 +41,9 @@ struct UpscalerInputs {
 // previous depth), reused by frame generation so it skips its own
 // reconstruct-and-dilate pass.
 struct Fsr3SharedResources {
-  const GpuImage* dilated_depth = nullptr;
-  const GpuImage* dilated_motion = nullptr;
-  const GpuImage* recon_prev_depth = nullptr;
+  const gpu::GpuImage* dilated_depth = nullptr;
+  const gpu::GpuImage* dilated_motion = nullptr;
+  const gpu::GpuImage* recon_prev_depth = nullptr;
 };
 
 class Upscaler {
@@ -61,7 +61,7 @@ class Upscaler {
 
 // Returns null if the SDK for the requested kind is not compiled in or the
 // device does not support it. Caller falls back to TAA.
-base::UniquePointer<Upscaler> CreateUpscaler(const UpscalerDesc& desc, class Device& device);
+base::UniquePointer<Upscaler> CreateUpscaler(const UpscalerDesc& desc, class gpu::Device& device);
 
 // The spelling the --upscaler flag and the settings ini use, for logging which
 // backend a fallback actually landed on.

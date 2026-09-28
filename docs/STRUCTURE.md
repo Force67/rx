@@ -409,7 +409,10 @@ and after.
    - 4d-2 (done): flat foundation, `internal` for every `detail`, `rx::rpc`
      into `rx::net`, and `rx::importers`, `rx::vehicles`, `rx::weather`,
      `rx::replication` matching their folders.
-   - 4d-3: the RHI into `rx::gpu` (backends nested), ui into `rx::ui`.
+   - 4d-3 (done): the RHI into `rx::gpu` (backends `rx::gpu::vk`,
+     `rx::gpu::d3d12`, `rx::gpu::null`); window, events and the imgui renderer
+     into `rx::ui`; `WorldClock` into `rx::app`, `exr_write` into `rx::asset`.
+     The include lint now checks namespaces too.
 5. **Development shared build.** Add the single-instance fixes and the `-dev`
    presets, then per-module feature flags on the single registry.
 6. **Plugins and apps.** Add `RX_PLUGIN`, `PluginRegistry` and `rx_add_app`.
@@ -430,7 +433,7 @@ that moves a header appends to that file.
 |---|---|
 | `foundation/` | flat `rx::` (`rx::StrFormat`, `rx::Min`, `rx::StableSort`, `rx::FrameArena`), as all of `base/` is `base::`. The one sub-namespace is `rx::fs`, mirroring `std::filesystem`. `rx::mem` went flat; its category API says `Memory` in the name instead (`MemoryCategory`, `RegisterMemoryCategory`), since the namespace no longer does. |
 | `rxe/<folder>/*` | `rx::<folder>`: one namespace per top-level folder, as `net::` covers all of Chromium's `net/`. `gpu::Device`, `ui::Window`, `net::RpcValue`, `importers::LoadGltfScene`, `world::` for `world` and `world_bake`. One exception: `rxe/net/http` stays `rx::http`, because its API is named for the protocol (`http::Get`, `http::Url`, `http::Response`) and `net::Get` would lose that. |
-| backends | nested under their interface: `rx::gpu::vk`, `rx::gpu::d3d12`, `rx::gpu::null` (today `rx::render::vk`, `rx::render::d`) |
+| backends | nested under their interface: `rx::gpu::vk`, `rx::gpu::d3d12`, `rx::gpu::null` |
 | `plugins/<name>/*` | `rx::<name>` (`rx::nav`, `rx::vehicles`) |
 | first-party apps | `rx::shell`, `rx::editor` |
 | third-party plugins, games | their own root, never `rx::`, as Chromium components use `autofill::` and not `chrome::` |
@@ -438,8 +441,10 @@ that moves a header appends to that file.
 Renames: `rx::authoring` becomes `rx::devtools`, `rx::rpc` becomes `rx::net`,
 and `rx::edit` splits into `rx::scene` and `rx::editor`.
 
-- `rx_module(... NAMESPACE gpu)` declares it; `tools/checkincludes` checks that
-  every header of the module opens that namespace.
+- The folder fixes the namespace; `tools/checkincludes` checks that every
+  header under `rxe/` and `plugins/` opens it. A block of another `rx`
+  namespace in the same header may only forward-declare that namespace's types
+  (`namespace rx::gpu { class Device; }`).
 - Private helpers live in `internal` (matching the `internal/` directories);
   file-local ones in a `.cc` in an anonymous namespace. `detail` and
   `format_detail` go away.

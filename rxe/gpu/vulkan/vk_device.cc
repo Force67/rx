@@ -24,7 +24,7 @@
 #include <nvsdk_ngx_vk.h>
 #endif
 
-namespace rx::render::vk {
+namespace rx::gpu::vk {
 namespace {
 
 constexpr const char* kValidationLayer = "VK_LAYER_KHRONOS_validation";
@@ -437,7 +437,7 @@ VkDescriptorPool CreateTransientPool(VkDevice device, bool with_accel) {
 
 }  // namespace
 
-base::UniquePointer<Device> VulkanDevice::Create(const DeviceDesc& desc, Window& window) {
+base::UniquePointer<Device> VulkanDevice::Create(const DeviceDesc& desc, ui::Window& window) {
   return CreateImpl(desc, &window);
 }
 
@@ -445,7 +445,7 @@ base::UniquePointer<Device> VulkanDevice::CreateOffscreen(const DeviceDesc& desc
   return CreateImpl(desc, nullptr);
 }
 
-base::UniquePointer<Device> VulkanDevice::CreateImpl(const DeviceDesc& desc, Window* window) {
+base::UniquePointer<Device> VulkanDevice::CreateImpl(const DeviceDesc& desc, ui::Window* window) {
   auto device = base::UniquePointer<VulkanDevice>(new VulkanDevice());
 
   // A windowed device needs the platform surface instance extensions; an
@@ -1002,7 +1002,7 @@ base::UniquePointer<Device> VulkanDevice::CreateImpl(const DeviceDesc& desc, Win
   return device;
 }
 
-base::UniquePointer<Device> CreateVulkanDevice(const DeviceDesc& desc, Window& window) {
+base::UniquePointer<Device> CreateVulkanDevice(const DeviceDesc& desc, ui::Window& window) {
   return VulkanDevice::Create(desc, window);
 }
 
@@ -1168,7 +1168,7 @@ void VulkanDevice::WaitIdle() {
   }
 }
 
-bool VulkanDevice::RecreateSurface(Window& window) {
+bool VulkanDevice::RecreateSurface(ui::Window& window) {
   WaitIdle();
   if (surface_ != VK_NULL_HANDLE) {
     vkDestroySurfaceKHR(instance_, surface_, nullptr);
@@ -3076,4 +3076,4 @@ PresentResult VulkanDevice::TranslatePresent(VkResult presented, Swapchain& swap
   return presented == VK_SUCCESS ? PresentResult::kOk : PresentResult::kFailed;
 }
 
-}  // namespace rx::render::vk
+}  // namespace rx::gpu::vk

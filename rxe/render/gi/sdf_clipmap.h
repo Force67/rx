@@ -41,7 +41,7 @@ class SdfClipmap {
     bool bounded_quality = false;
   };
 
-  explicit SdfClipmap(Device& device) : device_(device) {}
+  explicit SdfClipmap(gpu::Device& device) : device_(device) {}
   ~SdfClipmap();
 
   SdfClipmap(const SdfClipmap&) = delete;
@@ -59,31 +59,31 @@ class SdfClipmap {
 
   // Full-screen raymarch of the clipmap onto `lit` (RX_SDF_DEBUG: 1 distance,
   // 2 albedo+normal). Verification tool; also proof the trace/data are correct.
-  void AddDebugPass(RenderGraph& graph, ResourceHandle lit, Extent2D extent,
+  void AddDebugPass(RenderGraph& graph, ResourceHandle lit, gpu::Extent2D extent,
                     const Mat4& inv_view_proj, const Vec3& camera, u32 mode, u32 frame_index);
 
   // S2 interface (bind these into the software trace variants)
-  const GpuImage& distance_volume() const { return distance_; }
-  const GpuImage& albedo_volume() const { return albedo_; }
-  const GpuImage& emissive_volume() const { return emissive_; }
-  SamplerHandle sampler() const { return sampler_; }
-  const GpuBuffer& globals(u32 frame_index) const { return globals_buffers_[frame_index % 2]; }
+  const gpu::GpuImage& distance_volume() const { return distance_; }
+  const gpu::GpuImage& albedo_volume() const { return albedo_; }
+  const gpu::GpuImage& emissive_volume() const { return emissive_; }
+  gpu::SamplerHandle sampler() const { return sampler_; }
+  const gpu::GpuBuffer& globals(u32 frame_index) const { return globals_buffers_[frame_index % 2]; }
   bool ready() const { return volumes_initialized_; }
 
  private:
   Vec3 SnapOrigin(const Vec3& camera, u32 clip) const;
   void WriteGlobals(u32 frame_index, const Vec3& camera);
 
-  Device& device_;
-  GpuImage distance_;   // R16Float, signed distance
-  GpuImage albedo_;     // RGBA8Unorm, surface albedo proxy
-  GpuImage emissive_;   // RGBA8Unorm, surface emissive proxy
-  SamplerHandle sampler_{};
-  GpuBuffer globals_buffers_[2];  // host-visible SdfGlobals, ping-pong by frame parity
+  gpu::Device& device_;
+  gpu::GpuImage distance_;   // R16Float, signed distance
+  gpu::GpuImage albedo_;     // RGBA8Unorm, surface albedo proxy
+  gpu::GpuImage emissive_;   // RGBA8Unorm, surface emissive proxy
+  gpu::SamplerHandle sampler_{};
+  gpu::GpuBuffer globals_buffers_[2];  // host-visible SdfGlobals, ping-pong by frame parity
 
-  PipelineHandle clear_pipeline_{};
-  PipelineHandle compose_pipeline_{};
-  PipelineHandle debug_pipeline_{};
+  gpu::PipelineHandle clear_pipeline_{};
+  gpu::PipelineHandle compose_pipeline_{};
+  gpu::PipelineHandle debug_pipeline_{};
 
   bool volumes_initialized_ = false;
   bool clips_valid_ = false;

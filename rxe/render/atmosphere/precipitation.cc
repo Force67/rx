@@ -17,12 +17,12 @@ struct PrecipPush {
 
 }  // namespace
 
-bool Precipitation::Initialize(Device& device) {
+bool Precipitation::Initialize(gpu::Device& device) {
   pipeline_ = device.CreateComputePipeline({
       .shader = RX_SHADER(k_precipitation_cs_hlsl),
-      .sets = {{.slots = {{0, BindingType::kStorageImage},
-                          {1, BindingType::kSampledImage}}}},
-      .push_constant_size = PushSize<PrecipPush>(),
+      .sets = {{.slots = {{0, gpu::BindingType::kStorageImage},
+                          {1, gpu::BindingType::kSampledImage}}}},
+      .push_constant_size = gpu::PushSize<PrecipPush>(),
       .debug_name = "precipitation",
   });
   if (!pipeline_) {
@@ -32,15 +32,15 @@ bool Precipitation::Initialize(Device& device) {
   return true;
 }
 
-void Precipitation::Destroy(Device& device) {
+void Precipitation::Destroy(gpu::Device& device) {
   device.DestroyPipeline(pipeline_);
   pipeline_ = {};
 }
 
 ResourceHandle Precipitation::AddToGraph(RenderGraph& graph, ResourceHandle color,
-                                         Extent2D extent, const Frame& frame) {
+                                         gpu::Extent2D extent, const Frame& frame) {
   ResourceHandle out = graph.CreateTexture({.name = "precipitation",
-                                            .format = Format::kRGBA16Float,
+                                            .format = gpu::Format::kRGBA16Float,
                                             .width = extent.width,
                                             .height = extent.height});
   graph.AddPass(
@@ -62,8 +62,8 @@ ResourceHandle Precipitation::AddToGraph(RenderGraph& graph, ResourceHandle colo
         push.size[1] = extent.height;
 
         ctx.cmd->BindPipeline(pipeline_);
-        ctx.cmd->BindTransient(0, {Bind::Storage(0, ctx.graph->image(out)),
-                                   Bind::Sampled(1, ctx.graph->image(color))});
+        ctx.cmd->BindTransient(0, {gpu::Bind::Storage(0, ctx.graph->image(out)),
+                                   gpu::Bind::Sampled(1, ctx.graph->image(color))});
         ctx.cmd->Push(push);
         ctx.cmd->Dispatch2D(extent);
       });

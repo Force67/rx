@@ -5,7 +5,7 @@
 
 namespace rx {
 
-void RegisterEditorInput(InputMap& map) {
+void RegisterEditorInput(ui::InputMap& map) {
   map.RegisterAction(Action::kMoveForward, "move_forward");
   map.RegisterAction(Action::kMoveBack, "move_back");
   map.RegisterAction(Action::kMoveLeft, "move_left");
@@ -26,34 +26,34 @@ void RegisterEditorInput(InputMap& map) {
   map.RegisterFold(Axis::kMoveX, Action::kMoveRight, Action::kMoveLeft);
   map.RegisterFold(Axis::kMoveY, Action::kMoveBack, Action::kMoveForward);
 
-  map.SetDefaultsFn([](InputMap& m) {
-    auto key = [](Key k) { return Binding{SourceKind::kKey, static_cast<u16>(k), 0}; };
-    auto pad = [](GamepadButton g) {
-      return Binding{SourceKind::kGamepadButton, static_cast<u16>(g), 0};
+  map.SetDefaultsFn([](ui::InputMap& m) {
+    auto key = [](ui::Key k) { return ui::Binding{ui::SourceKind::kKey, static_cast<u16>(k), 0}; };
+    auto pad = [](ui::GamepadButton g) {
+      return ui::Binding{ui::SourceKind::kGamepadButton, static_cast<u16>(g), 0};
     };
-    auto axis = [](GamepadAxis a, i8 dir) {
-      return Binding{SourceKind::kGamepadAxis, static_cast<u16>(a), dir};
+    auto axis = [](ui::GamepadAxis a, i8 dir) {
+      return ui::Binding{ui::SourceKind::kGamepadAxis, static_cast<u16>(a), dir};
     };
 
-    m.AddBinding(Action::kMoveForward, key(Key::kW));
-    m.AddBinding(Action::kMoveBack, key(Key::kS));
-    m.AddBinding(Action::kMoveLeft, key(Key::kA));
-    m.AddBinding(Action::kMoveRight, key(Key::kD));
-    m.AddBinding(Action::kJump, key(Key::kSpace));
-    m.AddBinding(Action::kJump, pad(GamepadButton::kSouth));
-    m.AddBinding(Action::kSprint, key(Key::kLeftShift));
-    m.AddBinding(Action::kSprint, pad(GamepadButton::kLeftStick));
-    m.AddBinding(Action::kSneak, key(Key::kLeftCtrl));
-    m.AddBinding(Action::kSneak, pad(GamepadButton::kRightStick));
-    m.AddBinding(Action::kCamUp, key(Key::kE));
-    m.AddBinding(Action::kCamUp, pad(GamepadButton::kRightShoulder));
-    m.AddBinding(Action::kCamDown, key(Key::kQ));
-    m.AddBinding(Action::kCamDown, pad(GamepadButton::kLeftShoulder));
+    m.AddBinding(Action::kMoveForward, key(ui::Key::kW));
+    m.AddBinding(Action::kMoveBack, key(ui::Key::kS));
+    m.AddBinding(Action::kMoveLeft, key(ui::Key::kA));
+    m.AddBinding(Action::kMoveRight, key(ui::Key::kD));
+    m.AddBinding(Action::kJump, key(ui::Key::kSpace));
+    m.AddBinding(Action::kJump, pad(ui::GamepadButton::kSouth));
+    m.AddBinding(Action::kSprint, key(ui::Key::kLeftShift));
+    m.AddBinding(Action::kSprint, pad(ui::GamepadButton::kLeftStick));
+    m.AddBinding(Action::kSneak, key(ui::Key::kLeftCtrl));
+    m.AddBinding(Action::kSneak, pad(ui::GamepadButton::kRightStick));
+    m.AddBinding(Action::kCamUp, key(ui::Key::kE));
+    m.AddBinding(Action::kCamUp, pad(ui::GamepadButton::kRightShoulder));
+    m.AddBinding(Action::kCamDown, key(ui::Key::kQ));
+    m.AddBinding(Action::kCamDown, pad(ui::GamepadButton::kLeftShoulder));
 
-    m.AddAxisBinding(Axis::kMoveX, axis(GamepadAxis::kLeftX, 0));
-    m.AddAxisBinding(Axis::kMoveY, axis(GamepadAxis::kLeftY, 0));
-    m.AddAxisBinding(Axis::kLookX, axis(GamepadAxis::kRightX, 0));
-    m.AddAxisBinding(Axis::kLookY, axis(GamepadAxis::kRightY, 0));
+    m.AddAxisBinding(Axis::kMoveX, axis(ui::GamepadAxis::kLeftX, 0));
+    m.AddAxisBinding(Axis::kMoveY, axis(ui::GamepadAxis::kLeftY, 0));
+    m.AddAxisBinding(Axis::kLookX, axis(ui::GamepadAxis::kRightX, 0));
+    m.AddAxisBinding(Axis::kLookY, axis(ui::GamepadAxis::kRightY, 0));
   });
 }
 

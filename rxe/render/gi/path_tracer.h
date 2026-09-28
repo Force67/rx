@@ -5,9 +5,12 @@
 #include "rxe/render/core/render_graph.h"
 #include "rxe/gpu/rhi/resources.h"
 
+namespace rx::gpu {
+class Device;
+}  // namespace rx::gpu
+
 namespace rx::render {
 
-class Device;
 class RayTracingContext;
 
 // Reference + playable path tracer sharing the realtime TLAS + bindless scene
@@ -47,20 +50,20 @@ class PathTracer {
     ResourceHandle background = kInvalidResource;
   };
 
-  bool Initialize(Device& device, BindingLayoutHandle bindless_layout);
-  void Resize(Device& device, Extent2D extent);
-  void Destroy(Device& device);
+  bool Initialize(gpu::Device& device, gpu::BindingLayoutHandle bindless_layout);
+  void Resize(gpu::Device& device, gpu::Extent2D extent);
+  void Destroy(gpu::Device& device);
   bool available() const { return pipeline_ && accum_; }
 
   // Reference accumulation into output (an hdr storage image, usually
   // scene_color), accumulating across frames.
   void AddToGraph(RenderGraph& graph, RayTracingContext& raytracing, u32 tlas_slot,
-                  BindingSetHandle bindless_set, TextureView sky_view, SamplerHandle sky_sampler,
+                  gpu::BindingSetHandle bindless_set, gpu::TextureView sky_view, gpu::SamplerHandle sky_sampler,
                   ResourceHandle output, const Frame& frame);
 
   // Denoised: trace one sample and write the NRD REBLUR_DIFFUSE inputs into t.
   void AddGbufferPass(RenderGraph& graph, RayTracingContext& raytracing, u32 tlas_slot,
-                      BindingSetHandle bindless_set, TextureView sky_view, SamplerHandle sky_sampler,
+                      gpu::BindingSetHandle bindless_set, gpu::TextureView sky_view, gpu::SamplerHandle sky_sampler,
                       const GbufferTargets& t, const Frame& frame);
 
   // Denoised: scene_color = denoised_radiance * albedo + background.
@@ -71,16 +74,16 @@ class PathTracer {
   u32 samples_per_frame() const { return spp_; }
 
  private:
-  PipelineHandle pipeline_;
+  gpu::PipelineHandle pipeline_;
   // Denoised path (NRD inputs + composite).
-  PipelineHandle gbuffer_pipeline_;
-  PipelineHandle composite_pipeline_;
-  GpuImage accum_;  // rgba32f, persistent; rgb = sum, a = sample count
-  ResourceState accum_state_ = ResourceState::kUndefined;
+  gpu::PipelineHandle gbuffer_pipeline_;
+  gpu::PipelineHandle composite_pipeline_;
+  gpu::GpuImage accum_;  // rgba32f, persistent; rgb = sum, a = sample count
+  gpu::ResourceState accum_state_ = gpu::ResourceState::kUndefined;
   // Camera matrices for both tracers; too big for a push block. Ping-pongs
   // with the frame parity.
-  GpuBuffer camera_[2];
-  Extent2D extent_{};
+  gpu::GpuBuffer camera_[2];
+  gpu::Extent2D extent_{};
   u32 accumulated_samples_ = 0;
   u32 spp_ = 2;     // samples per dispatch
   u32 bounces_ = 4;

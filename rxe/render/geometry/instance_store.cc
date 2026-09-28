@@ -22,11 +22,11 @@ f32 MaxScale(const Mat4 &transform) {
 
 }  // namespace
 
-GpuBuffer InstanceStore::Upload(Device &device, base::Span<const Mat4> transforms) {
+gpu::GpuBuffer InstanceStore::Upload(gpu::Device &device, base::Span<const Mat4> transforms) {
   if (transforms.empty()) return {};
   return device.CreateBufferWithData(
       ByteSpan(reinterpret_cast<const u8 *>(transforms.data()), transforms.size_bytes()),
-      kBufferUsageVertex);
+      gpu::kBufferUsageVertex);
 }
 
 void InstanceStore::ComputeBounds(Group &group, const f32 mesh_center[3], f32 mesh_radius) {
@@ -59,11 +59,11 @@ void InstanceStore::ComputeBounds(Group &group, const f32 mesh_center[3], f32 me
   }
 }
 
-InstanceGroupHandle InstanceStore::Create(Device &device, u64 mesh,
+InstanceGroupHandle InstanceStore::Create(gpu::Device &device, u64 mesh,
                                           base::Span<const Mat4> transforms,
                                           const f32 mesh_center[3], f32 mesh_radius) {
   if (mesh == 0 || transforms.empty()) return {};
-  GpuBuffer buffer = Upload(device, transforms);
+  gpu::GpuBuffer buffer = Upload(device, transforms);
   if (!buffer) return {};
 
   u32 index;
@@ -94,12 +94,12 @@ InstanceStore::Group *InstanceStore::Resolve(InstanceGroupHandle handle) {
   return group.alive && group.generation == handle.generation ? &group : nullptr;
 }
 
-bool InstanceStore::Replace(Device &device, InstanceGroupHandle handle,
+bool InstanceStore::Replace(gpu::Device &device, InstanceGroupHandle handle,
                             base::Span<const Mat4> transforms, const f32 mesh_center[3],
                             f32 mesh_radius) {
   Group *group = Resolve(handle);
   if (!group || transforms.empty()) return false;
-  GpuBuffer replacement = Upload(device, transforms);
+  gpu::GpuBuffer replacement = Upload(device, transforms);
   if (!replacement) return false;
 
   if (!group->has_submitted_state) {
@@ -120,7 +120,7 @@ bool InstanceStore::Replace(Device &device, InstanceGroupHandle handle,
       base::Vector<Mat4> previous;
       previous.assign(transforms.begin(), transforms.end());
       base::Copy(submitted.begin(), submitted.end(), previous.begin());
-      GpuBuffer previous_buffer = Upload(device, previous);
+      gpu::GpuBuffer previous_buffer = Upload(device, previous);
       if (!previous_buffer) {
         device.DestroyBuffer(replacement);
         return false;
@@ -146,7 +146,7 @@ bool InstanceStore::Replace(Device &device, InstanceGroupHandle handle,
   return true;
 }
 
-bool InstanceStore::Destroy(Device &device, InstanceGroupHandle handle) {
+bool InstanceStore::Destroy(gpu::Device &device, InstanceGroupHandle handle) {
   Group *group = Resolve(handle);
   if (!group) return false;
   live_instances_ -= group->transforms.size();
@@ -168,7 +168,7 @@ bool InstanceStore::Destroy(Device &device, InstanceGroupHandle handle) {
   return true;
 }
 
-void InstanceStore::RefreshMesh(Device &device, u64 mesh, const f32 mesh_center[3], f32 mesh_radius,
+void InstanceStore::RefreshMesh(gpu::Device &device, u64 mesh, const f32 mesh_center[3], f32 mesh_radius,
                                 bool compatible) {
   size_t invalidated_groups = 0;
   size_t invalidated_instances = 0;
@@ -193,7 +193,7 @@ void InstanceStore::RefreshMesh(Device &device, u64 mesh, const f32 mesh_center[
   }
 }
 
-void InstanceStore::OnFrameSubmitted(Device &device) {
+void InstanceStore::OnFrameSubmitted(gpu::Device &device) {
   for (Group &group : groups_) {
     if (!group.alive) continue;
     if (group.previous_buffer) device.DestroyBufferDeferred(group.previous_buffer);
@@ -202,7 +202,7 @@ void InstanceStore::OnFrameSubmitted(Device &device) {
   }
 }
 
-void InstanceStore::Shutdown(Device &device) {
+void InstanceStore::Shutdown(gpu::Device &device) {
   for (Group &group : groups_) {
     if (group.buffer) device.DestroyBuffer(group.buffer);
     if (group.previous_buffer) device.DestroyBuffer(group.previous_buffer);

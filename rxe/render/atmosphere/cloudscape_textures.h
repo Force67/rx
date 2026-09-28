@@ -23,19 +23,19 @@ class CloudscapeTextures {
   static constexpr u32 kWeatherSize = 512;      // 2D weather map
   static constexpr f32 kWeatherExtent = kCloudscapeWeatherExtent;
 
-  bool Initialize(Device& device);   // create images, pipelines, sampler
-  void Destroy(Device& device);
+  bool Initialize(gpu::Device& device);   // create images, pipelines, sampler
+  void Destroy(gpu::Device& device);
 
   // Appends work to the frame graph: the three one-time noise bakes on the
   // first call, and a weather-map regeneration pass whenever the map-relevant
   // fields of `controls` differ from what was last baked.
   void AddToGraph(RenderGraph& graph, const CloudscapeControls& controls);
 
-  TextureView base_noise_view() const { return base_noise_.view; }    // 128^3 RGBA8 3D
-  TextureView detail_noise_view() const { return detail_noise_.view; }  // 32^3 RGBA8 3D
-  TextureView curl_view() const { return curl_.view; }                // 128^2 RG16F 2D
-  TextureView weather_map_view() const { return weather_map_.view; }  // 512^2 RGBA8 2D
-  SamplerHandle sampler() const { return sampler_; }                  // trilinear, wrap
+  gpu::TextureView base_noise_view() const { return base_noise_.view; }    // 128^3 RGBA8 3D
+  gpu::TextureView detail_noise_view() const { return detail_noise_.view; }  // 32^3 RGBA8 3D
+  gpu::TextureView curl_view() const { return curl_.view; }                // 128^2 RG16F 2D
+  gpu::TextureView weather_map_view() const { return weather_map_.view; }  // 512^2 RGBA8 2D
+  gpu::SamplerHandle sampler() const { return sampler_; }                  // trilinear, wrap
   f32 weather_map_extent() const { return kWeatherExtent; }
   bool ready() const;  // images + pipelines all created
 
@@ -43,18 +43,18 @@ class CloudscapeTextures {
   // True when the map-relevant fields of `controls` differ from the last bake.
   bool MapStateChanged(const CloudscapeControls& controls) const;
 
-  PipelineHandle base_noise_pipeline_;
-  PipelineHandle detail_noise_pipeline_;
-  PipelineHandle curl_pipeline_;
-  PipelineHandle weather_pipeline_;
+  gpu::PipelineHandle base_noise_pipeline_;
+  gpu::PipelineHandle detail_noise_pipeline_;
+  gpu::PipelineHandle curl_pipeline_;
+  gpu::PipelineHandle weather_pipeline_;
 
   // Persistent storage images: bake passes transition them to kGeneral for the
   // write and back to sampled-compute state for every consumer.
-  GpuImage base_noise_;
-  GpuImage detail_noise_;
-  GpuImage curl_;
-  GpuImage weather_map_;
-  SamplerHandle sampler_;
+  gpu::GpuImage base_noise_;
+  gpu::GpuImage detail_noise_;
+  gpu::GpuImage curl_;
+  gpu::GpuImage weather_map_;
+  gpu::SamplerHandle sampler_;
 
   bool noise_baked_ = false;    // the three static volumes bake exactly once
   bool weather_baked_ = false;  // the weather map bakes once, then on change

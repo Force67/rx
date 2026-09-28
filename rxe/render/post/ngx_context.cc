@@ -48,8 +48,8 @@ Context g_context;
 
 }  // namespace
 
-bool Acquire(Device& device) {
-  VulkanHandles h = GetVulkanHandles(device);
+bool Acquire(gpu::Device& device) {
+  gpu::VulkanHandles h = gpu::GetVulkanHandles(device);
   if (g_context.initialized) {
     if (h.device != g_context.vk_device) {
       RX_WARN("ngx: context belongs to another device");

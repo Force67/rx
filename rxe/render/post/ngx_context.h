@@ -10,16 +10,19 @@
 
 typedef struct NVSDK_NGX_Parameter NVSDK_NGX_Parameter;
 
+namespace rx::gpu {
+class Device;
+}  // namespace rx::gpu
+
 namespace rx::render {
 
-class Device;
 
 namespace ngx {
 
 // Initializes NGX for the device's Vulkan instance on first call, bumps a
 // refcount otherwise. Returns false when the backend is not Vulkan or NGX
 // init fails (callers degrade their feature gracefully).
-bool Acquire(Device& device);
+bool Acquire(gpu::Device& device);
 // Drops a reference; the last one shuts NGX down.
 void Release();
 

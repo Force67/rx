@@ -91,13 +91,13 @@ void TrimTransparentBorder(ugui::SvgImage& image) {
 
 Splash::~Splash() { Shutdown(); }
 
-bool Splash::Initialize(Window& window, render::Renderer& renderer, asset::Vfs& vfs,
+bool Splash::Initialize(ui::Window& window, render::Renderer& renderer, asset::Vfs& vfs,
                         f32 seconds) {
   window_ = &window;
   renderer_ = &renderer;
   total_seconds_ = seconds;
 
-  render::VulkanHandles vk = render::GetVulkanHandles(*renderer.device());
+  gpu::VulkanHandles vk = gpu::GetVulkanHandles(*renderer.device());
   if (!vk.device) {
     RX_INFO("splash: renderer is not on the vulkan backend, skipping the plate");
     return false;
@@ -136,8 +136,8 @@ bool Splash::Initialize(Window& window, render::Renderer& renderer, asset::Vfs& 
   info.device = vk.device;
   info.queue_family = vk.graphics_family;
   info.queue = vk.graphics_queue;
-  info.color_format = render::GetVkFormat(renderer.swapchain_format());
-  info.frames_in_flight = render::GetVulkanFramesInFlight(*renderer.device());
+  info.color_format = gpu::GetVkFormat(renderer.swapchain_format());
+  info.frames_in_flight = gpu::GetVulkanFramesInFlight(*renderer.device());
   if (!backend_.Init(info)) {
     RX_WARN("splash: ugui vulkan backend failed to initialize, skipping the plate");
     return false;
@@ -338,9 +338,9 @@ void Splash::Draw(render::FrameView& view) {
   // underneath still records: drop it and the fade dissolves to the bare scene
   // rather than to the application's first screen, which on a game is a world
   // that has not finished streaming.
-  view.hud_draw = [this, under = base::move(view.hud_draw)](render::CommandList& cmd) {
+  view.hud_draw = [this, under = base::move(view.hud_draw)](gpu::CommandList& cmd) {
     if (under) under(cmd);
-    if (draw_data_) backend_.Render(*draw_data_, render::GetVkCommandBuffer(cmd));
+    if (draw_data_) backend_.Render(*draw_data_, gpu::GetVkCommandBuffer(cmd));
   };
   // And drops the debug overlay, which records after hud_draw and would
   // otherwise be the one thing the plate does not cover. It comes back by

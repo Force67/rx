@@ -950,28 +950,28 @@ void DriveDemo::SetBoatCargo(f32 frac) {
           static_cast<i32>(boat_desc_.max_cargo_kg));
 }
 
-void DriveDemo::Update(f32 dt, const InputState& input, const ActionState& actions,
+void DriveDemo::Update(f32 dt, const ui::InputState& input, const ui::ActionState& actions,
                        bool allow_keyboard, bool allow_mouse) {
   if (dt <= 0) return;
-  auto held = [&](Key k) { return allow_keyboard && input.key(k); };
+  auto held = [&](ui::Key k) { return allow_keyboard && input.key(k); };
 
   // Discrete verbs (key edges, render cadence).
   if (allow_keyboard) {
-    if (input.key_pressed(Key::kTab)) {
+    if (input.key_pressed(ui::Key::kTab)) {
       active_ = static_cast<Vehicle>((static_cast<u32>(active_) + 1) %
                                      static_cast<u32>(Vehicle::kCount));
       cam_init_ = false;
     }
-    if (input.key_pressed(Key::kC)) free_cam_ = !free_cam_;
-    if (input.key_pressed(Key::kR)) ResetActive();
+    if (input.key_pressed(ui::Key::kC)) free_cam_ = !free_cam_;
+    if (input.key_pressed(ui::Key::kR)) ResetActive();
     // Number keys are context-sensitive: while the boat is active, 1-5 swap the
     // boat-type profile; otherwise 1-6 swap the car's handling profile (and make
     // the car active). Key L cycles the boat's cargo load when it is active.
-    const Key kNumKeys[6] = {Key::k1, Key::k2, Key::k3, Key::k4, Key::k5, Key::k6};
+    const ui::Key kNumKeys[6] = {ui::Key::k1, ui::Key::k2, ui::Key::k3, ui::Key::k4, ui::Key::k5, ui::Key::k6};
     if (active_ == Vehicle::kBoat) {
       for (u32 i = 0; i < kBoatProfileCount; ++i)
         if (input.key_pressed(kNumKeys[i])) SetBoatProfile(i);
-      if (input.key_pressed(Key::kL)) {
+      if (input.key_pressed(ui::Key::kL)) {
         boat_cargo_step_ = (boat_cargo_step_ + 1) % 4;
         SetBoatCargo(kCargoSteps[boat_cargo_step_]);
       }
@@ -983,21 +983,21 @@ void DriveDemo::Update(f32 dt, const InputState& input, const ActionState& actio
         }
       }
     }
-    if (input.key_pressed(Key::kM) && car_) {
+    if (input.key_pressed(ui::Key::kM) && car_) {
       car_manual_ = !car_manual_;
       ctx_.physics->SetManualTransmission(car_, car_manual_);
     }
     if (car_manual_) {
-      if (input.key_pressed(Key::kLeftShift)) shift_up_pending_ = true;
-      if (input.key_pressed(Key::kLeftCtrl)) shift_down_pending_ = true;
+      if (input.key_pressed(ui::Key::kLeftShift)) shift_up_pending_ = true;
+      if (input.key_pressed(ui::Key::kLeftCtrl)) shift_down_pending_ = true;
     }
-    if (input.key_pressed(Key::kF)) {
+    if (input.key_pressed(ui::Key::kF)) {
       flap_step_ = (flap_step_ + 1) % 3;
       plane_flaps_ = static_cast<f32>(flap_step_) * 0.5f;
     }
     // K is absent from the engine Key enum (append-only C# bridge); J drives the
     // rain-wetness cycle instead.
-    if (input.key_pressed(Key::kJ)) {
+    if (input.key_pressed(ui::Key::kJ)) {
       wetness_step_ = (wetness_step_ + 1) % 3;
       wetness_ = static_cast<f32>(wetness_step_) * 0.5f;
       ctx_.physics->set_surface_wetness(wetness_);
@@ -1011,30 +1011,30 @@ void DriveDemo::Update(f32 dt, const InputState& input, const ActionState& actio
   kite_steer_ = kite_reel_ = 0;
 
   if (active_ == Vehicle::kCar) {
-    if (held(Key::kW)) car_throttle_ = 1.0f;
-    if (held(Key::kS)) {
+    if (held(ui::Key::kW)) car_throttle_ = 1.0f;
+    if (held(ui::Key::kS)) {
       const f32 fwd = car_ ? ctx_.physics->VehicleForwardSpeed(car_) : 0.0f;
       if (fwd > 0.6f)
         car_brake_ = 1.0f;  // brake while rolling forward
       else
         car_throttle_ = -1.0f;  // then reverse
     }
-    car_steer_ = (held(Key::kD) ? 1.0f : 0.0f) - (held(Key::kA) ? 1.0f : 0.0f);
-    if (held(Key::kSpace)) car_handbrake_ = 1.0f;
+    car_steer_ = (held(ui::Key::kD) ? 1.0f : 0.0f) - (held(ui::Key::kA) ? 1.0f : 0.0f);
+    if (held(ui::Key::kSpace)) car_handbrake_ = 1.0f;
   } else if (active_ == Vehicle::kBoat) {
-    boat_throttle_ = (held(Key::kW) ? 1.0f : 0.0f) - (held(Key::kS) ? 1.0f : 0.0f);
-    boat_steer_ = (held(Key::kD) ? 1.0f : 0.0f) - (held(Key::kA) ? 1.0f : 0.0f);
+    boat_throttle_ = (held(ui::Key::kW) ? 1.0f : 0.0f) - (held(ui::Key::kS) ? 1.0f : 0.0f);
+    boat_steer_ = (held(ui::Key::kD) ? 1.0f : 0.0f) - (held(ui::Key::kA) ? 1.0f : 0.0f);
   } else if (active_ == Vehicle::kPlane) {
-    if (held(Key::kW)) plane_throttle_ += dt * 0.5f;
-    if (held(Key::kS)) plane_throttle_ -= dt * 0.5f;
+    if (held(ui::Key::kW)) plane_throttle_ += dt * 0.5f;
+    if (held(ui::Key::kS)) plane_throttle_ -= dt * 0.5f;
     plane_throttle_ = rx::Clamp(plane_throttle_, 0.0f, 1.0f);
-    plane_pitch_ = (held(Key::kArrowUp) ? 1.0f : 0.0f) - (held(Key::kArrowDown) ? 1.0f : 0.0f);
-    plane_roll_ = (held(Key::kArrowRight) ? 1.0f : 0.0f) - (held(Key::kArrowLeft) ? 1.0f : 0.0f);
-    plane_rudder_ = (held(Key::kD) ? 1.0f : 0.0f) - (held(Key::kA) ? 1.0f : 0.0f);
-    if (held(Key::kSpace)) plane_brakes_ = 1.0f;
+    plane_pitch_ = (held(ui::Key::kArrowUp) ? 1.0f : 0.0f) - (held(ui::Key::kArrowDown) ? 1.0f : 0.0f);
+    plane_roll_ = (held(ui::Key::kArrowRight) ? 1.0f : 0.0f) - (held(ui::Key::kArrowLeft) ? 1.0f : 0.0f);
+    plane_rudder_ = (held(ui::Key::kD) ? 1.0f : 0.0f) - (held(ui::Key::kA) ? 1.0f : 0.0f);
+    if (held(ui::Key::kSpace)) plane_brakes_ = 1.0f;
   } else if (active_ == Vehicle::kKite) {
-    kite_steer_ = (held(Key::kD) ? 1.0f : 0.0f) - (held(Key::kA) ? 1.0f : 0.0f);
-    kite_reel_ = (held(Key::kW) ? 1.0f : 0.0f) - (held(Key::kS) ? 1.0f : 0.0f);  // out / in
+    kite_steer_ = (held(ui::Key::kD) ? 1.0f : 0.0f) - (held(ui::Key::kA) ? 1.0f : 0.0f);
+    kite_reel_ = (held(ui::Key::kW) ? 1.0f : 0.0f) - (held(ui::Key::kS) ? 1.0f : 0.0f);  // out / in
   }
 
   if (AutoThrottle) {
@@ -1105,7 +1105,7 @@ void DriveDemo::Update(f32 dt, const InputState& input, const ActionState& actio
   }
 }
 
-void DriveDemo::UpdateChaseCamera(f32 dt, const InputState& input, const ActionState& actions,
+void DriveDemo::UpdateChaseCamera(f32 dt, const ui::InputState& input, const ui::ActionState& actions,
                                   bool allow_keyboard, bool allow_mouse) {
   if (free_cam_) {
     ctx_.camera->Update(input, FlyCameraIntent(actions), allow_mouse, allow_keyboard, dt);

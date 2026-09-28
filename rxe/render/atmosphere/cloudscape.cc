@@ -137,28 +137,28 @@ bool DensityFieldDiscontinuous(const CloudscapeControls &previous,
 
 } // namespace
 
-bool Cloudscape::Initialize(Device &device) {
+bool Cloudscape::Initialize(gpu::Device &device) {
   device_ = &device;
   if (!textures_.Initialize(device)) {
     device_ = nullptr;
     return false;
   }
-  screen_sampler_ = device.GetSampler({.min_filter = Filter::kLinear,
-                                       .mag_filter = Filter::kLinear,
-                                       .mip_filter = Filter::kLinear,
-                                       .address_u = AddressMode::kClampToEdge,
-                                       .address_v = AddressMode::kClampToEdge,
-                                       .address_w = AddressMode::kClampToEdge});
+  screen_sampler_ = device.GetSampler({.min_filter = gpu::Filter::kLinear,
+                                       .mag_filter = gpu::Filter::kLinear,
+                                       .mip_filter = gpu::Filter::kLinear,
+                                       .address_u = gpu::AddressMode::kClampToEdge,
+                                       .address_v = gpu::AddressMode::kClampToEdge,
+                                       .address_w = gpu::AddressMode::kClampToEdge});
   if (!screen_sampler_) {
     RX_ERROR("cloudscape screen sampler creation failed");
     Destroy(device);
     return false;
   }
   for (u32 i = 0; i < kFramesInFlight; ++i) {
-    march_params_[i] = device.CreateBuffer(sizeof(MarchPush), kBufferUsageUniform, true);
-    shadow_params_[i] = device.CreateBuffer(sizeof(ShadowPush), kBufferUsageUniform, true);
-    haze_params_[i] = device.CreateBuffer(sizeof(HazePush), kBufferUsageUniform, true);
-    funnel_params_[i] = device.CreateBuffer(sizeof(FunnelPush), kBufferUsageUniform, true);
+    march_params_[i] = device.CreateBuffer(sizeof(MarchPush), gpu::kBufferUsageUniform, true);
+    shadow_params_[i] = device.CreateBuffer(sizeof(ShadowPush), gpu::kBufferUsageUniform, true);
+    haze_params_[i] = device.CreateBuffer(sizeof(HazePush), gpu::kBufferUsageUniform, true);
+    funnel_params_[i] = device.CreateBuffer(sizeof(FunnelPush), gpu::kBufferUsageUniform, true);
     if (!march_params_[i].mapped || !shadow_params_[i].mapped || !haze_params_[i].mapped ||
         !funnel_params_[i].mapped) {
       RX_ERROR("cloudscape parameter buffer creation failed");
@@ -168,55 +168,55 @@ bool Cloudscape::Initialize(Device &device) {
   }
   march_pipeline_ = device.CreateComputePipeline({
       .shader = RX_SHADER(k_cloudscape_march_cs_hlsl),
-      .sets = {{.slots = {{0, BindingType::kStorageImage},
-                          {1, BindingType::kStorageImage},
-                          {2, BindingType::kSampledImage},
-                          {3, BindingType::kSampledImage},
-                          {4, BindingType::kSampledImage},
-                          {5, BindingType::kCombinedTextureSampler},
-                          {6, BindingType::kCombinedTextureSampler},
-                          {7, BindingType::kCombinedTextureSampler},
-                          {8, BindingType::kCombinedTextureSampler},
-                          {9, BindingType::kUniformBuffer}}}},
+      .sets = {{.slots = {{0, gpu::BindingType::kStorageImage},
+                          {1, gpu::BindingType::kStorageImage},
+                          {2, gpu::BindingType::kSampledImage},
+                          {3, gpu::BindingType::kSampledImage},
+                          {4, gpu::BindingType::kSampledImage},
+                          {5, gpu::BindingType::kCombinedTextureSampler},
+                          {6, gpu::BindingType::kCombinedTextureSampler},
+                          {7, gpu::BindingType::kCombinedTextureSampler},
+                          {8, gpu::BindingType::kCombinedTextureSampler},
+                          {9, gpu::BindingType::kUniformBuffer}}}},
       .debug_name = "cloudscape_march",
   });
   apply_pipeline_ = device.CreateComputePipeline({
       .shader = RX_SHADER(k_cloudscape_apply_cs_hlsl),
-      .sets = {{.slots = {{0, BindingType::kStorageImage},
-                          {1, BindingType::kSampledImage},
-                          {2, BindingType::kCombinedTextureSampler},
-                          {3, BindingType::kSampledImage},
-                          {4, BindingType::kSampledImage}}}},
-      .push_constant_size = PushSize<ApplyPush>(),
+      .sets = {{.slots = {{0, gpu::BindingType::kStorageImage},
+                          {1, gpu::BindingType::kSampledImage},
+                          {2, gpu::BindingType::kCombinedTextureSampler},
+                          {3, gpu::BindingType::kSampledImage},
+                          {4, gpu::BindingType::kSampledImage}}}},
+      .push_constant_size = gpu::PushSize<ApplyPush>(),
       .debug_name = "cloudscape_apply",
   });
   haze_pipeline_ = device.CreateComputePipeline({
       .shader = RX_SHADER(k_cloudscape_haze_cs_hlsl),
-      .sets = {{.slots = {{0, BindingType::kStorageImage},
-                          {1, BindingType::kSampledImage},
-                          {2, BindingType::kSampledImage},
-                          {3, BindingType::kCombinedTextureSampler},
-                          {4, BindingType::kCombinedTextureSampler},
-                          {5, BindingType::kCombinedTextureSampler},
-                          {6, BindingType::kUniformBuffer}}}},
+      .sets = {{.slots = {{0, gpu::BindingType::kStorageImage},
+                          {1, gpu::BindingType::kSampledImage},
+                          {2, gpu::BindingType::kSampledImage},
+                          {3, gpu::BindingType::kCombinedTextureSampler},
+                          {4, gpu::BindingType::kCombinedTextureSampler},
+                          {5, gpu::BindingType::kCombinedTextureSampler},
+                          {6, gpu::BindingType::kUniformBuffer}}}},
       .debug_name = "cloudscape_haze",
   });
   funnel_pipeline_ = device.CreateComputePipeline({
       .shader = RX_SHADER(k_cloudscape_funnel_cs_hlsl),
-      .sets = {{.slots = {{0, BindingType::kStorageImage},
-                          {1, BindingType::kSampledImage},
-                          {2, BindingType::kSampledImage},
-                          {3, BindingType::kCombinedTextureSampler},
-                          {4, BindingType::kUniformBuffer}}}},
+      .sets = {{.slots = {{0, gpu::BindingType::kStorageImage},
+                          {1, gpu::BindingType::kSampledImage},
+                          {2, gpu::BindingType::kSampledImage},
+                          {3, gpu::BindingType::kCombinedTextureSampler},
+                          {4, gpu::BindingType::kUniformBuffer}}}},
       .debug_name = "cloudscape_funnel",
   });
   shadow_pipeline_ = device.CreateComputePipeline({
       .shader = RX_SHADER(k_cloudscape_shadow_cs_hlsl),
-      .sets = {{.slots = {{0, BindingType::kStorageImage},
-                          {1, BindingType::kSampledImage},
-                          {2, BindingType::kCombinedTextureSampler},
-                          {3, BindingType::kCombinedTextureSampler},
-                          {4, BindingType::kUniformBuffer}}}},
+      .sets = {{.slots = {{0, gpu::BindingType::kStorageImage},
+                          {1, gpu::BindingType::kSampledImage},
+                          {2, gpu::BindingType::kCombinedTextureSampler},
+                          {3, gpu::BindingType::kCombinedTextureSampler},
+                          {4, gpu::BindingType::kUniformBuffer}}}},
       .debug_name = "cloudscape_shadow",
   });
   if (!march_pipeline_ || !apply_pipeline_ || !shadow_pipeline_ ||
@@ -231,12 +231,12 @@ bool Cloudscape::Initialize(Device &device) {
 ResourceHandle Cloudscape::AddFunnelToGraph(RenderGraph &graph,
                                             ResourceHandle color,
                                             ResourceHandle depth,
-                                            Extent2D extent,
+                                            gpu::Extent2D extent,
                                             const Frame &frame) {
   if (!textures_.ready() || frame.controls.tornado_strength <= 0.01f)
     return color;
   ResourceHandle out = graph.CreateTexture({.name = "cloudscape_funnel",
-                                            .format = Format::kRGBA16Float,
+                                            .format = gpu::Format::kRGBA16Float,
                                             .width = extent.width,
                                             .height = extent.height});
   FunnelPush push{};
@@ -272,11 +272,11 @@ ResourceHandle Cloudscape::AddFunnelToGraph(RenderGraph &graph,
       [this, out, color, depth, extent, param_slot](PassContext &ctx) {
         ctx.cmd->BindPipeline(funnel_pipeline_);
         ctx.cmd->BindTransient(
-            0, {Bind::Storage(0, ctx.graph->image(out)),
-                Bind::Sampled(1, ctx.graph->image(color)),
-                Bind::Sampled(2, ctx.graph->image(depth)),
-                Bind::Combined(3, textures_.base_noise_view(), textures_.sampler()),
-                Bind::Uniform(4, funnel_params_[param_slot], 0, sizeof(FunnelPush))});
+            0, {gpu::Bind::Storage(0, ctx.graph->image(out)),
+                gpu::Bind::Sampled(1, ctx.graph->image(color)),
+                gpu::Bind::Sampled(2, ctx.graph->image(depth)),
+                gpu::Bind::Combined(3, textures_.base_noise_view(), textures_.sampler()),
+                gpu::Bind::Uniform(4, funnel_params_[param_slot], 0, sizeof(FunnelPush))});
         ctx.cmd->Dispatch2D(extent);
       });
   return out;
@@ -284,12 +284,12 @@ ResourceHandle Cloudscape::AddFunnelToGraph(RenderGraph &graph,
 
 ResourceHandle Cloudscape::AddHazeToGraph(RenderGraph &graph,
                                           ResourceHandle color,
-                                          ResourceHandle depth, Extent2D extent,
+                                          ResourceHandle depth, gpu::Extent2D extent,
                                           const Frame &frame) {
   if (!textures_.ready() || frame.controls.fog_density <= 0.003f)
     return color;
   ResourceHandle out = graph.CreateTexture({.name = "cloudscape_haze",
-                                            .format = Format::kRGBA16Float,
+                                            .format = gpu::Format::kRGBA16Float,
                                             .width = extent.width,
                                             .height = extent.height});
   HazePush push{};
@@ -336,19 +336,19 @@ ResourceHandle Cloudscape::AddHazeToGraph(RenderGraph &graph,
       [this, out, color, depth, extent, frame, param_slot](PassContext &ctx) {
         ctx.cmd->BindPipeline(haze_pipeline_);
         ctx.cmd->BindTransient(
-            0, {Bind::Storage(0, ctx.graph->image(out)),
-                Bind::Sampled(1, ctx.graph->image(color)),
-                Bind::Sampled(2, ctx.graph->image(depth)),
-                Bind::Combined(3, textures_.base_noise_view(), textures_.sampler()),
-                Bind::Combined(4, textures_.weather_map_view(), textures_.sampler()),
-                Bind::Combined(5, frame.transmittance_lut, frame.lut_sampler),
-                Bind::Uniform(6, haze_params_[param_slot], 0, sizeof(HazePush))});
+            0, {gpu::Bind::Storage(0, ctx.graph->image(out)),
+                gpu::Bind::Sampled(1, ctx.graph->image(color)),
+                gpu::Bind::Sampled(2, ctx.graph->image(depth)),
+                gpu::Bind::Combined(3, textures_.base_noise_view(), textures_.sampler()),
+                gpu::Bind::Combined(4, textures_.weather_map_view(), textures_.sampler()),
+                gpu::Bind::Combined(5, frame.transmittance_lut, frame.lut_sampler),
+                gpu::Bind::Uniform(6, haze_params_[param_slot], 0, sizeof(HazePush))});
         ctx.cmd->Dispatch2D(extent);
       });
   return out;
 }
 
-void Cloudscape::Destroy(Device &device) {
+void Cloudscape::Destroy(gpu::Device &device) {
   ReleaseBuffers(device);
   device.DestroyPipeline(march_pipeline_);
   device.DestroyPipeline(apply_pipeline_);
@@ -361,7 +361,7 @@ void Cloudscape::Destroy(Device &device) {
   haze_pipeline_ = {};
   funnel_pipeline_ = {};
   for (u32 i = 0; i < kFramesInFlight; ++i) {
-    for (GpuBuffer *buffer : {&march_params_[i], &shadow_params_[i], &haze_params_[i],
+    for (gpu::GpuBuffer *buffer : {&march_params_[i], &shadow_params_[i], &haze_params_[i],
                               &funnel_params_[i]}) {
       if (*buffer)
         device.DestroyBuffer(*buffer);
@@ -373,10 +373,10 @@ void Cloudscape::Destroy(Device &device) {
   device_ = nullptr;
 }
 
-void Cloudscape::ReleaseHistory(Device &device) { ReleaseBuffers(device); }
+void Cloudscape::ReleaseHistory(gpu::Device &device) { ReleaseBuffers(device); }
 
 void Cloudscape::AddShadowToGraph(RenderGraph &graph, ResourceHandle sun_shadow,
-                                  ResourceHandle depth, Extent2D extent,
+                                  ResourceHandle depth, gpu::Extent2D extent,
                                   const Frame &frame, f32 strength) {
   textures_.AddToGraph(graph, frame.controls);
   if (!textures_.ready())
@@ -415,16 +415,16 @@ void Cloudscape::AddShadowToGraph(RenderGraph &graph, ResourceHandle sun_shadow,
       [this, sun_shadow, depth, extent, param_slot](PassContext &ctx) {
         ctx.cmd->BindPipeline(shadow_pipeline_);
         ctx.cmd->BindTransient(
-            0, {Bind::Storage(0, ctx.graph->image(sun_shadow)),
-                Bind::Sampled(1, ctx.graph->image(depth)),
-                Bind::Combined(2, textures_.base_noise_view(), textures_.sampler()),
-                Bind::Combined(3, textures_.weather_map_view(), textures_.sampler()),
-                Bind::Uniform(4, shadow_params_[param_slot], 0, sizeof(ShadowPush))});
+            0, {gpu::Bind::Storage(0, ctx.graph->image(sun_shadow)),
+                gpu::Bind::Sampled(1, ctx.graph->image(depth)),
+                gpu::Bind::Combined(2, textures_.base_noise_view(), textures_.sampler()),
+                gpu::Bind::Combined(3, textures_.weather_map_view(), textures_.sampler()),
+                gpu::Bind::Uniform(4, shadow_params_[param_slot], 0, sizeof(ShadowPush))});
         ctx.cmd->Dispatch2D(extent);
       });
 }
 
-void Cloudscape::ReleaseBuffers(Device &device) {
+void Cloudscape::ReleaseBuffers(gpu::Device &device) {
   for (int i = 0; i < 2; ++i) {
     if (cloud_[i])
       device.DestroyImageDeferred(cloud_[i]);
@@ -432,8 +432,8 @@ void Cloudscape::ReleaseBuffers(Device &device) {
       device.DestroyImageDeferred(dist_[i]);
     cloud_[i] = {};
     dist_[i] = {};
-    cloud_state_[i] = ResourceState::kUndefined;
-    dist_state_[i] = ResourceState::kUndefined;
+    cloud_state_[i] = gpu::ResourceState::kUndefined;
+    dist_state_[i] = gpu::ResourceState::kUndefined;
   }
   half_extent_ = {};
   history_valid_ = false;
@@ -441,15 +441,15 @@ void Cloudscape::ReleaseBuffers(Device &device) {
   has_last_controls_ = false;
 }
 
-void Cloudscape::EnsureBuffers(Device &device, Extent2D half) {
+void Cloudscape::EnsureBuffers(gpu::Device &device, gpu::Extent2D half) {
   if (half.width == half_extent_.width && half.height == half_extent_.height &&
       cloud_[0])
     return;
   ReleaseBuffers(device);
-  TextureUsageFlags usage = kTextureUsageSampled | kTextureUsageStorage;
+  gpu::TextureUsageFlags usage = gpu::kTextureUsageSampled | gpu::kTextureUsageStorage;
   for (int i = 0; i < 2; ++i) {
-    cloud_[i] = device.CreateImage2D(Format::kRGBA16Float, half, usage);
-    dist_[i] = device.CreateImage2D(Format::kR32Float, half, usage);
+    cloud_[i] = device.CreateImage2D(gpu::Format::kRGBA16Float, half, usage);
+    dist_[i] = device.CreateImage2D(gpu::Format::kR32Float, half, usage);
   }
   if (!cloud_[0] || !cloud_[1] || !dist_[0] || !dist_[1]) {
     RX_ERROR("cloudscape history buffer creation failed");
@@ -460,16 +460,16 @@ void Cloudscape::EnsureBuffers(Device &device, Extent2D half) {
 }
 
 ResourceHandle Cloudscape::AddToGraph(RenderGraph &graph, ResourceHandle color,
-                                      ResourceHandle depth, Extent2D extent,
+                                      ResourceHandle depth, gpu::Extent2D extent,
                                       const Frame &frame) {
   if (!device_)
     return color;
-  Device *device = device_;
+  gpu::Device *device = device_;
   textures_.AddToGraph(graph, frame.controls);
   if (!textures_.ready())
     return color;
 
-  Extent2D half{extent.width > 1 ? extent.width / 2 : 1,
+  gpu::Extent2D half{extent.width > 1 ? extent.width / 2 : 1,
                 extent.height > 1 ? extent.height / 2 : 1};
   EnsureBuffers(*device, half);
   if (!cloud_[0])
@@ -554,21 +554,21 @@ ResourceHandle Cloudscape::AddToGraph(RenderGraph &graph, ResourceHandle color,
        param_slot](PassContext &ctx) {
         ctx.cmd->BindPipeline(march_pipeline_);
         ctx.cmd->BindTransient(
-            0, {Bind::Storage(0, ctx.graph->image(cur_cloud)),
-                Bind::Storage(1, ctx.graph->image(cur_dist)),
-                Bind::Sampled(2, ctx.graph->image(prv_cloud)),
-                Bind::Sampled(3, ctx.graph->image(prv_dist)),
-                Bind::Sampled(4, ctx.graph->image(depth)),
-                Bind::Combined(5, textures_.base_noise_view(), textures_.sampler()),
-                Bind::Combined(6, textures_.detail_noise_view(), textures_.sampler()),
-                Bind::Combined(7, textures_.curl_view(), textures_.sampler()),
-                Bind::Combined(8, textures_.weather_map_view(), textures_.sampler()),
-                Bind::Uniform(9, march_params_[param_slot], 0, sizeof(MarchPush))});
+            0, {gpu::Bind::Storage(0, ctx.graph->image(cur_cloud)),
+                gpu::Bind::Storage(1, ctx.graph->image(cur_dist)),
+                gpu::Bind::Sampled(2, ctx.graph->image(prv_cloud)),
+                gpu::Bind::Sampled(3, ctx.graph->image(prv_dist)),
+                gpu::Bind::Sampled(4, ctx.graph->image(depth)),
+                gpu::Bind::Combined(5, textures_.base_noise_view(), textures_.sampler()),
+                gpu::Bind::Combined(6, textures_.detail_noise_view(), textures_.sampler()),
+                gpu::Bind::Combined(7, textures_.curl_view(), textures_.sampler()),
+                gpu::Bind::Combined(8, textures_.weather_map_view(), textures_.sampler()),
+                gpu::Bind::Uniform(9, march_params_[param_slot], 0, sizeof(MarchPush))});
         ctx.cmd->Dispatch2D(half);
       });
 
   ResourceHandle out = graph.CreateTexture({.name = "cloudscape",
-                                            .format = Format::kRGBA16Float,
+                                            .format = gpu::Format::kRGBA16Float,
                                             .width = extent.width,
                                             .height = extent.height});
   graph.AddPass(
@@ -601,12 +601,12 @@ ResourceHandle Cloudscape::AddToGraph(RenderGraph &graph, ResourceHandle color,
         push.jitter[1] = frame.jitter[1];
         ctx.cmd->BindPipeline(apply_pipeline_);
         ctx.cmd->BindTransient(
-            0, {Bind::Storage(0, ctx.graph->image(out)),
-                 Bind::Sampled(1, ctx.graph->image(color)),
-                 Bind::Combined(2, ctx.graph->image(cur_cloud).view,
+            0, {gpu::Bind::Storage(0, ctx.graph->image(out)),
+                 gpu::Bind::Sampled(1, ctx.graph->image(color)),
+                 gpu::Bind::Combined(2, ctx.graph->image(cur_cloud).view,
                                 screen_sampler_),
-                 Bind::Sampled(3, ctx.graph->image(cur_dist)),
-                 Bind::Sampled(4, ctx.graph->image(depth))});
+                 gpu::Bind::Sampled(3, ctx.graph->image(cur_dist)),
+                 gpu::Bind::Sampled(4, ctx.graph->image(depth))});
         ctx.cmd->Push(push);
         ctx.cmd->Dispatch2D(extent);
       });

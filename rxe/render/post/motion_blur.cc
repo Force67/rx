@@ -31,50 +31,50 @@ struct BlurPush {
 
 }  // namespace
 
-bool MotionBlurPass::Initialize(Device& device) {
+bool MotionBlurPass::Initialize(gpu::Device& device) {
   tilemax_pipeline_ = device.CreateComputePipeline({
       .shader = RX_SHADER(k_motion_tilemax_cs_hlsl),
-      .sets = {{.slots = {{0, BindingType::kStorageImage},
-                          {1, BindingType::kSampledImage}}}},
-      .push_constant_size = PushSize<TileMaxPush>(),
+      .sets = {{.slots = {{0, gpu::BindingType::kStorageImage},
+                          {1, gpu::BindingType::kSampledImage}}}},
+      .push_constant_size = gpu::PushSize<TileMaxPush>(),
       .debug_name = "motion_tilemax",
   });
   blur_pipeline_ = device.CreateComputePipeline({
       .shader = RX_SHADER(k_motion_blur_cs_hlsl),
-      .sets = {{.slots = {{0, BindingType::kStorageImage},
-                          {1, BindingType::kCombinedTextureSampler},
-                          {2, BindingType::kCombinedTextureSampler},
-                          {3, BindingType::kSampledImage}}}},
-      .push_constant_size = PushSize<BlurPush>(),
+      .sets = {{.slots = {{0, gpu::BindingType::kStorageImage},
+                          {1, gpu::BindingType::kCombinedTextureSampler},
+                          {2, gpu::BindingType::kCombinedTextureSampler},
+                          {3, gpu::BindingType::kSampledImage}}}},
+      .push_constant_size = gpu::PushSize<BlurPush>(),
       .debug_name = "motion_blur",
   });
   if (!tilemax_pipeline_ || !blur_pipeline_) {
     RX_ERROR("motion blur pipeline creation failed");
     return false;
   }
-  sampler_ = device.GetSampler({.address_u = AddressMode::kClampToEdge,
-                                .address_v = AddressMode::kClampToEdge});
+  sampler_ = device.GetSampler({.address_u = gpu::AddressMode::kClampToEdge,
+                                .address_v = gpu::AddressMode::kClampToEdge});
   return true;
 }
 
-void MotionBlurPass::Destroy(Device& device) {
-  for (PipelineHandle* p : {&tilemax_pipeline_, &blur_pipeline_}) {
+void MotionBlurPass::Destroy(gpu::Device& device) {
+  for (gpu::PipelineHandle* p : {&tilemax_pipeline_, &blur_pipeline_}) {
     if (*p) device.DestroyPipeline(*p);
     *p = {};
   }
 }
 
 ResourceHandle MotionBlurPass::AddToGraph(RenderGraph& graph, ResourceHandle color,
-                                          ResourceHandle motion, Extent2D extent,
+                                          ResourceHandle motion, gpu::Extent2D extent,
                                           const Frame& frame) {
   u32 tiles_x = (extent.width + kTileSize - 1) / kTileSize;
   u32 tiles_y = (extent.height + kTileSize - 1) / kTileSize;
   ResourceHandle tiles = graph.CreateTexture({.name = "mb_tilemax",
-                                              .format = Format::kRG16Float,
+                                              .format = gpu::Format::kRG16Float,
                                               .width = tiles_x,
                                               .height = tiles_y});
   ResourceHandle out = graph.CreateTexture({.name = "mb_color",
-                                            .format = Format::kRGBA16Float,
+                                            .format = gpu::Format::kRGBA16Float,
                                             .width = extent.width,
                                             .height = extent.height});
 
@@ -90,7 +90,7 @@ ResourceHandle MotionBlurPass::AddToGraph(RenderGraph& graph, ResourceHandle col
         b.Read(motion, ResourceUsage::kSampledCompute);
       },
       [this, tiles, motion, extent, tiles_x, tiles_y, max_blur_uv, debug_uv, frame](PassContext& ctx) {
-        const GpuImage& mv = ctx.graph->image(motion);
+        const gpu::GpuImage& mv = ctx.graph->image(motion);
         TileMaxPush p{};
         p.tile_count[0] = tiles_x;
         p.tile_count[1] = tiles_y;
@@ -102,8 +102,8 @@ ResourceHandle MotionBlurPass::AddToGraph(RenderGraph& graph, ResourceHandle col
         p.debug_vel[0] = debug_uv[0];
         p.debug_vel[1] = debug_uv[1];
         ctx.cmd->BindPipeline(tilemax_pipeline_);
-        ctx.cmd->BindTransient(0, {Bind::Storage(0, ctx.graph->image(tiles)),
-                                   Bind::Sampled(1, mv)});
+        ctx.cmd->BindTransient(0, {gpu::Bind::Storage(0, ctx.graph->image(tiles)),
+                                   gpu::Bind::Sampled(1, mv)});
         ctx.cmd->Push(p);
         ctx.cmd->Dispatch2D({tiles_x, tiles_y});
       });
@@ -133,10 +133,10 @@ ResourceHandle MotionBlurPass::AddToGraph(RenderGraph& graph, ResourceHandle col
         p.debug_vel[1] = debug_uv[1];
         ctx.cmd->BindPipeline(blur_pipeline_);
         ctx.cmd->BindTransient(
-            0, {Bind::Storage(0, ctx.graph->image(out)),
-                Bind::Combined(1, ctx.graph->image(color).view, sampler_),
-                Bind::Combined(2, ctx.graph->image(motion).view, sampler_),
-                Bind::Sampled(3, ctx.graph->image(tiles))});
+            0, {gpu::Bind::Storage(0, ctx.graph->image(out)),
+                gpu::Bind::Combined(1, ctx.graph->image(color).view, sampler_),
+                gpu::Bind::Combined(2, ctx.graph->image(motion).view, sampler_),
+                gpu::Bind::Sampled(3, ctx.graph->image(tiles))});
         ctx.cmd->Push(p);
         ctx.cmd->Dispatch2D(extent);
       });

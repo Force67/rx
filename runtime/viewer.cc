@@ -936,7 +936,7 @@ void Viewer::DriveSunFromClock() {
   const f32 hour = clock_->hour();
   if (last_sky_hour_ >= -100.0f && ::fabsf(hour - last_sky_hour_) < 0.02f) return;
   last_sky_hour_ = hour;
-  const SkyLighting sky = ComputeSkyLighting(hour);
+  const app::SkyLighting sky = app::ComputeSkyLighting(hour);
   auto& s = renderer_->settings();
   s.sun_direction = sky.sun_direction;
   s.sun_intensity = sky.sun_intensity;

@@ -5,9 +5,12 @@
 #include "rxe/render/core/render_graph.h"
 #include "rxe/gpu/rhi/resources.h"
 
+namespace rx::gpu {
+class Device;
+}  // namespace rx::gpu
+
 namespace rx::render {
 
-class Device;
 
 enum class AntiAliasingMode : u8 {
   kNone,
@@ -39,9 +42,9 @@ class TaaPass {
     u32 jitter_sample_count = 8;
   };
 
-  bool Initialize(Device& device);
-  void Resize(Device& device, Extent2D extent);
-  void Destroy(Device& device);
+  bool Initialize(gpu::Device& device);
+  void Resize(gpu::Device& device, gpu::Extent2D extent);
+  void Destroy(gpu::Device& device);
 
   void Configure(const Settings& settings) { settings_ = settings; }
   void Reset() { history_valid_ = false; }
@@ -56,11 +59,11 @@ class TaaPass {
 
  private:
   Settings settings_;
-  SamplerHandle sampler_;
-  PipelineHandle pipeline_;
-  GpuImage history_[2];
-  ResourceState history_states_[2] = {ResourceState::kUndefined, ResourceState::kUndefined};
-  Extent2D extent_{};
+  gpu::SamplerHandle sampler_;
+  gpu::PipelineHandle pipeline_;
+  gpu::GpuImage history_[2];
+  gpu::ResourceState history_states_[2] = {gpu::ResourceState::kUndefined, gpu::ResourceState::kUndefined};
+  gpu::Extent2D extent_{};
   bool history_valid_ = false;
 };
 

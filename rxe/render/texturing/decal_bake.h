@@ -75,9 +75,9 @@ class DecalBaker {
   // and then rides the animation.
   struct Target {
     u32 receiver = 0;
-    const GpuMesh* mesh = nullptr;
+    const gpu::GpuMesh* mesh = nullptr;
     Mat4 transform = Mat4::Identity();
-    const GpuBuffer* bones = nullptr;  // frame bone palette, null = static
+    const gpu::GpuBuffer* bones = nullptr;  // frame bone palette, null = static
     u32 skin_offset = 0;
   };
 
@@ -98,9 +98,9 @@ class DecalBaker {
   // no-desc Initialize consults them: code that sizes the layers explicitly
   // means it.
   static Desc EnvDesc();
-  bool Initialize(Device& device, const Desc& desc);
-  bool Initialize(Device& device) { return Initialize(device, EnvDesc()); }
-  void Destroy(Device& device);
+  bool Initialize(gpu::Device& device, const Desc& desc);
+  bool Initialize(gpu::Device& device) { return Initialize(device, EnvDesc()); }
+  void Destroy(gpu::Device& device);
   bool available() const { return static_cast<bool>(stamp_pipeline_); }
 
   u32 AcquireReceiver();
@@ -126,19 +126,19 @@ class DecalBaker {
   // uv_rect indexes; either may be null, and a built-in white / flat page
   // stands in.
   void AddToGraph(RenderGraph& graph, base::Span<const Target> targets, u32 frame_slot,
-                  u64 frame_index, TextureView source_albedo, TextureView source_normal);
+                  u64 frame_index, gpu::TextureView source_albedo, gpu::TextureView source_normal);
 
-  TextureView albedo_view() const { return albedo_.view; }
-  TextureView fx_view() const { return fx_.view; }
+  gpu::TextureView albedo_view() const { return albedo_.view; }
+  gpu::TextureView fx_view() const { return fx_.view; }
   // Per-tile uv scale+bias (float4 each), indexed by tile. The forward pass
   // needs it to reproduce the mapping the bake used.
-  const GpuBuffer& tile_uv_buffer(u32 frame_slot) const {
+  const gpu::GpuBuffer& tile_uv_buffer(u32 frame_slot) const {
     return tile_uv_xform_[frame_slot];
   }
   // The backing atlas, for readback and debug views. Left in
   // kShaderReadFragment by every bake.
-  const GpuImage& albedo_atlas() const { return albedo_; }
-  const GpuImage& fx_atlas() const { return fx_; }
+  const gpu::GpuImage& albedo_atlas() const { return albedo_; }
+  const gpu::GpuImage& fx_atlas() const { return fx_; }
   // FrameGlobals::decal_layer: x tiles per atlas row, y tile edge in atlas uv.
   f32 tiles_per_row() const { return static_cast<f32>(tiles_per_row_); }
   f32 tile_uv() const { return tile_uv_; }
@@ -187,8 +187,8 @@ class DecalBaker {
 
   static constexpr u32 kNoTile = 0xffffffffu;
 
-  bool CreateAtlases(Device& device);
-  bool CreatePipelines(Device& device);
+  bool CreateAtlases(gpu::Device& device);
+  bool CreatePipelines(gpu::Device& device);
   // Picks a free tile, or evicts the coldest receiver that is not drawing this
   // frame. kNoTile when every tile is in use by a live target.
   u32 AcquireTile(u32 receiver, u64 frame_index);
@@ -201,34 +201,34 @@ class DecalBaker {
   u32 mip_count_ = 1;
   f32 tile_uv_ = 0;
 
-  GpuImage albedo_;  // RGBA8 premultiplied colour + coverage
-  GpuImage fx_;      // RGBA8 normal xy, roughness multiplier, coverage
-  GpuImage chart_;   // R8 UV-chart mask, drives the gutter fill
+  gpu::GpuImage albedo_;  // RGBA8 premultiplied colour + coverage
+  gpu::GpuImage fx_;      // RGBA8 normal xy, roughness multiplier, coverage
+  gpu::GpuImage chart_;   // R8 UV-chart mask, drives the gutter fill
   // Mip-0 views: the whole-image views span the chain, which is legal neither
   // as a render target nor as a storage image.
-  TextureView albedo_mip0_;
-  TextureView fx_mip0_;
+  gpu::TextureView albedo_mip0_;
+  gpu::TextureView fx_mip0_;
   // Neutral tile contents, uploaded to clear a tile before a repaint. Filled
   // once at startup: transparent albedo, flat/unity fx, empty chart.
-  GpuBuffer clear_staging_;
+  gpu::GpuBuffer clear_staging_;
   u64 clear_albedo_offset_ = 0;
   u64 clear_fx_offset_ = 0;
   u64 clear_chart_offset_ = 0;
-  GpuBuffer stamps_[Device::kMaxFramesInFlight];
+  gpu::GpuBuffer stamps_[gpu::Device::kMaxFramesInFlight];
   // Stand-ins for a caller with no authored decal atlas: a stamp then paints
   // the projector's own footprint, which is a usable solid decal rather than a
   // null descriptor.
-  GpuImage white_;
-  GpuImage flat_normal_;
+  gpu::GpuImage white_;
+  gpu::GpuImage flat_normal_;
   // Per frame slot: the forward pass samples it while the next frame records.
-  GpuBuffer tile_uv_xform_[Device::kMaxFramesInFlight];
+  gpu::GpuBuffer tile_uv_xform_[gpu::Device::kMaxFramesInFlight];
 
-  PipelineHandle stamp_pipeline_;
-  PipelineHandle stamp_skin_pipeline_;
-  PipelineHandle dilate_pipeline_;
-  SamplerHandle sampler_;
-  ResourceState atlas_state_ = ResourceState::kUndefined;  // albedo_ + fx_, in lockstep
-  ResourceState chart_state_ = ResourceState::kUndefined;
+  gpu::PipelineHandle stamp_pipeline_;
+  gpu::PipelineHandle stamp_skin_pipeline_;
+  gpu::PipelineHandle dilate_pipeline_;
+  gpu::SamplerHandle sampler_;
+  gpu::ResourceState atlas_state_ = gpu::ResourceState::kUndefined;  // albedo_ + fx_, in lockstep
+  gpu::ResourceState chart_state_ = gpu::ResourceState::kUndefined;
 
   base::Vector<Receiver> receivers_;  // index + 1 = handle
   base::Vector<u32> free_receivers_;

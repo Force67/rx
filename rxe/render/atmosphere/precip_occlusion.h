@@ -32,10 +32,10 @@ class PrecipOcclusion {
   static constexpr u32 kRefreshFrames = 16;    // steady-state cadence (dynamic casters)
   // Matches ShadowPass::kAtlasFormat so its depth-only caster pipelines render
   // here unchanged.
-  static constexpr Format kFormat = Format::kD16Unorm;
+  static constexpr gpu::Format kFormat = gpu::Format::kD16Unorm;
 
-  bool Initialize(Device& device);
-  void Destroy(Device& device);
+  bool Initialize(gpu::Device& device);
+  void Destroy(gpu::Device& device);
   bool available() const { return static_cast<bool>(map_); }
 
   // Snap the anchor to the coarse cell and decide whether this frame re-renders.
@@ -47,19 +47,19 @@ class PrecipOcclusion {
   void Params(f32 out[4]) const;
   static constexpr f32 y_range() { return 2.0f * kHalfHeight; }
 
-  TextureView view() const { return map_.view; }
-  SamplerHandle sampler() const { return sampler_; }
+  gpu::TextureView view() const { return map_.view; }
+  gpu::SamplerHandle sampler() const { return sampler_; }
 
   // Depth-only render of the frame's opaque draws when the anchor moved or the
   // refresh cadence hit; no-op otherwise. draw() receives the top-down
   // view-proj and records the casters, same contract as ShadowPass::Render's
   // callback (the caller binds the depth-only pipelines and pushes matrices).
   void AddToGraph(RenderGraph& graph,
-                  const base::Function<void(CommandList&, const Mat4&)>& draw);
+                  const base::Function<void(gpu::CommandList&, const Mat4&)>& draw);
 
  private:
-  GpuImage map_;            // persistent D16, parked shader-read between renders
-  SamplerHandle sampler_;   // linear clamp (consumers want soft dilated edges)
+  gpu::GpuImage map_;            // persistent D16, parked shader-read between renders
+  gpu::SamplerHandle sampler_;   // linear clamp (consumers want soft dilated edges)
   f32 center_[3] = {0, 0, 0};  // anchor, quantized to kAnchorCell
   bool dirty_ = true;          // anchor moved / cadence hit -> render this frame
   bool rendered_ = false;      // image holds a render (first use transitions from undefined)
