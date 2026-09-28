@@ -33,7 +33,7 @@ using namespace rx::inventory;
 ItemDef MakeBoxDef(f32 mass, u32 max_stack, f32 weight) {
   ItemDef def;
   def.name_hash = 0x1234;
-  def.shape.kind = physics::ShapeDesc::Kind::kBox;
+  def.shape.kind = asset::ShapeDesc::Kind::kBox;
   def.shape.half_extents = Vec3{0.1f, 0.1f, 0.1f};
   def.mass = mass;
   def.friction = 0.6f;
