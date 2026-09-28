@@ -1,0 +1,249 @@
+#ifndef RX_RENDER_RAYTRACING_H_
+#define RX_RENDER_RAYTRACING_H_
+
+
+#include <base/containers/unordered_map.h>
+#include <base/containers/vector.h>
+
+#include "base/memory/unique_pointer.h"
+#include "foundation/build_config/types.h"
+#include "foundation/math/math.h"
+#include "rxe/render/gi/rt_slot_tracker.h"
+#include "rxe/render/rhi/command_list.h"
+#include "rxe/render/rhi/resources.h"
+
+namespace rx::render {
+
+class Device;
+
+struct RayTracingSettings {
+  bool shadows = true;
+  bool reflections = false;
+  bool global_illumination = false;
+};
+
+// TLAS instance mask bits, mirrored by the RX_RAY_MASK_* defines in
+// shaders/rhi_bindings.hlsli (keep in sync). Realtime effects trace
+// kRayMaskRealtime; the path-tracer family traces kRayMaskPathTrace, which
+// additionally sees no_rt fill geometry (too dense for realtime rays, wanted
+// for ground-truth light transport). kRayMaskApprox tags the opaque-
+// approximation BLAS of alpha-masked vegetation (BuildApproxBlas): realtime
+// diffuse GI / AO / shadow rays trace kRayMaskRealtime|kRayMaskApprox with
+// RAY_FLAG_CULL_NON_OPAQUE and hit the stand-in; reflections and the path
+// tracer never carry the approx bit, so no ray sees both variants.
+enum RayMask : u8 {
+  kRayMaskRealtime = 0x01,
+  kRayMaskPathTrace = 0x02,
+  kRayMaskApprox = 0x04,
+  kRayMaskAll = 0xff,
+};
+
+// Owns acceleration structures. Only constructed when DeviceCaps::raytracing
+// is true; every effect it feeds degrades to the raster path otherwise.
+// BLASes build once per uploaded mesh, the TLAS rebuilds every frame from
+// the visible instances. TLAS slots rotate so a rebuild never races the frame
+// still in flight.
+class RayTracingContext {
+ public:
+  // Four ping-pong slots (not two): the async-TLAS path (RX_RT_ASYNC_TLAS)
+  // builds slot N on the compute queue for the *next* frame while this frame's
+  // consumers read the slot built last frame, so a slot is written, then read a
+  // frame later, then rewritten several frames after that. The fourth slot also
+  // makes the modulo sequence continuous when the u32 frame counter wraps.
+  static constexpr u32 kSlots = 4;
+  static_assert(TlasSlotTracker::kSlots == kSlots, "slot tracker must mirror kSlots");
+
+  struct Instance {
+    u64 mesh_key = 0;
+    u32 custom_index = 0;  // shader-visible instanceCustomIndex (bindless mesh record)
+    u8 mask = kRayMaskAll;  // RayMask bits; rays only hit instances whose mask
+                            // intersects the query's InstanceInclusionMask
+    // Points the instance at this mesh's opaque-approximation BLAS (built by
+    // BuildApproxBlas) instead of its regular BLAS. Used with kRayMaskApprox
+    // to route realtime diffuse/AO/shadow rays to the vegetation stand-in.
+    bool approx = false;
+    // Selects a distance LOD's BLAS (built by BuildLodBlas) instead of the LOD0
+    // structure. 0 = LOD0 (blas_), N>0 = lods_[N-1]. Mutually exclusive with
+    // approx (distant LODs stay force-opaque; see BuildLodBlas).
+    u32 lod = 0;
+    // Resolves mesh_key against the per-ACTOR skinned structures (see
+    // ReserveSkinnedBlas) instead of the per-mesh ones. Mutually exclusive with
+    // approx/lod: a skinned actor has exactly one posed structure.
+    bool skinned = false;
+    Mat4 transform = Mat4::Identity();
+    Mat4 previous_transform = Mat4::Identity();
+    u32 previous_mesh = 0xffffffffu;
+    u32 history_id = 0xffffffffu;
+  };
+
+  struct MotionRecord {
+    Mat4 previous_transform;
+    u32 previous_mesh = 0xffffffffu;
+    u32 history_id = 0xffffffffu;
+    u32 pad[2] = {};
+  };
+  static_assert(sizeof(MotionRecord) == 80);
+
+  static base::UniquePointer<RayTracingContext> Create(Device& device);
+  ~RayTracingContext();
+
+  RayTracingContext(const RayTracingContext&) = delete;
+  RayTracingContext& operator=(const RayTracingContext&) = delete;
+
+  void Configure(const RayTracingSettings& settings) { settings_ = settings; }
+  const RayTracingSettings& settings() const { return settings_; }
+
+  // Builds a BLAS for an uploaded mesh, keyed like the renderer's mesh map.
+  // The mesh buffers must have been created with acceleration structure
+  // build input usage.
+  bool BuildBlas(u64 mesh_key, const GpuMesh& mesh);
+  void RemoveBlas(u64 mesh_key);
+  void RemoveBlasDeferred(u64 mesh_key);
+
+  // Builds the opaque-approximation BLAS for an alpha-masked mesh: a fully
+  // OPAQUE structure over the caller-provided (already centroid-shrunk)
+  // vegetation geometry. Keyed like BuildBlas; the caller owns the vertex/
+  // index buffers (they must outlive the BLAS and carry accel-build-input
+  // usage). Instances with Instance::approx set resolve to this structure.
+  bool BuildApproxBlas(u64 mesh_key, const base::Vector<AccelTriangles>& geometries);
+  void RemoveApproxBlas(u64 mesh_key);
+  void RemoveApproxBlasDeferred(u64 mesh_key);
+  bool HasApproxBlas(u64 mesh_key) const { return approx_blas_.contains(mesh_key); }
+
+  // Builds (once) the BLAS for a non-zero distance LOD of an already-uploaded
+  // mesh, keyed by mesh_key + lod. lod is 1-based here (lod 1 = lods_[0]); the
+  // renderer builds these lazily the first time an instance selects the LOD.
+  // Distant LODs are built fully OPAQUE (masked foliage stays force-opaque; the
+  // opaque-approximation shrink is imperceptible past the LOD switch distance),
+  // so no separate approx variant is needed for them.
+  bool BuildLodBlas(u64 mesh_key, u32 lod, const base::Vector<AccelTriangles>& geometries);
+  bool HasLodBlas(u64 mesh_key, u32 lod) const;
+  void RemoveLodBlas(u64 mesh_key);
+  void RemoveLodBlasDeferred(u64 mesh_key);
+
+  // Whether a blas already exists for this mesh (BuildBlas is idempotent, but
+  // callers re-registering bindless geometry need to skip already-built meshes).
+  bool HasBlas(u64 mesh_key) const { return blas_.contains(mesh_key); }
+
+  // refittable structures (skinned actors)
+  // ALLOW_UPDATE structures over a buffer something else deforms every frame,
+  // refit (never rebuilt) from then on; build and refit are recorded into the
+  // frame command list, so a steady-state skinned actor costs no blocking
+  // submit. Keyed in a map of its own: SkinnedRayTracing keys per (actor,
+  // ping-pong slot) because a slot being refit must not be one a live TLAS
+  // traverses; the ping-pong policy lives entirely there. Reserve allocates
+  // (structure + persistent scratch) in the CPU frame-build phase like
+  // ReserveTlas, Record only records. `geometries` must describe the deformed
+  // buffer and a refit must repeat the build's geometry layout.
+  bool ReserveSkinnedBlas(u64 key, const base::Vector<AccelTriangles>& geometries);
+  // Refits `key` from `src_key` when that source holds a completed build, and
+  // does a full build otherwise (a key whose ping-pong partner has never been
+  // built, i.e. an actor's first two frames). Pass src_key == key for an
+  // in-place refit. No-op for a key that was never reserved.
+  void RecordSkinnedBlas(CommandList& cmd, u64 key, u64 src_key);
+  bool HasSkinnedBlas(u64 key) const { return skinned_blas_.contains(key); }
+  // Retires the structure and its scratch. Unlike a refit this DOES drop the
+  // address out from under any TLAS slot that referenced it, so the slot
+  // tracker is bumped exactly as RemoveBlas does.
+  void RemoveSkinnedBlasDeferred(u64 key);
+
+  // Grows the slot's TLAS to hold at least instance_count instances. This can
+  // stall (device idle) and reallocate, so it MUST be called during the CPU
+  // frame-build phase, never while a command list is recording. Doing the
+  // growth here keeps BuildTlas allocation-free at record time.
+  bool ReserveTlas(u32 slot, u32 instance_count);
+
+  // Records a full TLAS rebuild into cmd, including the barrier that makes
+  // it visible to shader ray queries. Instances without a BLAS are skipped.
+  // Capacity must already cover the instances (see ReserveTlas).
+  void BuildTlas(CommandList& cmd, u32 slot, u32 frame_index,
+                 const base::Vector<Instance>& instances);
+
+  // Invalid/unbuilt slots resolve to a permanently built empty TLAS, so an
+  // allocation failure degrades ray queries to misses instead of binding null or
+  // a structure that references retired BLAS addresses.
+  AccelStructHandle tlas(u32 slot) const {
+    return slot_tracker_.Valid(slot) ? tlas_[slot].handle : fallback_tlas_.handle;
+  }
+
+  const GpuBuffer& motion_buffer(u32 slot) const {
+    return slot_tracker_.Valid(slot) ? tlas_[slot].motion : fallback_tlas_.motion;
+  }
+
+  // Whether `slot` currently holds a valid TLAS build (built this session and
+  // against the live BLAS set). False for a never-built slot or one retired by a
+  // RemoveBlas/replace; consumers must not bind such a slot.
+  bool TlasValid(u32 slot) const { return slot_tracker_.Valid(slot); }
+
+  // Pick this frame's build/read slots and whether the async (build-ahead) path
+  // is safe. The async read slot is the previous frame's build; when it is not
+  // valid (RT just enabled, or a BLAS was replaced) this returns a synchronous
+  // build+read of the current slot instead of binding an unbuilt/stale one.
+  TlasSlotTracker::Selection SelectTlasSlots(u32 frame_index, bool want_async) {
+    return slot_tracker_.Select(frame_index, want_async);
+  }
+
+  // Total BLAS bytes reclaimed by compaction so far (0 on backends without
+  // the compacted-size query).
+  u64 compacted_saved_bytes() const { return compacted_saved_bytes_; }
+
+ private:
+  struct Blas {
+    AccelStructHandle handle;
+    u64 address = 0;
+  };
+
+  // One refittable structure. Its scratch is persistent and private because
+  // several of these are built into the same command list with no barrier
+  // between them; one shared arena would make those builds alias each other.
+  struct SkinnedBlas {
+    Blas blas;
+    GpuBuffer scratch;
+    u64 scratch_offset = 0;
+    base::Vector<AccelTriangles> geometries;
+    bool built = false;  // a build has been recorded, so it may be refit FROM
+  };
+
+  struct Tlas {
+    AccelStructHandle handle;
+    GpuBuffer instances;  // host visible TlasInstance[]
+    GpuBuffer motion;     // MotionRecord[] in the actual built TLAS order
+    GpuBuffer scratch;
+    u32 capacity = 0;
+  };
+
+  explicit RayTracingContext(Device& device) : device_(device) {}
+
+  // Shared build path for BuildBlas / BuildApproxBlas (create, build, compact).
+  // skip_compaction: dynamic meshes rebuild at stroke boundaries, so the
+  // second blocking compaction submit is wasted work there.
+  bool BuildBlasFromGeometries(const base::Vector<AccelTriangles>& geometries, Blas& out,
+                               bool skip_compaction = false);
+  bool EnsureTlasCapacity(Tlas& tlas, u32 instance_count);
+  bool EnsureBlasScratch(u64 size);
+  void DestroyTlas(Tlas& tlas);
+
+  Device& device_;
+  RayTracingSettings settings_;
+  base::UnorderedMap<u64, Blas> blas_;
+  // Opaque-approximation BLASes for alpha-masked vegetation, keyed like blas_.
+  base::UnorderedMap<u64, Blas> approx_blas_;
+  // Distance-LOD BLASes, keyed by mesh_key; the vector is indexed by lod-1
+  // (lod 1 = [0]) and grown lazily as LODs are first selected.
+  base::UnorderedMap<u64, base::Vector<Blas>> lod_blas_;
+  // Refittable structures for compute-skinned actors, keyed by (actor, slot).
+  base::UnorderedMap<u64, SkinnedBlas> skinned_blas_;
+  // Reused across builds. Freeing scratch right after the fence tripped
+  // lavapipe, whose build workers can outlive the signal; a persistent
+  // arena avoids both that and the per-build allocation.
+  GpuBuffer blas_scratch_;
+  u64 compacted_saved_bytes_ = 0;
+  Tlas tlas_[kSlots];
+  Tlas fallback_tlas_;
+  // Per-slot build validity + BLAS-set revision (pure logic; see the header).
+  TlasSlotTracker slot_tracker_;
+};
+
+}  // namespace rx::render
+
+#endif  // RX_RENDER_RAYTRACING_H_

@@ -1,5 +1,5 @@
 // Headless, measured proof that the five boat-type presets
-// (engine/physics/boat_profiles.h) float and handle differently, and that
+// (rxe/physics/boat_profiles.h) float and handle differently, and that
 // cargo load is a VISIBLE, emergent physics change (a laden hull sits deeper,
 // accelerates and turns more sluggishly, planes later and loses freeboard). No
 // GPU: a flat water plane is installed via set_water_height and each boat is
@@ -20,10 +20,10 @@
 #include "base/memory/move.h"
 #include "base/memory/unique_pointer.h"
 #include "foundation/math/math.h"
-#include "physics/physics_world.h"
-#include "physics/water_waves.h"
-#include "vehicles/boat.h"
-#include "vehicles/boat_profiles.h"
+#include "plugins/vehicles/boat.h"
+#include "plugins/vehicles/boat_profiles.h"
+#include "rxe/physics/physics_world.h"
+#include "rxe/physics/water_waves.h"
 
 using namespace rx;
 using physics::Boat;

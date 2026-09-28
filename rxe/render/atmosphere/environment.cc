@@ -1,0 +1,737 @@
+#include "rxe/render/atmosphere/environment.h"
+
+#include <string.h>
+
+#include "base/memory/mem_ops.h"
+#include "base/memory/move.h"
+#include "base/memory/unique_pointer.h"
+#include "foundation/logging/log.h"
+#include "rxe/render/atmosphere/ltc_tables.h"
+#include "rxe/render/pipeline/mesh_pipeline.h"
+#include "shaders/brdf_lut_cs_hlsl.h"
+#include "shaders/envmap_cs_hlsl.h"
+#include "shaders/fullscreen_vs_slang.h"
+#include "shaders/irradiance_cs_hlsl.h"
+#include "shaders/multiscatter_lut_cs_hlsl.h"
+#include "shaders/prefilter_cs_hlsl.h"
+#include "shaders/sky_cs_hlsl.h"
+#include "shaders/sky_ps_hlsl.h"
+#include "shaders/transmittance_lut_cs_hlsl.h"
+
+namespace rx::render {
+namespace {
+
+struct EnvmapPush {
+  f32 tint[3];
+  f32 face_size;
+  f32 intensity;
+  f32 rotation;
+  f32 pad[2];
+};
+
+struct SkyPush {
+  f32 sun_direction[3];
+  f32 intensity;
+  f32 sun_color[3];
+  f32 face_size;
+  f32 aurora_intensity;  // premultiplied by the CPU night factor; 0 skips
+  f32 time;              // seconds, drives the aurora curtain animation
+};
+
+struct SizePush {
+  f32 size;
+};
+
+struct PrefilterPush {
+  f32 face_size;
+  f32 roughness;
+};
+
+struct LutPush {
+  f32 size[2];  // (width, height) in texels
+};
+
+}  // namespace
+
+base::UniquePointer<EnvironmentSystem> EnvironmentSystem::Create(Device& device) {
+  auto env = base::UniquePointer<EnvironmentSystem>(new EnvironmentSystem(device));
+
+  env->sampler_ = device.GetSampler({.min_filter = Filter::kLinear,
+                                     .mag_filter = Filter::kLinear,
+                                     .mip_filter = Filter::kLinear,
+                                     .address_u = AddressMode::kClampToEdge,
+                                     .address_v = AddressMode::kClampToEdge,
+                                     .address_w = AddressMode::kClampToEdge});
+  env->point_sampler_ = device.GetSampler({.min_filter = Filter::kNearest,
+                                           .mag_filter = Filter::kNearest,
+                                           .mip_filter = Filter::kNearest,
+                                           .address_u = AddressMode::kClampToEdge,
+                                           .address_v = AddressMode::kClampToEdge});
+  env->envmap_sampler_ = device.GetSampler({.min_filter = Filter::kLinear,
+                                            .mag_filter = Filter::kLinear,
+                                            .mip_filter = Filter::kLinear,
+                                            .address_u = AddressMode::kRepeat,
+                                            .address_v = AddressMode::kClampToEdge,
+                                            .address_w = AddressMode::kClampToEdge});
+  env->wrap_sampler_ = device.GetSampler({.min_filter = Filter::kLinear,
+                                          .mag_filter = Filter::kLinear,
+                                          .address_u = AddressMode::kRepeat,
+                                          .address_v = AddressMode::kRepeat});
+  if (!env->sampler_) return nullptr;
+
+  // Comparison sampler for the cascade shadow atlas: hardware pcf, depth-less-or
+  // -equal returns the lit fraction, clamped so taps near a cascade edge hold.
+  env->shadow_sampler_ = device.GetSampler({.min_filter = Filter::kLinear,
+                                            .mag_filter = Filter::kLinear,
+                                            .mip_filter = Filter::kNearest,
+                                            .address_u = AddressMode::kClampToEdge,
+                                            .address_v = AddressMode::kClampToEdge,
+                                            .address_w = AddressMode::kClampToEdge,
+                                            .max_lod = 0.0f,
+                                            .compare_enable = true,
+                                            .compare_op = CompareOp::kLessEqual});
+  if (!env->shadow_sampler_) return nullptr;
+
+  if (!env->CreateImages() || !env->CreateDummies()) return nullptr;
+  if (!env->CreatePipelines()) return nullptr;
+  if (!env->BakeLuts()) return nullptr;  // transmittance + multiscatter, before any sky update
+  if (!env->BakeBrdfLut()) return nullptr;
+  return env;
+}
+
+bool EnvironmentSystem::CreateImages() {
+  TextureUsageFlags usage = kTextureUsageSampled | kTextureUsageStorage;
+  sky_ = device_.CreateImageCube(Format::kRGBA16Float, kSkySize, usage);
+  irradiance_ = device_.CreateImageCube(Format::kRGBA16Float, kIrradianceSize, usage);
+  prefiltered_ = device_.CreateImageCube(Format::kRGBA16Float, kPrefilterSize, usage,
+                                         kPrefilterMips);
+  brdf_lut_ = device_.CreateImage2D(Format::kRG16Float, {kBrdfLutSize, kBrdfLutSize}, usage);
+  // Atmosphere LUTs: a single 2d view serves both the storage write (kGeneral)
+  // and the later sampled reads, like the brdf lut.
+  transmittance_lut_ = device_.CreateImage2D(Format::kRGBA16Float,
+                                             {kTransmittanceW, kTransmittanceH}, usage);
+  multiscatter_lut_ = device_.CreateImage2D(Format::kRGBA16Float,
+                                            {kMultiScatterSize, kMultiScatterSize}, usage);
+  if (!sky_ || !irradiance_ || !prefiltered_ || !brdf_lut_ || !transmittance_lut_ ||
+      !multiscatter_lut_)
+    return false;
+
+  sky_storage_view_ = device_.CreateMipView(sky_, 0);
+  if (!sky_storage_view_) return false;
+  irradiance_storage_view_ = device_.CreateMipView(irradiance_, 0);
+  if (!irradiance_storage_view_) return false;
+  for (u32 mip = 0; mip < kPrefilterMips; ++mip) {
+    prefilter_storage_views_[mip] = device_.CreateMipView(prefiltered_, mip);
+    if (!prefilter_storage_views_[mip]) return false;
+  }
+  return true;
+}
+
+bool EnvironmentSystem::CreateDummies() {
+  white_ = device_.CreateImage2D(Format::kR8Unorm, {1, 1},
+                                 kTextureUsageSampled | kTextureUsageTransferDst);
+  black_array_ = device_.CreateImage2D(Format::kRGBA16Float, {1, 1},
+                                       kTextureUsageSampled | kTextureUsageTransferDst);
+  // Stand-in shadow atlas (1x1 depth, cleared lit) so the env set is always
+  // complete even when cascaded shadow maps are off.
+  shadow_dummy_ = device_.CreateImage2D(Format::kD32Float, {1, 1},
+                                        kTextureUsageSampled | kTextureUsageTransferDst);
+  // Flat-normal stand-in for the decal channel atlas (0.5, 0.5, 1).
+  flat_normal_ = device_.CreateImage2D(Format::kRGBA8Unorm, {1, 1},
+                                       kTextureUsageSampled | kTextureUsageTransferDst);
+  black_ = device_.CreateImage2D(Format::kR8Unorm, {1, 1},
+                                 kTextureUsageSampled | kTextureUsageTransferDst);
+  if (!white_ || !black_array_ || !shadow_dummy_ || !flat_normal_ || !black_) return false;
+
+  // The shaders declare Texture2DArray for the ddgi slots; the dummy must be
+  // an array view so the descriptor's view type matches when ddgi is off.
+  black_array_view_ = device_.CreateArrayView(black_array_);
+  if (!black_array_view_) return false;
+
+  dummy_volume_ = device_.CreateBuffer(512, kBufferUsageUniform, true);
+  dummy_storage_ = device_.CreateBuffer(512, kBufferUsageStorage, true);
+  if (!dummy_volume_.mapped) return false;
+  base::MemSet(dummy_volume_.mapped, 0, 512);
+
+  device_.ImmediateSubmit([&](CommandList& cmd) {
+    for (GpuImage* image : {&white_, &black_array_, &flat_normal_, &black_}) {
+      cmd.Barrier(Transition(*image, ResourceState::kUndefined, ResourceState::kCopyDst));
+      f32 clear[4] = {0.0f, 0.0f, 0.0f, 0.0f};
+      if (image == &white_) clear[0] = 1.0f;
+      if (image == &flat_normal_) {
+        clear[0] = 0.5f;
+        clear[1] = 0.5f;
+        clear[2] = 1.0f;
+        clear[3] = 1.0f;
+      }
+      cmd.ClearColor(*image, clear);
+      cmd.Barrier(Transition(*image, ResourceState::kCopyDst,
+                             ResourceState::kShaderReadFragment));
+    }
+
+    // The depth dummy: clear to 1.0 (fully lit) and leave it shader-readable.
+    cmd.Barrier(Transition(shadow_dummy_, ResourceState::kUndefined, ResourceState::kCopyDst));
+    cmd.ClearDepth(shadow_dummy_, 1.0f);
+    cmd.Barrier(Transition(shadow_dummy_, ResourceState::kCopyDst,
+                           ResourceState::kShaderReadFragment));
+  });
+
+  // LTC area-light fit tables: two 64x64 RGBA16F uploads, sampled by the rect
+  // light path in the mesh shaders (env slots 18/19).
+  constexpr u64 kLtcBytes = static_cast<u64>(kLtcLutSize) * kLtcLutSize * 4 * sizeof(u16);
+  ltc_matrix_ = device_.CreateImage2D(Format::kRGBA16Float, {kLtcLutSize, kLtcLutSize},
+                                      kTextureUsageSampled | kTextureUsageTransferDst);
+  ltc_amplitude_ = device_.CreateImage2D(Format::kRGBA16Float, {kLtcLutSize, kLtcLutSize},
+                                         kTextureUsageSampled | kTextureUsageTransferDst);
+  if (!ltc_matrix_ || !ltc_amplitude_) return false;
+  GpuBuffer ltc_staging = device_.CreateBuffer(kLtcBytes * 2, kBufferUsageTransferSrc, true);
+  if (!ltc_staging.mapped) return false;
+  base::MemCopy(ltc_staging.mapped, kLtc1, kLtcBytes);
+  base::MemCopy(static_cast<u8*>(ltc_staging.mapped) + kLtcBytes, kLtc2, kLtcBytes);
+  device_.ImmediateSubmit([&](CommandList& cmd) {
+    BufferTextureCopy region1{.buffer_offset = 0, .mip = 0,
+                              .extent = {kLtcLutSize, kLtcLutSize}};
+    BufferTextureCopy region2{.buffer_offset = kLtcBytes, .mip = 0,
+                              .extent = {kLtcLutSize, kLtcLutSize}};
+    cmd.Barrier(Transition(ltc_matrix_, ResourceState::kUndefined, ResourceState::kCopyDst));
+    cmd.Barrier(Transition(ltc_amplitude_, ResourceState::kUndefined, ResourceState::kCopyDst));
+    cmd.CopyBufferToTexture(ltc_staging, ltc_matrix_, base::Span(&region1, 1));
+    cmd.CopyBufferToTexture(ltc_staging, ltc_amplitude_, base::Span(&region2, 1));
+    cmd.Barrier(Transition(ltc_matrix_, ResourceState::kCopyDst,
+                           ResourceState::kShaderReadFragment));
+    cmd.Barrier(Transition(ltc_amplitude_, ResourceState::kCopyDst,
+                           ResourceState::kShaderReadFragment));
+  });
+  device_.DestroyBuffer(ltc_staging);
+  return true;
+}
+
+bool EnvironmentSystem::CreatePipelines() {
+  // sampled_count: number of combined-image-sampler inputs after the storage
+  // image at binding 0 (the sky pass takes two: the transmittance + multi-
+  // scattering LUTs).
+  auto make_compute = [&](PipelineHandle* pipeline, ShaderBlob shader, u32 sampled_count,
+                          u32 push_size, const char* name) {
+    PipelineBindings set;
+    set.slots.push_back({0, BindingType::kStorageImage});
+    for (u32 i = 1; i <= sampled_count; ++i) {
+      set.slots.push_back({i, BindingType::kCombinedTextureSampler});
+    }
+    ComputePipelineDesc desc;
+    desc.shader = shader;
+    desc.sets.push_back(base::move(set));
+    desc.push_constant_size = push_size;
+    desc.debug_name = name;
+    *pipeline = device_.CreateComputePipeline(desc);
+    return static_cast<bool>(*pipeline);
+  };
+
+  if (!make_compute(&sky_gen_, RX_SHADER(k_sky_cs_hlsl), 2, PushSize<SkyPush>(), "sky_gen") ||
+      !make_compute(&envmap_gen_, RX_SHADER(k_envmap_cs_hlsl), 1, PushSize<EnvmapPush>(),
+                    "envmap_gen") ||
+      !make_compute(&irradiance_gen_, RX_SHADER(k_irradiance_cs_hlsl), 1, PushSize<SizePush>(),
+                    "irradiance_gen") ||
+      !make_compute(&prefilter_gen_, RX_SHADER(k_prefilter_cs_hlsl), 1, PushSize<PrefilterPush>(),
+                    "prefilter_gen") ||
+      !make_compute(&brdf_gen_, RX_SHADER(k_brdf_lut_cs_hlsl), 0, PushSize<SizePush>(),
+                    "brdf_gen") ||
+      !make_compute(&transmittance_gen_, RX_SHADER(k_transmittance_lut_cs_hlsl), 0,
+                    sizeof(LutPush), "transmittance_gen") ||
+      !make_compute(&multiscatter_gen_, RX_SHADER(k_multiscatter_lut_cs_hlsl), 1,
+                    sizeof(LutPush), "multiscatter_gen")) {
+    RX_ERROR("environment compute pipeline creation failed");
+    return false;
+  }
+
+  // Set 2 of the mesh pipeline: ibl inputs, per frame ao, ddgi atlases, the
+  // cascade shadow atlas (7) + cascade ubo (8), the opaque scene color (9,
+  // sampled by transmissive materials for refraction), and the SIGMA-denoised
+  // sun shadow (10, screen-space R8 sampled by the rt lighting variant).
+  BindingLayoutDesc env_desc;
+  // Vertex included for the FFT-ocean displacement sample in mesh.vs.
+  env_desc.stages = kShaderStageVertex | kShaderStageFragment;
+  for (u32 i = 0; i < 6; ++i) {
+    env_desc.slots.push_back({i, BindingType::kCombinedTextureSampler});
+  }
+  env_desc.slots.push_back({6, BindingType::kUniformBuffer});
+  env_desc.slots.push_back({7, BindingType::kCombinedTextureSampler});
+  env_desc.slots.push_back({8, BindingType::kUniformBuffer});
+  env_desc.slots.push_back({9, BindingType::kCombinedTextureSampler});
+  env_desc.slots.push_back({10, BindingType::kCombinedTextureSampler});
+  env_desc.slots.push_back({11, BindingType::kStorageBuffer});  // dynamic point lights
+  // 12: NRD-denoised stochastic specular reflections (screen-space rgba16f),
+  // sampled by the rt variant instead of tracing inline.
+  env_desc.slots.push_back({12, BindingType::kCombinedTextureSampler});
+  // 13/14: froxel cluster counts + light index list (light_cluster.cs).
+  env_desc.slots.push_back({13, BindingType::kStorageBuffer});
+  env_desc.slots.push_back({14, BindingType::kStorageBuffer});
+  // 15-17: clustered decals (buffer, per-cluster indices, atlas).
+  env_desc.slots.push_back({15, BindingType::kStorageBuffer});
+  env_desc.slots.push_back({16, BindingType::kStorageBuffer});
+  env_desc.slots.push_back({17, BindingType::kCombinedTextureSampler});
+  // 18/19: LTC area-light fit tables (matrix + magnitude/fresnel/sphere).
+  env_desc.slots.push_back({18, BindingType::kCombinedTextureSampler});
+  env_desc.slots.push_back({19, BindingType::kCombinedTextureSampler});
+  // 20/21: local light shadows (face matrices SB + depth atlas, comparison
+  // sampled like the cascade atlas).
+  env_desc.slots.push_back({20, BindingType::kStorageBuffer});
+  env_desc.slots.push_back({21, BindingType::kCombinedTextureSampler});
+  // 22: decal channel atlas (normal in decal space).
+  env_desc.slots.push_back({22, BindingType::kCombinedTextureSampler});
+  // 23/24: hybrid ReSTIR DI outputs (demodulated diffuse irradiance +
+  // F-less specular), black when the feature is off.
+  env_desc.slots.push_back({23, BindingType::kCombinedTextureSampler});
+  env_desc.slots.push_back({24, BindingType::kCombinedTextureSampler});
+  // 25-27: virtual texturing (feedback request buffer, mip-mapped page
+  // indirection, physical page atlas).
+  env_desc.slots.push_back({25, BindingType::kStorageBuffer});
+  env_desc.slots.push_back({26, BindingType::kCombinedTextureSampler});
+  env_desc.slots.push_back({27, BindingType::kCombinedTextureSampler});
+  // 28/29: FFT ocean displacement + normal/foam maps (wrap-sampled tiles).
+  env_desc.slots.push_back({28, BindingType::kCombinedTextureSampler});
+  env_desc.slots.push_back({29, BindingType::kCombinedTextureSampler});
+  // 30/31/32: persistent water foam/ripple field (ring 0 + ring 1 textures,
+  // clamp-sampled, kept in GENERAL by the compute chain) + the ring params CB.
+  env_desc.slots.push_back({30, BindingType::kCombinedTextureSampler});
+  env_desc.slots.push_back({31, BindingType::kCombinedTextureSampler});
+  env_desc.slots.push_back({32, BindingType::kUniformBuffer});
+  // 33: shoreline wetting field (R16F world-space wetness, clamp-sampled).
+  env_desc.slots.push_back({33, BindingType::kCombinedTextureSampler});
+  // 34: underwater caustic map (RG16F tiling, wrap-sampled, kept in GENERAL by
+  // the caustics compute chain).
+  env_desc.slots.push_back({34, BindingType::kCombinedTextureSampler});
+  // 35: RCGI resolved full-res indirect diffuse irradiance (RGBA16F,
+  // screen-space; the forward pass adds it when kFrameFlagRcgi is set). Black
+  // when RCGI is off.
+  env_desc.slots.push_back({35, BindingType::kCombinedTextureSampler});
+  // 36-40: RCGI world irradiance cascades for the inline reflection bounce
+  // (mesh_rt TraceReflection when NRD reflections are unavailable). 36 globals
+  // UBO, 37 irradiance atlas, 38 visibility atlas, 39 probe-relocation metadata,
+  // 40 interior volumes. Placeholders when RCGI is off.
+  env_desc.slots.push_back({36, BindingType::kUniformBuffer});
+  env_desc.slots.push_back({37, BindingType::kCombinedTextureSampler});
+  env_desc.slots.push_back({38, BindingType::kCombinedTextureSampler});
+  env_desc.slots.push_back({39, BindingType::kStorageBuffer});
+  env_desc.slots.push_back({40, BindingType::kStorageBuffer});
+  // 41/42: baked texture-space decal layers (DecalBaker). 41 premultiplied
+  // colour + coverage, 42 tangent-space normal xy + roughness multiplier. The
+  // per-draw tile arrives in the push block; black/neutral when the baker is
+  // off, which the forward pass never samples (tile 0 = no layer).
+  env_desc.slots.push_back({41, BindingType::kCombinedTextureSampler});
+  env_desc.slots.push_back({42, BindingType::kCombinedTextureSampler});
+  // 43: per-tile uv scale/bias, so the forward pass reproduces the mapping the
+  // bake used (UDIM character bodies need one).
+  env_desc.slots.push_back({43, BindingType::kStorageBuffer});
+  // 44-46: the hair transmittance volume (front-most fibre depth, the layered
+  // fibre counts, and the light frustum it was rendered with), so skin under a
+  // groom is shadowed by the strands over it. Neutral (no hair) when absent.
+  env_desc.slots.push_back({44, BindingType::kCombinedTextureSampler});
+  env_desc.slots.push_back({45, BindingType::kCombinedTextureSampler});
+  env_desc.slots.push_back({46, BindingType::kUniformBuffer});
+  env_set_layout_ = device_.CreateBindingLayout(env_desc);
+  if (!env_set_layout_) return false;
+
+  return true;
+}
+
+bool EnvironmentSystem::CreateSkyPipeline(BindingLayoutHandle globals_layout, Format color_format,
+                                          Format motion_format, Format depth_format) {
+  // Sky background pipeline. Binding 0 is the sky cubemap; binding 1 is the
+  // transmittance LUT, so the screen-space sun disc reddens/dims with the same
+  // physical extinction as the sky rather than an air-mass approximation.
+  // Depth: equal against the cleared reversed-z far value, no write: only
+  // empty pixels shade. Blending is off on both targets; the old pipeline
+  // masked attachment 1 (motion) writes to RG only, equivalent on the
+  // two-channel motion format.
+  sky_draw_pipeline_ = device_.CreateGraphicsPipeline({
+      .vertex = RX_SHADER(k_fullscreen_vs_slang),
+      .fragment = RX_SHADER(k_sky_ps_hlsl),
+      .raster = {.cull = CullMode::kNone},
+      .depth = {.test = true, .write = false, .compare = CompareOp::kEqual,
+                .format = depth_format},
+      // The scene pass carries a third target (skin diffuse for sss); the sky
+      // writes zeros there.
+      .color_formats = {color_format, motion_format, MeshPipeline::kSkinDiffuseFormat},
+      .blend = {BlendMode::kOpaque, BlendMode::kOpaque, BlendMode::kOpaque},
+      .sets = {{.shared = globals_layout},
+               {.slots = {{0, BindingType::kCombinedTextureSampler},
+                          {1, BindingType::kCombinedTextureSampler}},
+                .stages = kShaderStageFragment}},
+      .debug_name = "sky",
+  });
+  if (!sky_draw_pipeline_) {
+    RX_ERROR("sky pipeline creation failed");
+    return false;
+  }
+  return true;
+}
+
+bool EnvironmentSystem::BakeBrdfLut() {
+  device_.ImmediateSubmit([&](CommandList& cmd) {
+    cmd.Barrier(Transition(brdf_lut_, ResourceState::kUndefined, ResourceState::kGeneral));
+
+    SizePush push{static_cast<f32>(kBrdfLutSize)};
+    cmd.BindPipeline(brdf_gen_);
+    cmd.BindTransient(0, {Bind::Storage(0, brdf_lut_)});
+    cmd.Push(push);
+    cmd.Dispatch(kBrdfLutSize / 8, kBrdfLutSize / 8, 1);
+
+    cmd.Barrier(Transition(brdf_lut_, ResourceState::kGeneral,
+                           ResourceState::kShaderReadFragment));
+  });
+  return true;
+}
+
+bool EnvironmentSystem::BakeLuts() {
+  device_.ImmediateSubmit([&](CommandList& cmd) {
+    // Transmittance LUT (no inputs).
+    cmd.Barrier(Transition(transmittance_lut_, ResourceState::kUndefined,
+                           ResourceState::kGeneral));
+    LutPush tpush{{static_cast<f32>(kTransmittanceW), static_cast<f32>(kTransmittanceH)}};
+    cmd.BindPipeline(transmittance_gen_);
+    cmd.BindTransient(0, {Bind::Storage(0, transmittance_lut_)});
+    cmd.Push(tpush);
+    cmd.Dispatch2D({kTransmittanceW, kTransmittanceH});
+
+    // Make it sampleable for the multiscatter pass (and the sky compute +
+    // sky-draw fragment passes thereafter).
+    cmd.Barrier(Transition(transmittance_lut_, ResourceState::kGeneral,
+                           ResourceState::kShaderReadAll));
+
+    // Multiple-scattering LUT (samples the transmittance LUT).
+    cmd.Barrier(Transition(multiscatter_lut_, ResourceState::kUndefined,
+                           ResourceState::kGeneral));
+    LutPush mpush{{static_cast<f32>(kMultiScatterSize), static_cast<f32>(kMultiScatterSize)}};
+    cmd.BindPipeline(multiscatter_gen_);
+    cmd.BindTransient(0, {Bind::Storage(0, multiscatter_lut_),
+                          Bind::Combined(1, transmittance_lut_.view, sampler_)});
+    cmd.Push(mpush);
+    cmd.Dispatch2D({kMultiScatterSize, kMultiScatterSize});
+
+    cmd.Barrier(Transition(multiscatter_lut_, ResourceState::kGeneral,
+                           ResourceState::kShaderReadCompute));
+  });
+  return true;
+}
+
+void EnvironmentSystem::RecordUpdate(CommandList& cmd, const Vec3& sun_direction,
+                                     f32 sun_intensity, const Vec3& sun_color,
+                                     f32 aurora_intensity, f32 time_seconds) {
+  // The sky is sampled in both compute (convolutions, path tracers) and
+  // fragment (sky draw); the convolutions only in fragment (mesh IBL).
+  ResourceState sky_old =
+      maps_initialized_ ? ResourceState::kShaderReadAll : ResourceState::kUndefined;
+  ResourceState conv_old =
+      maps_initialized_ ? ResourceState::kShaderReadFragment : ResourceState::kUndefined;
+  maps_initialized_ = true;
+
+  cmd.Barrier(Transition(sky_, sky_old, ResourceState::kGeneral));
+
+  if (has_envmap_) {
+    // An authored dome replaces the atmosphere outright: the convolutions below
+    // are unchanged, so the scene picks up real directional sky lighting rather
+    // than a flat ambient stand-in.
+    EnvmapPush push{};
+    push.tint[0] = envmap_tint_.x;
+    push.tint[1] = envmap_tint_.y;
+    push.tint[2] = envmap_tint_.z;
+    push.face_size = static_cast<f32>(kSkySize);
+    push.intensity = envmap_intensity_;
+    push.rotation = envmap_rotation_;
+    cmd.BindPipeline(envmap_gen_);
+    cmd.BindTransient(0, {Bind::StorageView(0, sky_storage_view_),
+                          Bind::Combined(1, envmap_.view, envmap_sampler_)});
+    cmd.Push(push);
+    cmd.Dispatch(kSkySize / 8, kSkySize / 8, 6);
+    cmd.Barrier(Transition(sky_, ResourceState::kGeneral, ResourceState::kShaderReadAll));
+    RecordConvolutions(cmd, conv_old);
+    return;
+  }
+
+  SkyPush sky_push{};
+  Vec3 dir = Normalize(sun_direction);
+  sky_push.sun_direction[0] = dir.x;
+  sky_push.sun_direction[1] = dir.y;
+  sky_push.sun_direction[2] = dir.z;
+  sky_push.intensity = sun_intensity;
+  sky_push.sun_color[0] = sun_color.x;
+  sky_push.sun_color[1] = sun_color.y;
+  sky_push.sun_color[2] = sun_color.z;
+  sky_push.face_size = static_cast<f32>(kSkySize);
+  sky_push.aurora_intensity = aurora_intensity;
+  sky_push.time = time_seconds;
+  cmd.BindPipeline(sky_gen_);
+  cmd.BindTransient(0, {Bind::StorageView(0, sky_storage_view_),
+                        Bind::Combined(1, transmittance_lut_.view, sampler_),
+                        Bind::Combined(2, multiscatter_lut_.view, sampler_)});
+  cmd.Push(sky_push);
+  cmd.Dispatch(kSkySize / 8, kSkySize / 8, 6);
+
+  cmd.Barrier(Transition(sky_, ResourceState::kGeneral, ResourceState::kShaderReadAll));
+  RecordConvolutions(cmd, conv_old);
+}
+
+bool EnvironmentSystem::SetEnvironmentMap(const f32* rgba, u32 width, u32 height,
+                                          const Vec3& tint, f32 intensity,
+                                          f32 rotation_radians) {
+  if (!rgba || width == 0 || height == 0) return false;
+
+  // A new map may differ in size from the last one, so the old image goes.
+  if (envmap_) {
+    device_.WaitIdle();
+    device_.DestroyImage(envmap_);
+  }
+  envmap_ = device_.CreateImage2D(Format::kRGBA32Float, {width, height},
+                                  kTextureUsageSampled | kTextureUsageTransferDst);
+  if (!envmap_) {
+    has_envmap_ = false;
+    return false;
+  }
+
+  const u64 bytes = static_cast<u64>(width) * height * 4 * sizeof(f32);
+  GpuBuffer staging = device_.CreateBuffer(bytes, kBufferUsageTransferSrc, true);
+  if (!staging.mapped) {
+    device_.DestroyImage(envmap_);
+    envmap_ = {};
+    has_envmap_ = false;
+    return false;
+  }
+  base::MemCopy(staging.mapped, rgba, bytes);
+  // Host-visible memory is not guaranteed coherent, so the write has to be
+  // flushed before the copy reads it; the other staging uploads in the engine
+  // (material_system, vk_device) do the same.
+  device_.FlushBuffer(staging, 0, bytes);
+  device_.ImmediateSubmit([&](CommandList& cmd) {
+    BufferTextureCopy region{.buffer_offset = 0, .mip = 0, .extent = {width, height}};
+    cmd.Barrier(Transition(envmap_, ResourceState::kUndefined, ResourceState::kCopyDst));
+    cmd.CopyBufferToTexture(staging, envmap_, base::Span(&region, 1));
+    cmd.Barrier(Transition(envmap_, ResourceState::kCopyDst, ResourceState::kShaderReadAll));
+  });
+  device_.DestroyBuffer(staging);
+
+  envmap_tint_ = tint;
+  envmap_intensity_ = intensity;
+  envmap_rotation_ = rotation_radians;
+  has_envmap_ = true;
+  return true;
+}
+
+void EnvironmentSystem::ClearEnvironmentMap() { has_envmap_ = false; }
+
+// Diffuse irradiance + ggx prefilter off the sky cubemap, whatever produced it.
+void EnvironmentSystem::RecordConvolutions(CommandList& cmd,
+                                           ResourceState conv_old) {
+  cmd.Barrier(Transition(irradiance_, conv_old, ResourceState::kGeneral));
+  cmd.Barrier(Transition(prefiltered_, conv_old, ResourceState::kGeneral));
+
+  SizePush irradiance_push{static_cast<f32>(kIrradianceSize)};
+  cmd.BindPipeline(irradiance_gen_);
+  cmd.BindTransient(0, {Bind::StorageView(0, irradiance_storage_view_),
+                        Bind::Combined(1, sky_.view, sampler_)});
+  cmd.Push(irradiance_push);
+  cmd.Dispatch(kIrradianceSize / 8 + 1, kIrradianceSize / 8 + 1, 6);
+
+  cmd.BindPipeline(prefilter_gen_);
+  for (u32 mip = 0; mip < kPrefilterMips; ++mip) {
+    u32 size = kPrefilterSize >> mip;
+    PrefilterPush push{static_cast<f32>(size),
+                       static_cast<f32>(mip) / static_cast<f32>(kPrefilterMips - 1)};
+    cmd.BindTransient(0, {Bind::StorageView(0, prefilter_storage_views_[mip]),
+                          Bind::Combined(1, sky_.view, sampler_)});
+    cmd.Push(push);
+    cmd.Dispatch((size + 7) / 8, (size + 7) / 8, 6);
+  }
+
+  cmd.Barrier(Transition(irradiance_, ResourceState::kGeneral,
+                         ResourceState::kShaderReadFragment));
+  cmd.Barrier(Transition(prefiltered_, ResourceState::kGeneral,
+                         ResourceState::kShaderReadFragment));
+}
+
+void EnvironmentSystem::DrawSky(CommandList& cmd, BindingSetHandle globals) {
+  // Rebound under the sky pipeline: the mesh pipeline layout carries push
+  // constant ranges this one lacks, which breaks set compatibility.
+  cmd.BindPipeline(sky_draw_pipeline_);
+  cmd.BindSet(0, globals);
+  cmd.BindTransient(1, {Bind::Combined(0, sky_.view, sampler_),
+                        Bind::Combined(1, transmittance_lut_.view, sampler_)});
+  cmd.Draw(3);
+}
+
+void EnvironmentSystem::WriteEnvSet(BindingSetHandle set, TextureView ao_view,
+                                    const DdgiBinding* ddgi, TextureView shadow_view,
+                                    const GpuBuffer& cascade_buffer, u64 cascade_size,
+                                    TextureView opaque_color, TextureView sun_shadow_view,
+                                    const GpuBuffer& lights, u64 lights_size,
+                                    TextureView spec_reflections,
+                                    const GpuBuffer& cluster_counts,
+                                    const GpuBuffer& cluster_indices,
+                                    const GpuBuffer& decal_buffer,
+                                    const GpuBuffer& decal_indices,
+                                    TextureView decal_atlas,
+                                    const GpuBuffer& local_shadow_faces,
+                                    TextureView local_shadow_atlas,
+                                    TextureView decal_normal_atlas,
+                                    TextureView restir_diffuse, TextureView restir_spec,
+                                    const GpuBuffer& vt_feedback, TextureView vt_indirection,
+                                    TextureView vt_atlas, TextureView ocean_displacement,
+                                    TextureView ocean_normal, TextureView water_field_ring0,
+                                    TextureView water_field_ring1,
+                                    const GpuBuffer& water_field_params,
+                                    TextureView shore_wetness, TextureView caustics,
+                                    TextureView rcgi_irradiance,
+                                    const RcgiWorldBinding* rcgi_world,
+                                    TextureView decal_layer_albedo,
+                                    TextureView decal_layer_fx,
+                                    const GpuBuffer& decal_layer_xform,
+                                    const HairVolumeBinding* hair_volume) const {
+  device_.UpdateBindingSet(
+      set,
+      {Bind::Combined(0, irradiance_.view, sampler_),
+       Bind::Combined(1, prefiltered_.view, sampler_),
+       Bind::Combined(2, brdf_lut_.view, sampler_),
+       Bind::Combined(3, ao_view ? ao_view : white_.view, sampler_),
+       // The live atlases stay in kGeneral (storage-written by the ddgi
+       // compute passes each frame); the dummy is in the shader-read state.
+       ddgi ? InGeneral(Bind::Combined(4, ddgi->irradiance, sampler_))
+            : Bind::Combined(4, black_array_view_, sampler_),
+       ddgi ? InGeneral(Bind::Combined(5, ddgi->distance, sampler_))
+            : Bind::Combined(5, black_array_view_, sampler_),
+       Bind::Uniform(6, ddgi ? ddgi->volume : dummy_volume_, 0,
+                     ddgi ? ddgi->volume_size : 256),
+       Bind::Combined(7, shadow_view ? shadow_view : shadow_dummy_.view, shadow_sampler_),
+       Bind::Uniform(8, cascade_buffer ? cascade_buffer : dummy_volume_, 0,
+                     cascade_buffer ? cascade_size : 512),
+       Bind::Combined(9, opaque_color ? opaque_color : white_.view, sampler_),
+       // white = fully lit
+       Bind::Combined(10, sun_shadow_view ? sun_shadow_view : white_.view, sampler_),
+       Bind::StorageBuffer(11, lights ? lights : dummy_storage_, 0, lights ? lights_size : 256),
+       // The frame graph moves the denoised target to shader-read for the
+       // scene pass (same as the sigma sun shadow); white when absent.
+       Bind::Combined(12, spec_reflections ? spec_reflections : white_.view, sampler_),
+       Bind::StorageBuffer(13, cluster_counts ? cluster_counts : dummy_storage_, 0,
+                           cluster_counts ? cluster_counts.size : 256),
+       Bind::StorageBuffer(14, cluster_indices ? cluster_indices : dummy_storage_, 0,
+                           cluster_indices ? cluster_indices.size : 256),
+       Bind::StorageBuffer(15, decal_buffer ? decal_buffer : dummy_storage_, 0,
+                           decal_buffer ? decal_buffer.size : 256),
+       Bind::StorageBuffer(16, decal_indices ? decal_indices : dummy_storage_, 0,
+                           decal_indices ? decal_indices.size : 256),
+       Bind::Combined(17, decal_atlas ? decal_atlas : white_.view, sampler_),
+       Bind::Combined(18, ltc_matrix_.view, sampler_),
+       Bind::Combined(19, ltc_amplitude_.view, sampler_),
+       Bind::StorageBuffer(20, local_shadow_faces ? local_shadow_faces : dummy_storage_, 0,
+                           local_shadow_faces ? local_shadow_faces.size : 256),
+       Bind::Combined(21, local_shadow_atlas ? local_shadow_atlas : shadow_dummy_.view,
+                      shadow_sampler_),
+       Bind::Combined(22, decal_normal_atlas ? decal_normal_atlas : flat_normal_.view,
+                      sampler_),
+       Bind::Combined(23, restir_diffuse ? restir_diffuse : black_.view, sampler_),
+       Bind::Combined(24, restir_spec ? restir_spec : black_.view, sampler_),
+       Bind::StorageBuffer(25, vt_feedback ? vt_feedback : dummy_storage_, 0,
+                           vt_feedback ? vt_feedback.size : 256),
+       Bind::Combined(26, vt_indirection ? vt_indirection : black_.view, point_sampler_),
+       Bind::Combined(27, vt_atlas ? vt_atlas : black_.view, sampler_),
+       // The live ocean maps are storage images the compute chain keeps in
+       // GENERAL; the black dummy is shader-read.
+       ocean_displacement ? InGeneral(Bind::Combined(28, ocean_displacement, wrap_sampler_))
+                          : Bind::Combined(28, black_.view, wrap_sampler_),
+       ocean_normal ? InGeneral(Bind::Combined(29, ocean_normal, wrap_sampler_))
+                    : Bind::Combined(29, black_.view, wrap_sampler_),
+       // The water field rings are storage images kept in GENERAL, clamp-sampled
+       // by world position; the params CB carries their origins/extents.
+       water_field_ring0 ? InGeneral(Bind::Combined(30, water_field_ring0, sampler_))
+                         : Bind::Combined(30, black_.view, sampler_),
+       water_field_ring1 ? InGeneral(Bind::Combined(31, water_field_ring1, sampler_))
+                         : Bind::Combined(31, black_.view, sampler_),
+       Bind::Uniform(32, water_field_params ? water_field_params : dummy_volume_, 0,
+                     water_field_params ? water_field_params.size : 256),
+       // The live field is a storage image kept in GENERAL by the wetting
+       // compute; the black dummy (dry) is shader-read.
+       shore_wetness ? InGeneral(Bind::Combined(33, shore_wetness, sampler_))
+                     : Bind::Combined(33, black_.view, sampler_),
+       // The live caustic map is a storage image kept in GENERAL by the caustics
+       // compute; the black dummy (no caustics) is shader-read.
+       caustics ? InGeneral(Bind::Combined(34, caustics, wrap_sampler_))
+                : Bind::Combined(34, black_.view, wrap_sampler_),
+       // RCGI resolved irradiance is a transient the frame graph moves to
+       // shader-read for the scene pass; black (no indirect) when off.
+       Bind::Combined(35, rcgi_irradiance ? rcgi_irradiance : black_.view, sampler_),
+       // RCGI world cascades for the inline reflection bounce. The live atlases
+       // are storage-written and stay in GENERAL; placeholders (dummy UBO/SB,
+       // black atlas) when RCGI is off keep the descriptor set complete.
+       Bind::Uniform(36, rcgi_world && rcgi_world->globals ? *rcgi_world->globals : dummy_volume_,
+                     0, rcgi_world && rcgi_world->globals ? rcgi_world->globals->size : 256),
+       rcgi_world && rcgi_world->irradiance
+           ? InGeneral(Bind::Combined(37, rcgi_world->irradiance, sampler_))
+           : Bind::Combined(37, black_.view, sampler_),
+       rcgi_world && rcgi_world->visibility
+           ? InGeneral(Bind::Combined(38, rcgi_world->visibility, sampler_))
+           : Bind::Combined(38, black_.view, sampler_),
+       Bind::StorageBuffer(39,
+                           rcgi_world && rcgi_world->probe_meta ? *rcgi_world->probe_meta
+                                                                : dummy_storage_,
+                           0, rcgi_world && rcgi_world->probe_meta ? rcgi_world->probe_meta->size
+                                                                   : 256),
+       Bind::StorageBuffer(40,
+                           rcgi_world && rcgi_world->interior_vols ? *rcgi_world->interior_vols
+                                                                   : dummy_storage_,
+                           0, rcgi_world && rcgi_world->interior_vols
+                                  ? rcgi_world->interior_vols->size
+                                  : 256),
+       // Baked decal layers. The stand-ins must read as "no decal": a
+       // single-channel dummy would expand to alpha 1 and composite the surface
+       // to black, so use the RGBA8 white (coverage 1, colour white is never
+       // sampled because the baker being off leaves decal_layer.y at 0) and the
+       // flat normal for the fx layer's neutral.
+       Bind::Combined(41, decal_layer_albedo ? decal_layer_albedo : white_.view, sampler_),
+       Bind::Combined(42, decal_layer_fx ? decal_layer_fx : flat_normal_.view, sampler_),
+       Bind::StorageBuffer(43, decal_layer_xform ? decal_layer_xform : dummy_storage_, 0,
+                           decal_layer_xform ? decal_layer_xform.size : 256),
+       // Hair transmittance volume. The dummy UBO leaves `enabled` at zero, so
+       // the forward pass reads "no hair" rather than sampling a black map and
+       // shadowing the whole scene.
+       Bind::Combined(44, hair_volume && hair_volume->front_depth ? hair_volume->front_depth
+                                                                 : black_.view,
+                      sampler_),
+       Bind::Combined(45, hair_volume && hair_volume->layers ? hair_volume->layers : black_.view,
+                      sampler_),
+       Bind::Uniform(46,
+                     hair_volume && hair_volume->params ? *hair_volume->params : dummy_volume_, 0,
+                     hair_volume && hair_volume->params ? hair_volume->params->size : 256)});
+}
+
+EnvironmentSystem::~EnvironmentSystem() {
+  device_.DestroyPipeline(sky_draw_pipeline_);
+  device_.DestroyBindingLayout(env_set_layout_);
+  for (PipelineHandle* pipeline : {&sky_gen_, &envmap_gen_, &irradiance_gen_, &prefilter_gen_, &brdf_gen_,
+                                   &transmittance_gen_, &multiscatter_gen_}) {
+    device_.DestroyPipeline(*pipeline);
+    *pipeline = {};
+  }
+  device_.DestroyView(sky_storage_view_);
+  device_.DestroyView(irradiance_storage_view_);
+  for (TextureView view : prefilter_storage_views_) {
+    device_.DestroyView(view);
+  }
+  device_.DestroyView(black_array_view_);
+  device_.DestroyImage(sky_);
+  device_.DestroyImage(irradiance_);
+  device_.DestroyImage(prefiltered_);
+  device_.DestroyImage(brdf_lut_);
+  device_.DestroyImage(transmittance_lut_);
+  device_.DestroyImage(multiscatter_lut_);
+  device_.DestroyImage(envmap_);
+  device_.DestroyImage(white_);
+  device_.DestroyImage(black_array_);
+  device_.DestroyImage(shadow_dummy_);
+  device_.DestroyImage(flat_normal_);
+  device_.DestroyImage(black_);
+  device_.DestroyImage(ltc_matrix_);
+  device_.DestroyImage(ltc_amplitude_);
+  device_.DestroyBuffer(dummy_volume_);
+  device_.DestroyBuffer(dummy_storage_);
+  // Samplers are cached by the device and never destroyed by callers.
+}
+
+}  // namespace rx::render

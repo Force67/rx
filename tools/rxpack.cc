@@ -1,4 +1,4 @@
-// rxpack, authoring tool for .rxp game archives (engine/asset/pack.h).
+// rxpack, authoring tool for .rxp game archives (rxe/asset/pack.h).
 //
 //   rxpack create <archive.rxp> <input_dir> [--store] [--level N]
 //   rxpack list <archive.rxp>
@@ -14,13 +14,13 @@
 #include <stdlib.h>
 #include <string.h>
 
-#include "asset/asset_id.h"
-#include "asset/pack.h"
 #include "base/memory/move.h"
 #include "base/optional.h"
 #include "base/strings/xstring.h"
 #include "foundation/files/file_system.h"
 #include "foundation/strings/format.h"
+#include "rxe/asset/asset_id.h"
+#include "rxe/asset/pack.h"
 
 namespace fs = rx::fs;
 namespace asset = rx::asset;

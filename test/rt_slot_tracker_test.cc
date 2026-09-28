@@ -3,7 +3,7 @@
 // invalidation. Mirrors the discipline RayTracingContext applies around
 // BuildTlas / RemoveBlas so the crash cases the reviewer flagged (binding an
 // unbuilt slot, reading a slot whose BLASes were replaced) are guarded off-GPU.
-#include "render/gi/rt_slot_tracker.h"
+#include "rxe/render/gi/rt_slot_tracker.h"
 
 #include <stdio.h>
 #include <initializer_list>

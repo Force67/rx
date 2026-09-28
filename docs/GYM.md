@@ -104,7 +104,7 @@ shows the live crate count.
 
 ## Jetpack
 
-`engine/character/jetpack.{h,cc}` in the module's idiom: plain-data components
+`plugins/character/jetpack.{h,cc}` in the module's idiom: plain-data components
 (**`JetpackDesc`**, **`JetpackInput`**, **`JetpackState`**) plus one
 free-function system, **`StepJetpacks(world, dt)`**, staged **before**
 `StepCharacters` each fixed step. **J** toggles the pack; with it on, hold

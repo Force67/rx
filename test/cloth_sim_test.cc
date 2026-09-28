@@ -9,7 +9,7 @@
 #include "base/time/time.h"
 #include "foundation/features/feature_registry.h"
 #include "foundation/math/math.h"
-#include "physics/physics_world.h"
+#include "rxe/physics/physics_world.h"
 
 using namespace rx;
 

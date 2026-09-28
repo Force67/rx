@@ -4,17 +4,17 @@
 
 #include <base/option.h>
 
-#include "app/host.h"
 #include "base/strings/xstring.h"
-#include "edit/reflect.h"
 #include "foundation/files/file_system.h"
 #include "foundation/logging/log.h"
 #include "material_palette.h"
-#include "scene/scene_handlers.h"
+#include "rxe/app/host.h"
+#include "rxe/edit/reflect.h"
+#include "rxe/scene/scene_handlers.h"
+#include "rxe/script/handler_registry.h"
+#include "rxe/script/script_value.h"
 #include "scene_authoring.h"
 #include "scene_validate.h"
-#include "script/handler_registry.h"
-#include "script/script_value.h"
 #include "viewer.h"
 
 namespace {

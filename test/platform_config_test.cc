@@ -1,9 +1,9 @@
-#include "app/platform_config.h"
-#include "asset/vfs.h"
 #include "base/containers/unordered_map.h"
 #include "base/strings/xstring.h"
-#include "render/core/presets.h"
-#include "render/core/settings.h"
+#include "rxe/app/platform_config.h"
+#include "rxe/asset/vfs.h"
+#include "rxe/render/core/presets.h"
+#include "rxe/render/core/settings.h"
 
 #include <stdio.h>
 #include <string.h>

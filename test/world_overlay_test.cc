@@ -4,7 +4,7 @@
 #include "base/algorithm.h"
 #include "base/containers/span.h"
 #include "base/strings/xstring.h"
-#include "world/world_overlay.h"
+#include "rxe/world/world_overlay.h"
 
 #include <math.h>
 #include <stdio.h>

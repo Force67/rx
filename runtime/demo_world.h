@@ -5,19 +5,19 @@
 #include <base/containers/vector.h>
 #include <base/memory/unique_pointer.h>
 
-#include "asset/vfs.h"
 #include "base/strings/xstring.h"
-#include "ecs/world.h"
-#include "render/core/renderer.h"
-#include "world/world_claim.h"
-#include "world/world_map.h"
-#include "world/world_stream.h"
+#include "rxe/asset/vfs.h"
+#include "rxe/ecs/world.h"
+#include "rxe/render/core/renderer.h"
+#include "rxe/world/world_claim.h"
+#include "rxe/world/world_map.h"
+#include "rxe/world/world_stream.h"
 
 namespace rx {
 
 // `--world <archive.rxp>`: the viewer driving a baked world.
 //
-// This is the consumer engine/world was written for, and until it existed the
+// This is the consumer rxe/world was written for, and until it existed the
 // module had never been driven by anything but its own tests. It is deliberately
 // thin - mount, load the index, hand the camera to the streamer once a frame,
 // draw what came back - because that is the whole of what a host has to do, and

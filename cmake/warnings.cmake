@@ -14,11 +14,13 @@ function(rx_add_module name)
   # CMakeLists). See foundation/build_config/export.h for the annotation scheme.
   add_library(rx_${name} ${RX_LIB_TYPE} ${ARGN})
   add_library(rx::${name} ALIAS rx_${name})
-  # BUILD_INTERFACE keeps in-tree (add_subdirectory) consumers seeing the source
-  # header root unchanged; INSTALL_INTERFACE points find_package() consumers at
-  # the installed, module-qualified include root (see cmake/install.cmake).
+  # Includes are spelled from the repository root ("rxe/physics/...",
+  # "plugins/nav/...", "foundation/..."). BUILD_INTERFACE points in-tree
+  # (add_subdirectory) consumers at the source root; INSTALL_INTERFACE points
+  # find_package() consumers at the installed include root, which mirrors it
+  # (see cmake/install.cmake).
   target_include_directories(rx_${name} PUBLIC
-    $<BUILD_INTERFACE:${PROJECT_SOURCE_DIR}/engine>
+    $<BUILD_INTERFACE:${PROJECT_SOURCE_DIR}>
     $<INSTALL_INTERFACE:include>)
   # C++23 is a hard usage requirement (base:: headers use deducing this etc.);
   # propagate it so installed consumers compile with the right standard.

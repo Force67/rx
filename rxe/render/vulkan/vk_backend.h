@@ -1,0 +1,582 @@
+#ifndef RX_RENDER_VULKAN_VK_BACKEND_H_
+#define RX_RENDER_VULKAN_VK_BACKEND_H_
+
+// Internal Vulkan backend types. Only vulkan/*.cc and rhi/vulkan_interop.h may
+// include this; pass code sees rhi/ headers exclusively.
+
+#include <volk.h>
+
+#include <vk_mem_alloc.h>
+
+#include <base/containers/unordered_map.h>
+#include <base/containers/vector.h>
+
+#include "base/atomic.h"
+#include "base/containers/deque.h"
+#include "base/containers/span.h"
+#include "base/functional/function.h"
+#include "base/memory/unique_pointer.h"
+#include "base/strings/xstring.h"
+#include "base/threading/condition_variable.h"
+#include "base/threading/lock_guard.h"
+#include "base/threading/mutex.h"
+#include "base/threading/thread.h"
+#include "rxe/render/rhi/device.h"
+#include "rxe/render/rhi/swapchain.h"
+#include "rxe/render/rhi/vulkan_interop.h"
+
+namespace rx::render::vk {
+
+// Resolves the promoted-command table VulkanApi() hands out; called once, right
+// after volkLoadDevice, with the api version the device was created at.
+void LoadVulkanEntryPoints(u32 api_version);
+
+// backend records behind the opaque handles
+
+struct BufferRecord {
+  VkBuffer buffer = VK_NULL_HANDLE;
+  VmaAllocation allocation = nullptr;
+};
+
+struct TextureRecord {
+  VkImage image = VK_NULL_HANDLE;
+  VmaAllocation allocation = nullptr;  // null for swapchain images
+  VkImageView view = VK_NULL_HANDLE;   // whole-image default view
+  VkFormat format = VK_FORMAT_UNDEFINED;
+  VkImageAspectFlags aspect = VK_IMAGE_ASPECT_COLOR_BIT;
+  u32 mip_levels = 1;
+  u32 array_layers = 1;
+};
+
+struct BindingLayoutRecord {
+  VkDescriptorSetLayout layout = VK_NULL_HANDLE;
+  BindingLayoutDesc desc;  // kept for pool sizing of persistent sets
+};
+
+struct BindingSetRecord {
+  VkDescriptorSet set = VK_NULL_HANDLE;
+  VkDescriptorPool pool = VK_NULL_HANDLE;  // dedicated pool, owned
+  BindingLayoutRecord* layout = nullptr;
+};
+
+struct PipelineRecord {
+  enum BuildState : u32 { kBuilt = 0, kBuilding = 1, kFailed = 2 };
+
+  VkPipeline pipeline = VK_NULL_HANDLE;
+  VkPipelineLayout layout = VK_NULL_HANDLE;  // cached, not owned
+  VkPipelineBindPoint bind_point = VK_PIPELINE_BIND_POINT_COMPUTE;
+  VkShaderStageFlags push_stages = 0;
+  u32 push_size = 0;
+  // Cached set layouts for BindTransient, indexed by set. Not owned.
+  base::Vector<VkDescriptorSetLayout> set_layouts;
+  // Batched creation compiles on a worker thread; readers wait via
+  // WaitPipelineReady before touching any other field.
+  base::Atomic<u32> build_state{kBuilt};
+};
+
+struct AccelStructRecord {
+  VkAccelerationStructureKHR accel = VK_NULL_HANDLE;
+  BufferRecord backing;
+  u64 address = 0;
+};
+
+struct TimestampPoolRecord {
+  VkQueryPool pool = VK_NULL_HANDLE;
+  u32 count = 0;
+};
+
+struct AccelCompactionQueryRecord {
+  VkQueryPool pool = VK_NULL_HANDLE;  // VK_QUERY_TYPE_..._COMPACTED_SIZE_KHR
+  u32 count = 0;
+};
+
+// Handle <-> record casts. Handles are record pointers; TextureView and
+// SamplerHandle carry the Vulkan handle bits directly (they are immutable and
+// need no metadata).
+inline BufferRecord* Rec(BufferHandle h) { return reinterpret_cast<BufferRecord*>(h.value); }
+inline TextureRecord* Rec(TextureHandle h) { return reinterpret_cast<TextureRecord*>(h.value); }
+inline BindingLayoutRecord* Rec(BindingLayoutHandle h) {
+  return reinterpret_cast<BindingLayoutRecord*>(h.value);
+}
+inline BindingSetRecord* Rec(BindingSetHandle h) {
+  return reinterpret_cast<BindingSetRecord*>(h.value);
+}
+inline PipelineRecord* Rec(PipelineHandle h) { return reinterpret_cast<PipelineRecord*>(h.value); }
+inline AccelStructRecord* Rec(AccelStructHandle h) {
+  return reinterpret_cast<AccelStructRecord*>(h.value);
+}
+inline TimestampPoolRecord* Rec(TimestampPoolHandle h) {
+  return reinterpret_cast<TimestampPoolRecord*>(h.value);
+}
+inline AccelCompactionQueryRecord* Rec(AccelCompactionQueryHandle h) {
+  return reinterpret_cast<AccelCompactionQueryRecord*>(h.value);
+}
+template <typename Handle, typename Record>
+inline Handle MakeHandle(Record* record) {
+  return Handle{reinterpret_cast<u64>(record)};
+}
+inline VkImageView View(TextureView v) { return reinterpret_cast<VkImageView>(v.value); }
+inline TextureView MakeView(VkImageView view) {
+  return TextureView{reinterpret_cast<u64>(view)};
+}
+inline VkSampler SamplerOf(SamplerHandle s) { return reinterpret_cast<VkSampler>(s.value); }
+
+// conversion tables (vk_convert.cc)
+
+VkFormat ToVkFormat(Format format);
+Format FromVkFormat(VkFormat format);
+VkImageAspectFlags AspectOf(Format format);
+VkBufferUsageFlags ToVkBufferUsage(BufferUsageFlags usage);
+VkImageUsageFlags ToVkImageUsage(TextureUsageFlags usage, Format format);
+VkShaderStageFlags ToVkStages(ShaderStageFlags stages);
+VkDescriptorType ToVkDescriptorType(BindingType type);
+VkCompareOp ToVkCompare(CompareOp op);
+
+struct StateInfo {
+  VkImageLayout layout;
+  VkPipelineStageFlags2 stages;
+  VkAccessFlags2 access;
+};
+StateInfo StateInfoOf(ResourceState state, bool as_source);
+
+struct ScopeInfo {
+  VkPipelineStageFlags2 stages;
+  VkAccessFlags2 access;
+};
+ScopeInfo ScopeInfoOf(BarrierScope scope, bool as_source);
+
+class VulkanDevice;
+
+class VulkanCommandList final : public CommandList {
+ public:
+  VulkanCommandList(VulkanDevice& device, VkCommandBuffer cmd, VkDescriptorPool transient_pool,
+                    bool compute_only = false)
+      : device_(device), cmd_(cmd), transient_pool_(transient_pool),
+        compute_only_(compute_only) {}
+
+  void BindPipeline(PipelineHandle pipeline) override;
+  void BindSet(u32 set_index, BindingSetHandle set) override;
+  void BindTransient(u32 set_index, base::Span<const BindingItem> items) override;
+  void PushConstants(const void* data, u32 size, u32 offset) override;
+  void Dispatch(u32 x, u32 y, u32 z) override;
+  void DispatchIndirect(const GpuBuffer& args, u64 offset) override;
+  void BeginRendering(const RenderingInfo& info) override;
+  void EndRendering() override;
+  void SetViewport(f32 x, f32 y, f32 width, f32 height) override;
+  void SetScissor(i32 x, i32 y, u32 width, u32 height) override;
+  void BindVertexBuffer(u32 binding, const GpuBuffer& buffer, u64 offset) override;
+  void BindIndexBuffer(const GpuBuffer& buffer, u64 offset, IndexType type) override;
+  void Draw(u32 vertex_count, u32 instance_count, u32 first_vertex, u32 first_instance) override;
+  void DrawIndexed(u32 index_count, u32 instance_count, u32 first_index, i32 vertex_offset,
+                   u32 first_instance) override;
+  void DrawIndexedIndirect(const GpuBuffer& args, u64 offset, u32 draw_count, u32 stride) override;
+  void DrawIndirectCount(const GpuBuffer& args, u64 offset, const GpuBuffer& count_buffer,
+                         u64 count_offset, u32 max_draw_count, u32 stride) override;
+  void DrawIndexedIndirectCount(const GpuBuffer& args, u64 offset, const GpuBuffer& count_buffer,
+                                u64 count_offset, u32 max_draw_count, u32 stride) override;
+  void DrawMeshTasks(u32 x, u32 y, u32 z) override;
+  void DrawMeshTasksIndirect(const GpuBuffer& args, u64 offset, u32 draw_count,
+                             u32 stride) override;
+  void DrawMeshTasksIndirectCount(const GpuBuffer& args, u64 offset, const GpuBuffer& count_buffer,
+                                  u64 count_offset, u32 max_draws, u32 stride) override;
+  void TextureBarriers(base::Span<const TextureBarrier> barriers) override;
+  void MemoryBarrier(BarrierScope src, BarrierScope dst) override;
+  void CopyBufferToTexture(const GpuBuffer& src, const GpuImage& dst,
+                           base::Span<const BufferTextureCopy> regions) override;
+  void CopyTexture(const GpuImage& src, const GpuImage& dst) override;
+  void CopyTextureToBuffer(const GpuImage& src, const GpuBuffer& dst,
+                           const BufferTextureCopy& region) override;
+  void CopyBuffer(const GpuBuffer& src, u64 src_offset, const GpuBuffer& dst, u64 dst_offset,
+                  u64 size) override;
+  void BlitMip(const GpuImage& image, u32 src_mip, Extent2D src_extent, u32 dst_mip,
+               Extent2D dst_extent) override;
+  void ResolveTexture(const GpuImage& src, const GpuImage& dst) override;
+  void ClearColor(const GpuImage& image, const f32 color[4]) override;
+  void ClearDepth(const GpuImage& image, f32 depth) override;
+  void FillBuffer(const GpuBuffer& buffer, u64 offset, u64 size, u32 data) override;
+  void BuildBlas(AccelStructHandle blas, const BlasBuildDesc& desc, const GpuBuffer& scratch,
+                 u64 scratch_offset, AccelStructHandle src) override;
+  void BuildTlas(AccelStructHandle tlas, const GpuBuffer& instances, u32 instance_count,
+                 const GpuBuffer& scratch) override;
+  void QueryCompactedSizes(AccelCompactionQueryHandle query, const AccelStructHandle* accels,
+                           u32 count) override;
+  void CopyAccelStruct(AccelStructHandle dst, AccelStructHandle src, bool compact) override;
+  void ResetTimestamps(TimestampPoolHandle pool, u32 first, u32 count) override;
+  void WriteTimestamp(TimestampPoolHandle pool, u32 index, bool after_work) override;
+  void BeginDebugLabel(const char* name) override;
+  void EndDebugLabel() override;
+  void* native_handle() override { return cmd_; }
+
+  VkCommandBuffer cmd() const { return cmd_; }
+
+ private:
+  // Compute-only queue families reject graphics pipeline stages in barriers;
+  // recorded stage/access masks are narrowed to compute-legal bits.
+  VkPipelineStageFlags2 FilterStages(VkPipelineStageFlags2 stages) const;
+  VkAccessFlags2 FilterAccess(VkAccessFlags2 access) const;
+
+  VulkanDevice& device_;
+  VkCommandBuffer cmd_ = VK_NULL_HANDLE;
+  VkDescriptorPool transient_pool_ = VK_NULL_HANDLE;
+  bool compute_only_ = false;
+  const PipelineRecord* bound_ = nullptr;
+};
+
+class VulkanSwapchain final : public Swapchain {
+ public:
+  static base::UniquePointer<VulkanSwapchain> Create(VulkanDevice& device, u32 width, u32 height,
+                                                 bool vsync, bool hdr);
+  ~VulkanSwapchain() override;
+
+  AcquireResult Acquire(u32 slot, u32* out_image_index) override;
+  AcquireResult AcquireSecond(u32 slot, u32* out_image_index) override;
+  Format format() const override { return format_; }
+  Extent2D extent() const override { return extent_; }
+  u32 image_count() const override { return static_cast<u32>(images_.size()); }
+  const GpuImage& image(u32 index) const override { return images_[index]; }
+  bool can_sample() const override { return sampleable_; }
+  ColorSpace color_space() const override { return color_space_; }
+
+  VkSwapchainKHR swapchain() const { return swapchain_; }
+  VkSemaphore render_finished(u32 image_index) const { return render_finished_[image_index]; }
+
+ private:
+  explicit VulkanSwapchain(VulkanDevice& device) : device_(device) {}
+  bool Init(u32 width, u32 height, bool vsync, bool hdr);
+
+  VulkanDevice& device_;
+  VkSwapchainKHR swapchain_ = VK_NULL_HANDLE;
+  Format format_ = Format::kUnknown;
+  Extent2D extent_{};
+  base::Vector<GpuImage> images_;
+  base::Vector<TextureRecord> records_;
+  // One per swapchain image: a present may still wait on the semaphore until
+  // its image is reacquired, so frame slots cannot own these.
+  base::Vector<VkSemaphore> render_finished_;
+  bool sampleable_ = false;
+  ColorSpace color_space_ = ColorSpace::kSrgbNonlinear;
+};
+
+class VulkanDevice final : public Device {
+ public:
+  static base::UniquePointer<Device> Create(const DeviceDesc& desc, Window& window);
+  // Surfaceless device: no window, no surface, no swapchain extension. Same
+  // adapter selection, feature enablement and caps as the windowed path.
+  static base::UniquePointer<Device> CreateOffscreen(const DeviceDesc& desc);
+  ~VulkanDevice() override;
+
+  void WaitIdle() override;
+  bool RecreateSurface(Window& window) override;
+  void DestroySurface() override;
+  base::UniquePointer<Swapchain> CreateSwapchain(u32 width, u32 height, bool vsync,
+                                             bool hdr) override;
+  MemoryBudget memory_budget() const override;
+
+  GpuBuffer CreateBuffer(u64 size, BufferUsageFlags usage, bool host_visible) override;
+  GpuBuffer CreateBufferWithData(ByteSpan data, BufferUsageFlags usage) override;
+  void FlushBuffer(const GpuBuffer& buffer, u64 offset, u64 size) override;
+  void InvalidateBuffer(const GpuBuffer& buffer, u64 offset, u64 size) override;
+  void DestroyBuffer(GpuBuffer& buffer) override;
+  void DestroyBufferDeferred(GpuBuffer& buffer) override;
+  void DestroyImageDeferred(GpuImage& image) override;
+  void DestroyAccelStructDeferred(AccelStructHandle accel) override;
+  GpuImage CreateImage2D(Format format, Extent2D extent, TextureUsageFlags usage,
+                         u32 mip_levels, u32 samples) override;
+  GpuImage CreateImage3D(Format format, u32 width, u32 height, u32 depth,
+                         TextureUsageFlags usage) override;
+  GpuImage CreateImageCube(Format format, u32 size, TextureUsageFlags usage,
+                           u32 mip_levels) override;
+  GpuImage CreateImage2DArray(Format format, u32 width, u32 height, u32 array_layers,
+                              TextureUsageFlags usage, u32 mip_levels) override;
+  void DestroyImage(GpuImage& image) override;
+  TextureView CreateMipView(const GpuImage& image, u32 mip) override;
+  TextureView CreateArrayView(const GpuImage& image) override;
+  void DestroyView(TextureView view) override;
+  SamplerHandle GetSampler(const SamplerDesc& desc) override;
+
+  PipelineHandle CreateComputePipeline(const ComputePipelineDesc& desc) override;
+  PipelineHandle CreateGraphicsPipeline(const GraphicsPipelineDesc& desc) override;
+  void DestroyPipeline(PipelineHandle pipeline) override;
+  void BeginPipelineBatch() override;
+  bool EndPipelineBatch() override;
+  // Blocks until a (possibly batched) pipeline finished compiling; false if
+  // its creation failed. Cheap once built (one relaxed atomic load).
+  bool WaitPipelineReady(PipelineRecord* record);
+  BindingLayoutHandle CreateBindingLayout(const BindingLayoutDesc& desc) override;
+  void DestroyBindingLayout(BindingLayoutHandle layout) override;
+  BindingSetHandle CreateBindingSet(BindingLayoutHandle layout, u32 variable_count) override;
+  void DestroyBindingSet(BindingSetHandle set) override;
+  void UpdateBindingSet(BindingSetHandle set, base::Span<const BindingItem> items) override;
+
+  AccelSizes GetBlasSizes(const BlasBuildDesc& desc) override;
+  AccelSizes GetTlasSizes(u32 instance_count) override;
+  AccelStructHandle CreateAccelStruct(AccelStructType type, u64 size) override;
+  void DestroyAccelStruct(AccelStructHandle accel) override;
+  u64 accel_address(AccelStructHandle accel) override;
+  AccelCompactionQueryHandle CreateCompactionQuery(u32 count) override;
+  void DestroyCompactionQuery(AccelCompactionQueryHandle query) override;
+  bool GetCompactedSizes(AccelCompactionQueryHandle query, u64* out, u32 count) override;
+
+  TimestampPoolHandle CreateTimestampPool(u32 count) override;
+  void DestroyTimestampPool(TimestampPoolHandle pool) override;
+  bool GetTimestamps(TimestampPoolHandle pool, u32 first, u32 count, u64* out) override;
+
+  void ImmediateSubmit(const base::Function<void(CommandList&)>& record) override;
+  void BeginUploadBatch() override;
+  void FlushUploadBatch() override;
+  bool UploadBatchActive() const override {
+    CheckUploadBatchThread("UploadBatchActive");
+    return upload_batch_depth_ > 0;
+  }
+  void RecordUpload(const base::Function<void(CommandList&)>& record) override;
+  void ParkBatchStaging(GpuBuffer& buffer) override;
+  bool ReadbackImage(const GpuImage& image, ResourceState current, void* out,
+                     size_t out_size) override;
+  CommandList* BeginFrame(u32 slot) override;
+  PresentResult SubmitFrame(CommandList* cmd, Swapchain& swapchain, u32 image_index) override;
+  void SubmitFrame(CommandList* cmd) override;
+  CommandList* SplitFrame(CommandList* cmd, bool signal_fork) override;
+  CommandList* BeginAsync() override;
+  void SubmitAsync(CommandList* cmd) override;
+  PresentResult SubmitFrameGen(CommandList* cmd, Swapchain& swapchain, u32 interp_index,
+                               u32 real_index) override;
+
+  // Internal + interop surface.
+  VkInstance instance() const { return instance_; }
+  VkPhysicalDevice physical_device() const { return physical_device_; }
+  VkDevice device() const { return device_; }
+  VkSurfaceKHR surface() const { return surface_; }
+  VkQueue graphics_queue() const { return graphics_queue_; }
+  u32 graphics_family() const { return graphics_family_; }
+  VmaAllocator allocator() const { return allocator_; }
+
+  // Descriptor writes shared by BindTransient and UpdateBindingSet.
+  void WriteDescriptors(VkDescriptorSet set, base::Span<const BindingItem> items);
+  bool BuildComputePipeline(const ComputePipelineDesc& desc, PipelineRecord* record);
+  bool BuildGraphicsPipeline(const GraphicsPipelineDesc& desc, PipelineRecord* record);
+  void EnqueuePipelineJob(base::Function<void()> job);
+
+  // Inside a batch the build runs on a worker with a deep copy of the desc
+  // (the desc's vectors copy; debug_name is re-pointed at an owned string);
+  // outside it runs inline and failures return a null handle immediately.
+  template <typename Desc, typename Build>
+  PipelineHandle DispatchPipelineBuild(const Desc& desc, Build&& build) {
+    auto* record = new PipelineRecord{};
+    if (!pipeline_batch_active_) {
+      if (!build(desc, record)) {
+        delete record;
+        return {};
+      }
+      return MakeHandle<PipelineHandle>(record);
+    }
+    record->build_state.store(PipelineRecord::kBuilding, base::memory_order_relaxed);
+    EnqueuePipelineJob([this, copy = Desc(desc),
+                        name = base::String(desc.debug_name ? desc.debug_name : ""), record,
+                        build]() mutable {
+      copy.debug_name = name.empty() ? nullptr : name.c_str();
+      const bool ok = build(copy, record);
+      if (!ok) pipeline_batch_failures_.fetch_add(1, base::memory_order_relaxed);
+      record->build_state.store(ok ? PipelineRecord::kBuilt : PipelineRecord::kFailed,
+                                base::memory_order_release);
+      // Passing through the mutex orders the store before any waiter's
+      // predicate check that could otherwise miss it and sleep.
+      { base::LockGuard lock(pipeline_ready_mutex_); }
+      pipeline_ready_cv_.NotifyAll();
+    });
+    return MakeHandle<PipelineHandle>(record);
+  }
+
+  // Fails (and says why) when push_size is past the adapter's
+  // maxPushConstantsSize instead of letting the driver reject the layout.
+  VkPipelineLayout GetOrCreatePipelineLayout(base::Span<const VkDescriptorSetLayout> sets,
+                                             VkShaderStageFlags push_stages, u32 push_size,
+                                             const char* debug_name);
+  VkDescriptorSetLayout GetOrCreateSetLayout(const BindingLayoutDesc& desc);
+
+ private:
+  VulkanDevice() = default;
+
+  // Shared bringup for the windowed and offscreen paths. `window` is null for
+  // an offscreen device: no surface instance extensions, no surface, no
+  // swapchain device extension, and the graphics family is picked without a
+  // present-support requirement. Everything else (adapter scoring, feature
+  // enablement, caps, queues, resources) is identical.
+  static base::UniquePointer<Device> CreateImpl(const DeviceDesc& desc, Window* window);
+
+  bool InitResources();
+  void ShutdownResources();
+  // Immediate record teardown, shared by the immediate Destroy* paths and the
+  // graveyard drain.
+  void FreeBufferRecord(BufferRecord* record);
+  void FreeTextureRecord(TextureRecord* record);
+  void FreeAccelRecord(AccelStructRecord* record);
+  // Frees everything retired against `slot` (call after that slot's fence has
+  // been waited); DrainAllGraveyards frees every slot (device idle / teardown).
+  void DrainGraveyard(u32 slot);
+  void DrainAllGraveyards();
+  // Shared present-result handling (out-of-date / rotated-suboptimal folding).
+  PresentResult TranslatePresent(VkResult presented, Swapchain& swapchain);
+  void ShareWithAsyncCompute(VkImageCreateInfo& info, TextureUsageFlags usage,
+                             const u32* families);
+  GpuBuffer WrapBuffer(VkBuffer buffer, VmaAllocation allocation, u64 size, void* mapped,
+                       u64 address);
+
+  struct FrameRing {
+    VkCommandPool pool = VK_NULL_HANDLE;
+    VkCommandBuffer cmd = VK_NULL_HANDLE;
+    VkSemaphore image_available = VK_NULL_HANDLE;
+    // Second acquire for frame generation's interpolated present.
+    VkSemaphore image_available_fg = VK_NULL_HANDLE;
+    VkFence in_flight = VK_NULL_HANDLE;
+    VkDescriptorPool descriptor_pool = VK_NULL_HANDLE;
+    base::UniquePointer<VulkanCommandList> list;
+    bool fence_armed = false;  // submit happened; next BeginFrame must wait
+    // Async compute: extra graphics segments (fork/join splits) + the compute
+    // queue's list, all reset with the shared pool. The fork semaphore gates
+    // the async submission behind the pre-fork segment; the async semaphore
+    // gates the final segment behind the compute work.
+    static constexpr u32 kMaxSegments = 3;
+    VkCommandBuffer seg_cmds[kMaxSegments - 1] = {};
+    base::UniquePointer<VulkanCommandList> seg_lists[kMaxSegments - 1];
+    VkCommandPool async_pool = VK_NULL_HANDLE;  // compute-family pool when dedicated
+    VkCommandBuffer async_cmd = VK_NULL_HANDLE;
+    base::UniquePointer<VulkanCommandList> async_list;
+    VkSemaphore fork_sem = VK_NULL_HANDLE;
+    VkSemaphore async_sem = VK_NULL_HANDLE;
+    u32 active_segment = 0;
+    bool fork_signaled = false;
+    bool async_submitted = false;
+  };
+
+  VkInstance instance_ = VK_NULL_HANDLE;
+  VkDebugUtilsMessengerEXT debug_messenger_ = VK_NULL_HANDLE;
+  VkSurfaceKHR surface_ = VK_NULL_HANDLE;
+  VkPhysicalDevice physical_device_ = VK_NULL_HANDLE;
+  VkDevice device_ = VK_NULL_HANDLE;
+  // The api version the device was created at, which is the adapter's own
+  // clamped by RX_VK_MAX_VERSION - not what the adapter reports (caps_ keeps
+  // that). Decides core-vs-KHR entry points and what VMA is told.
+  // What rx spends on push constants, which RX_MAX_PUSH_CONSTANTS can lower
+  // below what the adapter reports; caps_ keeps the adapter's own figure.
+  u32 push_constant_budget_ = 128;
+  u32 api_version_ = VK_API_VERSION_1_3;
+  VkPipelineCache pipeline_cache_ = VK_NULL_HANDLE;
+  base::String pipeline_cache_path_;
+  VkQueue graphics_queue_ = VK_NULL_HANDLE;
+  VkQueue compute_queue_ = VK_NULL_HANDLE;  // async compute (dedicated family when available)
+  u32 graphics_family_ = 0;
+  // Dedicated compute-only family; graphics_family_ when none exists (then the
+  // async queue is a second queue of the graphics family).
+  u32 compute_family_ = VK_QUEUE_FAMILY_IGNORED;
+  u32 current_slot_ = 0;  // frame ring slot set by BeginFrame
+  VmaAllocator allocator_ = nullptr;
+  VkCommandPool immediate_pool_ = VK_NULL_HANDLE;
+  VkFence immediate_fence_ = VK_NULL_HANDLE;
+  VkDescriptorPool immediate_descriptor_pool_ = VK_NULL_HANDLE;
+  FrameRing frames_[kMaxFramesInFlight];
+
+  // Coalesced upload batch (see BeginUploadBatch). While upload_batch_depth_ > 0,
+  // CreateBufferWithData records its copy into upload_batch_cmd_ and parks the
+  // staging buffer in upload_batch_stagings_ instead of doing its own blocking
+  // ImmediateSubmit; the outermost FlushUploadBatch submits them all at once.
+  // Main-thread only, like every other immediate_* member.
+  u32 upload_batch_depth_ = 0;
+  VkCommandBuffer upload_batch_cmd_ = VK_NULL_HANDLE;
+  base::UniquePointer<VulkanCommandList> upload_batch_list_;
+  base::Vector<GpuBuffer> upload_batch_stagings_;
+  // Host-visible bytes currently parked in upload_batch_stagings_. When it
+  // crosses the budget the pending copies are submitted early (batch stays
+  // open), bounding the staging high-water mark of a large streaming burst.
+  u64 upload_batch_staging_bytes_ = 0;
+  // Uploads recorded into the open batch, reported if the batch has to be
+  // dropped (their destination buffers are already out in the wild).
+  u32 upload_batch_records_ = 0;
+  // The thread the device was created on; the batch state above is
+  // unsynchronized, so every batch entry point enforces thread affinity.
+  u32 upload_batch_thread_ = base::GetCurrentThreadIndex();
+  void CheckUploadBatchThread(const char* what) const;
+  // Lazily begins the batch command buffer on the first copy (null if that
+  // fails: the caller falls back to an unbatched ImmediateSubmit); submits any
+  // pending batch copies (leaving the batch open) before dependent GPU work.
+  VulkanCommandList* EnsureUploadBatchCmd();
+  void SubmitUploadBatchIfPending();
+  void ReportDroppedUploadBatch(const char* what);
+  void ResetPendingUploadBatch();
+  void DiscardPendingUploadBatch();
+  // A submitted-but-possibly-still-executing batch: the CPU no longer waits at
+  // flush. A trailing kTransferWrite->kAllCommands barrier in the batch orders
+  // its copies against all later graphics-queue work, and the fence retires the
+  // command buffer + stagings once the GPU is done (RetireCompletedUploadBatches,
+  // non-blocking, called from every flush). Serials let SubmitAsync tell which
+  // batches the fork semaphore already orders against the compute queue.
+  struct UploadBatchInFlight {
+    VkCommandBuffer cmd = VK_NULL_HANDLE;
+    VkFence fence = VK_NULL_HANDLE;
+    base::Vector<GpuBuffer> stagings;
+    u64 staging_bytes = 0;
+    u64 serial = 0;
+  };
+  base::Vector<UploadBatchInFlight> upload_batches_in_flight_;
+  base::Vector<VkFence> upload_fence_pool_;  // recycled batch fences
+  u64 upload_inflight_staging_bytes_ = 0;
+  u64 upload_batch_serial_ = 0;        // serial of the newest submitted batch
+  u64 upload_fork_covered_serial_ = 0; // newest batch submitted before the fork signal
+  u64 upload_retired_serial_ = 0;      // newest batch whose fence has signaled
+  // The batch serial that covers anything recorded right now: the serial the
+  // open batch will get once submitted, or the newest submitted one when
+  // nothing is recording. A deferred destroy latches this so the graveyard can
+  // tell whether a batch might still reference what it is about to free.
+  // Atomic because deferred destroys run off the device thread; the device
+  // thread is the only writer.
+  base::Atomic<u64> upload_park_serial_{0};
+  VkFence AcquireUploadBatchFence();
+  void RetireCompletedUploadBatches();  // frees batches whose fence has signaled
+  void DrainUploadBatchesInFlight();    // blocks until every in-flight batch retires
+
+  // Frame-safe deferred destruction. A resource retired during frame slot S is
+  // parked in graveyard_[S] and freed at the next BeginFrame(S), whose fence
+  // wait proves S's (and every earlier) submission finished. Guarded because a
+  // streaming worker may retire resources off the render thread.
+  struct Graveyard {
+    base::Vector<BufferRecord*> buffers;
+    base::Vector<TextureRecord*> images;
+    base::Vector<AccelStructRecord*> accels;
+    // Newest upload batch that may still reference something parked here. The
+    // slot's frame fence only proves submissions up to that frame finished, so
+    // it says nothing about a batch submitted afterwards (a retire from outside
+    // the frame loop, e.g. MaterialSystem::SwapResident via Renderer::Pin,
+    // parks under the previous frame's slot). The drain waits for both.
+    u64 upload_serial = 0;
+  };
+  Graveyard graveyard_[kMaxFramesInFlight];
+  base::Mutex graveyard_mutex_;
+  void NoteGraveyardUploadSerial(u32 slot);  // graveyard_mutex_ held
+
+  // Caches, keyed by content hash; entries live for the device's lifetime.
+  // The layout caches are shared with pipeline-batch worker threads.
+  base::Mutex layout_cache_mutex_;
+  base::UnorderedMap<u64, VkDescriptorSetLayout> set_layout_cache_;
+  base::UnorderedMap<u64, VkPipelineLayout> pipeline_layout_cache_;
+
+  // Startup pipeline batch: a transient worker pool drains the job queue
+  // while the main thread keeps issuing Create*Pipeline calls.
+  bool pipeline_batch_active_ = false;
+  bool pipeline_workers_quit_ = false;
+  base::Mutex pipeline_queue_mutex_;
+  base::ConditionVariable pipeline_queue_cv_;
+  base::SimpleDeque<base::Function<void()>> pipeline_jobs_;
+  // base::Thread is not movable; the vector must not relocate live threads.
+  base::Vector<base::UniquePointer<base::Thread>> pipeline_workers_;
+  // Signalled whenever a batched pipeline leaves kBuilding.
+  base::Mutex pipeline_ready_mutex_;
+  base::ConditionVariable pipeline_ready_cv_;
+  base::Atomic<u32> pipeline_batch_failures_{0};
+  base::UnorderedMap<u64, VkSampler> sampler_cache_;
+
+  friend class VulkanSwapchain;
+  friend class VulkanCommandList;
+};
+
+}  // namespace rx::render::vk
+
+#endif  // RX_RENDER_VULKAN_VK_BACKEND_H_

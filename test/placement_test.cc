@@ -10,12 +10,12 @@
 
 #include "base/memory/mem_ops.h"
 #include "foundation/math/scalar.h"
-#include "placement/density_program.h"
-#include "placement/ecotope.h"
-#include "placement/placement.h"
-#include "placement/placement_math.h"
-#include "placement/placement_pattern.h"
-#include "placement/world_data.h"
+#include "plugins/placement/density_program.h"
+#include "plugins/placement/ecotope.h"
+#include "plugins/placement/placement.h"
+#include "plugins/placement/placement_math.h"
+#include "plugins/placement/placement_pattern.h"
+#include "plugins/placement/world_data.h"
 
 namespace {
 

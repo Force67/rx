@@ -1,6 +1,6 @@
 # rx::locomotion: physics-first articulated locomotion
 
-`engine/locomotion` makes a jointed ragdoll biped stand, walk, take corrective
+`plugins/locomotion` makes a jointed ragdoll biped stand, walk, take corrective
 steps, and fall, as a **feedback controller over the physics simulation**, not
 as an animation player. Every fixed step the controller measures the simulated
 body, plans support contacts, generates continuous numeric targets, and drives

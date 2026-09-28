@@ -5,8 +5,8 @@
 
 #include "engine_context.h"
 #include "foundation/math/math.h"
-#include "physics/physics_world.h"
-#include "render/core/renderer.h"
+#include "rxe/physics/physics_world.h"
+#include "rxe/render/core/renderer.h"
 
 namespace rx {
 

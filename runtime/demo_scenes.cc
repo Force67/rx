@@ -6,10 +6,6 @@
 
 #include <base/option.h>
 
-#include "asset/asset_database.h"
-#include "asset/asset_id.h"
-#include "asset/primitives.h"
-#include "audio/audio_system.h"
 #include "base/algorithm.h"
 #include "base/containers/span.h"
 #include "base/containers/vector.h"
@@ -20,13 +16,17 @@
 #include "foundation/math/math.h"
 #include "foundation/math/scalar.h"
 #include "foundation/strings/format.h"
-#include "importers/materialx/materialx.h"
-#include "physics/water_waves.h"
-#include "render/atmosphere/lightning.h"
-#include "render/geometry/hair_groom.h"
-#include "scene/components.h"
+#include "plugins/weather/thunder_synth.h"
+#include "rxe/asset/asset_database.h"
+#include "rxe/asset/asset_id.h"
+#include "rxe/asset/primitives.h"
+#include "rxe/audio/audio_system.h"
+#include "rxe/importers/materialx/materialx.h"
+#include "rxe/physics/water_waves.h"
+#include "rxe/render/atmosphere/lightning.h"
+#include "rxe/render/geometry/hair_groom.h"
+#include "rxe/scene/components.h"
 #include "viewer_input.h"
-#include "weather/thunder_synth.h"
 
 namespace rx {
 
@@ -3791,7 +3791,7 @@ void DemoScenes::CreateDemoScene() {
 
 namespace {
 // FNV-1a, matching kinema::HashName, so the demo can name a curve without
-// pulling in kinema (which stays a private detail of engine/anim).
+// pulling in kinema (which stays a private detail of rxe/anim).
 constexpr u64 NameHash(const char* s) {
   u64 h = 14695981039346656037ull;
   while (*s) {
@@ -3916,7 +3916,7 @@ void DemoScenes::EmitLocomotion(f32 dt, render::FrameView& view) {
 
   // Foot placement: raycast the physics world under each foot. The probe works
   // in the actor's model space; convert to/from world with the actor transform
-  // (physics stays out of engine/anim).
+  // (physics stays out of rxe/anim).
   Mat4 actor = MakeTransform(loco_pos_, facing, 1.0f);
   Mat4 inv = Inverse(actor);
   auto probe = [&](const Vec3& model_origin, Vec3* hit, Vec3* normal) -> bool {

@@ -4,7 +4,7 @@
 #include <base/containers/vector.h>
 
 #include "engine_context.h"
-#include "render/geometry/procedural_grass.h"
+#include "rxe/render/geometry/procedural_grass.h"
 
 namespace rx {
 

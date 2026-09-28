@@ -3,7 +3,7 @@
 
 #include "base/strings/xstring.h"
 #include "foundation/files/file_system.h"
-#include "importers/usd/usd_loader.h"
+#include "rxe/importers/usd/usd_loader.h"
 
 namespace {
 

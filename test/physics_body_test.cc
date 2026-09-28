@@ -5,7 +5,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 
-#include "physics/physics_world.h"
+#include "rxe/physics/physics_world.h"
 
 using namespace rx;
 namespace physics = rx::physics;

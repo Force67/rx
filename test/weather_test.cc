@@ -5,7 +5,7 @@
 // device: everything here runs on plain scalars and the module's own PRNG.
 
 #include "foundation/math/scalar.h"
-#include "weather/weather.h"
+#include "plugins/weather/weather.h"
 
 #include <float.h>
 #include <math.h>

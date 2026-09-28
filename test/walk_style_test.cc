@@ -1,10 +1,10 @@
 #include <math.h>
 #include <stdio.h>
 
-#include "anim/procedural_gait.h"
-#include "asset/asset_id.h"
 #include "base/strings/xstring.h"
 #include "foundation/math/scalar.h"
+#include "rxe/anim/procedural_gait.h"
+#include "rxe/asset/asset_id.h"
 
 namespace {
 

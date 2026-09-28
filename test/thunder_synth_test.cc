@@ -1,6 +1,6 @@
 #include "base/containers/vector.h"
 #include "base/numeric_limits.h"
-#include "weather/thunder_synth.h"
+#include "plugins/weather/thunder_synth.h"
 
 #include <math.h>
 #include <stdio.h>

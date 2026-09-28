@@ -3,14 +3,14 @@
 
 #include <stdint.h>
 
-#include "anim/body_dynamics.h"
-#include "anim/pose.h"
-#include "anim/procedural_gait.h"
-#include "app/application.h"
-#include "asset/asset_database.h"
-#include "asset/mesh.h"
 #include "foundation/math/math.h"
-#include "ui/events/input.h"
+#include "rxe/anim/body_dynamics.h"
+#include "rxe/anim/pose.h"
+#include "rxe/anim/procedural_gait.h"
+#include "rxe/app/application.h"
+#include "rxe/asset/asset_database.h"
+#include "rxe/asset/mesh.h"
+#include "rxe/ui/events/input.h"
 
 #include "base/containers/map.h"
 #include "base/containers/pair.h"
@@ -20,16 +20,16 @@
 #include "base/memory/move.h"
 #include "base/optional.h"
 #include "base/strings/xstring.h"
-#include "edit/hierarchy.h"
-#include "edit/reflect.h"
-#include "edit/scene_io.h"
-#include "edit/selection.h"
-#include "edit/undo.h"
-#include "scene/fly_camera.h"
-#include "terrain/terrain.h"
-#include "ui/ugui_backend.h"
-#include "ui/ugui_platform.h"
-#include "world/world_bake.h"
+#include "plugins/terrain/terrain.h"
+#include "rxe/edit/hierarchy.h"
+#include "rxe/edit/reflect.h"
+#include "rxe/edit/scene_io.h"
+#include "rxe/edit/selection.h"
+#include "rxe/edit/undo.h"
+#include "rxe/scene/fly_camera.h"
+#include "rxe/ui/ugui_backend.h"
+#include "rxe/ui/ugui_platform.h"
+#include "rxe/world/world_bake.h"
 
 // libultragui
 #include <ugui/ui_context.h>

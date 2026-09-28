@@ -1,6 +1,6 @@
 #include "debug_ui.h"
 
-#include "scene/fly_camera.h"
+#include "rxe/scene/fly_camera.h"
 
 #if defined(RX_HAS_IMGUI)
 
@@ -16,13 +16,10 @@
 #include <imgui.h>
 #include <imgui_impl_sdl3.h>
 
-#include "app/platform_config.h"
-#include "asset/vfs.h"
 #include "base/algorithm.h"
 #include "base/containers/vector.h"
 #include "base/optional.h"
 #include "base/strings/xstring.h"
-#include "ecs/world.h"
 #include "foundation/files/file_system.h"
 #include "foundation/logging/log.h"
 #include "foundation/math/scalar.h"
@@ -30,9 +27,12 @@
 #include "foundation/memory/frame_arena.h"
 #include "foundation/memory/memory_tracker.h"
 #include "foundation/system/app_identity.h"
-#include "render/core/presets.h"
-#include "render/core/settings_ini.h"
-#include "render/util/imgui_theme.h"
+#include "rxe/app/platform_config.h"
+#include "rxe/asset/vfs.h"
+#include "rxe/ecs/world.h"
+#include "rxe/render/core/presets.h"
+#include "rxe/render/core/settings_ini.h"
+#include "rxe/render/util/imgui_theme.h"
 
 #ifndef RX_BUILD_ID
 #define RX_BUILD_ID "unknown"
@@ -51,7 +51,7 @@ namespace {
 base::Option<bool> HideDebugUi{"hide.debug.ui", false, "RX_HIDE_DEBUG_UI"};
 
 // Override for the platform tier directory the debug ui edits; defaults to the
-// compiled-in rx/config source path.
+// compiled-in rxe/resources/config source path.
 base::Option<const char*> PresetsDirOpt{"presets.dir", nullptr, "RX_PRESETS_DIR"};
 
 // Directory holding the platform tier files: RX_PRESETS_DIR, else the
@@ -299,7 +299,7 @@ void DebugUi::Build(render::Renderer& renderer, scene::FlyCamera& camera, const 
         }
       }
 
-      // The platform tier files in the source tree (rx/config): Load applies a
+      // The platform tier files in the source tree (rxe/resources/config): Load applies a
       // file's render keys to the live settings; Save writes the current ones
       // as [render.*] sections. Saving over a tier drops its includes and its
       // [options] / [memory.*] sections, so save to a new name and merge.

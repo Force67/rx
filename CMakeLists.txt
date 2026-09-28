@@ -13,7 +13,7 @@ option(RX_DLSS "Enable the NVIDIA DLSS upscaler backend" ON)
 option(RX_NRD "Enable the NVIDIA NRD ray tracing denoiser" ON)
 option(RX_JOLT "Enable Jolt physics" ON)
 # https in rx::http. Off leaves the plain-http client, and an https URL then
-# fails with a message rather than downgrading. See engine/http/CMakeLists.txt.
+# fails with a message rather than downgrading. See rxe/http/CMakeLists.txt.
 option(RX_HTTPS "Build rx::http's https path (needs an mbedTLS checkout)" ON)
 option(RX_USD "Enable OpenUSD scene loading (needs tools/get_tinyusdz.sh)" ON)
 # Vulkan 1.1 accepts SPIR-V 1.3, or 1.4 with VK_KHR_spirv_1_4; the default
@@ -296,6 +296,7 @@ if(NOT DEFINED RX_MODULES)
     rpc
     authoring
     net
+    replication
     http
     nav
     character
@@ -417,17 +418,25 @@ if(RX_HTTPS AND "http" IN_LIST RX_MODULES AND NOT TARGET mbedtls AND NOT MBEDTLS
   endif()
 endif()
 
-# A downstream fork registers its own engine/<name> modules by shipping this
-# file: it runs with RX_MODULES already populated, so it appends to that list
-# (and sets whatever paths its modules need) without editing anything upstream
-# owns. Nothing in this tree provides one, which is the point - a merge from
-# here can never touch it, so a fork carrying private modules stays mergeable
-# with no conflict in the shared build files.
-include("${CMAKE_CURRENT_SOURCE_DIR}/engine/local.cmake" OPTIONAL)
+# A downstream fork registers its own rxe/<name> or plugins/<name> modules by
+# shipping this file: it runs with RX_MODULES already populated, so it appends to
+# that list (and sets whatever paths its modules need) without editing anything
+# upstream owns. Nothing in this tree provides one, which is the point - a merge
+# from here can never touch it, so a fork carrying private modules stays
+# mergeable with no conflict in the shared build files.
+include("${CMAKE_CURRENT_SOURCE_DIR}/rxe/local.cmake" OPTIONAL)
 
+# RX_MODULES names modules, not paths: each lives in rxe/ or, if it is optional
+# per game, in plugins/ (docs/STRUCTURE.md).
 add_subdirectory(foundation)
 foreach(module ${RX_MODULES})
-  add_subdirectory(engine/${module})
+  if(EXISTS ${CMAKE_CURRENT_SOURCE_DIR}/rxe/${module}/CMakeLists.txt)
+    add_subdirectory(rxe/${module})
+  elseif(EXISTS ${CMAKE_CURRENT_SOURCE_DIR}/plugins/${module}/CMakeLists.txt)
+    add_subdirectory(plugins/${module})
+  else()
+    message(FATAL_ERROR "RX_MODULES: no module '${module}' in rxe/ or plugins/")
+  endif()
 endforeach()
 
 if(RX_BUILD_EXAMPLES AND "anim" IN_LIST RX_MODULES)
@@ -530,7 +539,7 @@ if(RX_BUILD_EDITOR)
 endif()
 
 # Asset authoring tools. rxpack creates/lists/extracts/verifies .rxp game
-# archives (engine/asset/pack.h).
+# archives (rxe/asset/pack.h).
 if(RX_BUILD_TOOLS)
   add_executable(rxpack tools/rxpack.cc)
   target_link_libraries(rxpack PRIVATE rx::asset rx::foundation)
@@ -558,7 +567,7 @@ else()
 endif()
 
 # rxworld cooks an authored .rxscene into a baked, streamable world archive
-# (engine/world/): a world index plus one payload per cell and domain, packed
+# (rxe/world/): a world index plus one payload per cell and domain, packed
 # into one .rxp the engine mounts like any other content.
 if(RX_BUILD_TOOLS AND "world" IN_LIST RX_MODULES)
   add_executable(rxworld tools/rxworld.cc)
@@ -632,13 +641,13 @@ if(RX_BUILD_TOOLS AND NOT WIN32 AND "rpc" IN_LIST RX_MODULES)
   rx_set_warnings(rxcall)
 endif()
 
-# Everything the engine ships, packed into one archive: engine/assets (fonts/)
-# and the platform tiers from config/, as rxe://fonts/ and rxe://config/. Games
+# Everything the engine ships, packed into one archive: rxe/resources (fonts/
+# and the platform tiers in config/), as rxe://fonts/ and rxe://config/. Games
 # add their own archives beside it (docs/CONFIG.md).
 if(RX_RXPACK_COMMAND)
   rx_add_archive(rx_engine_archives OUTPUT ${PROJECT_BINARY_DIR}/Data/rx_engine.rxp
-    CONTENT fonts ${CMAKE_CURRENT_SOURCE_DIR}/engine/assets/fonts
-            config ${CMAKE_CURRENT_SOURCE_DIR}/config)
+    CONTENT fonts ${CMAKE_CURRENT_SOURCE_DIR}/rxe/resources/fonts
+            config ${CMAKE_CURRENT_SOURCE_DIR}/rxe/resources/config)
   rx_finish_content_staging()
 endif()
 
@@ -771,7 +780,7 @@ if(RX_BUILD_TESTS)
   endif()
 
   # Handling profiles: measured, ordered proof that the six presets
-  # (engine/physics/vehicle_profiles.h) drive differently - 0-100, braking,
+  # (rxe/physics/vehicle_profiles.h) drive differently - 0-100, braking,
   # roll, grass launch, under/oversteer and downforce. Headless, needs Jolt.
   if(RX_JOLT AND "vehicles" IN_LIST RX_MODULES)
     add_executable(handling_test test/handling_test.cc)
@@ -789,7 +798,7 @@ if(RX_BUILD_TESTS)
   endif()
 
   # Boat-type profiles + cargo load: measured, ordered proof that the five presets
-  # (engine/physics/boat_profiles.h) float and handle differently and that cargo
+  # (rxe/physics/boat_profiles.h) float and handle differently and that cargo
   # sinks the hull deeper, slows accel/turning, delays planing and eats freeboard
   # - settle-draft/top-speed/turn-rate orderings, capsize vs self-right, an
   # overloaded barge near awash, and NaN-free chop. Headless, needs Jolt.
@@ -884,10 +893,10 @@ if(RX_BUILD_TESTS)
   endif()
 
   # Platform config: include and section rules, every shipped tier in
-  # rx/config resolving cleanly, and the android tier detection.
+  # rxe/resources/config resolving cleanly, and the android tier detection.
   add_executable(platform_config_test test/platform_config_test.cc)
   target_compile_definitions(platform_config_test PRIVATE
-    RX_CONFIG_SOURCE_DIR="${CMAKE_CURRENT_SOURCE_DIR}/config")
+    RX_CONFIG_SOURCE_DIR="${CMAKE_CURRENT_SOURCE_DIR}/rxe/resources/config")
   target_link_libraries(platform_config_test PRIVATE rx::app)
   add_test(NAME platform_config_test COMMAND platform_config_test)
 
@@ -1017,8 +1026,8 @@ if(RX_BUILD_TESTS AND (RX_RHI_VULKAN OR RX_RHI_D3D12))
   add_executable(path_sampling_test test/path_sampling_test.cc)
   target_link_libraries(path_sampling_test PRIVATE rx::render rx::foundation)
   target_include_directories(path_sampling_test PRIVATE ${CMAKE_BINARY_DIR}/generated)
-  set(RX_SHADER_INCLUDE_DIRS ${PROJECT_SOURCE_DIR}/engine/render/shaders)
-  set(RX_SHADER_DEPS_path_continue_cs_hlsl engine/render/shaders/path_continue.hlsli)
+  set(RX_SHADER_INCLUDE_DIRS ${PROJECT_SOURCE_DIR}/rxe/render/shaders)
+  set(RX_SHADER_DEPS_path_continue_cs_hlsl rxe/render/shaders/path_continue.hlsli)
   rx_embed_shaders(path_sampling_test test/shaders/path_continue.cs.hlsl)
   unset(RX_SHADER_INCLUDE_DIRS)
   add_test(NAME path_sampling_test COMMAND path_sampling_test)
@@ -1026,21 +1035,21 @@ if(RX_BUILD_TESTS AND (RX_RHI_VULKAN OR RX_RHI_D3D12))
 
   add_executable(path_alpha_test test/path_alpha_test.cc)
   target_link_libraries(path_alpha_test PRIVATE rx::render rx::foundation)
-  set(RX_SHADER_INCLUDE_DIRS ${PROJECT_SOURCE_DIR}/engine/render/shaders
+  set(RX_SHADER_INCLUDE_DIRS ${PROJECT_SOURCE_DIR}/rxe/render/shaders
       ${PROJECT_SOURCE_DIR}/third_party/NRD/Shaders)
   set(path_alpha_shaders test/shaders/path_alpha_recon.cs.hlsl test/shaders/path_alpha_di.cs.hlsl)
-  set(RX_SHADER_DEPS_path_alpha_recon_cs_hlsl engine/render/shaders/gi/recon_gbuffer.cs.hlsl)
-  set(RX_SHADER_DEPS_path_alpha_di_cs_hlsl engine/render/shaders/gi/recon_restir_di_spatial.cs.hlsl)
+  set(RX_SHADER_DEPS_path_alpha_recon_cs_hlsl rxe/render/shaders/gi/recon_gbuffer.cs.hlsl)
+  set(RX_SHADER_DEPS_path_alpha_di_cs_hlsl rxe/render/shaders/gi/recon_restir_di_spatial.cs.hlsl)
   if(RX_NRD)
     list(APPEND path_alpha_shaders test/shaders/path_alpha_nrd.cs.hlsl)
-    set(RX_SHADER_DEPS_path_alpha_nrd_cs_hlsl engine/render/shaders/gi/pathtrace_gbuffer.cs.hlsl)
+    set(RX_SHADER_DEPS_path_alpha_nrd_cs_hlsl rxe/render/shaders/gi/pathtrace_gbuffer.cs.hlsl)
   endif()
   foreach(shader IN LISTS path_alpha_shaders)
     get_filename_component(name ${shader} NAME)
     string(MAKE_C_IDENTIFIER ${name} symbol)
-    list(APPEND RX_SHADER_DEPS_${symbol} engine/render/shaders/rt_geometry.hlsli
-        engine/render/shaders/material_record.hlsli engine/render/shaders/path_continue.hlsli
-        engine/render/shaders/path_motion.hlsli)
+    list(APPEND RX_SHADER_DEPS_${symbol} rxe/render/shaders/rt_geometry.hlsli
+        rxe/render/shaders/material_record.hlsli rxe/render/shaders/path_continue.hlsli
+        rxe/render/shaders/path_motion.hlsli)
   endforeach()
   rx_embed_shaders(path_alpha_test ${path_alpha_shaders})
   unset(RX_SHADER_INCLUDE_DIRS)
@@ -1080,20 +1089,20 @@ if(RX_BUILD_TESTS AND (RX_RHI_VULKAN OR RX_RHI_D3D12))
 
   add_executable(path_motion_test test/path_motion_test.cc)
   target_link_libraries(path_motion_test PRIVATE rx::render rx::foundation)
-  set(RX_SHADER_INCLUDE_DIRS ${PROJECT_SOURCE_DIR}/engine/render/shaders
+  set(RX_SHADER_INCLUDE_DIRS ${PROJECT_SOURCE_DIR}/rxe/render/shaders
       ${PROJECT_SOURCE_DIR}/third_party/NRD/Shaders)
   set(path_motion_shaders test/shaders/path_motion_recon.cs.hlsl)
-  set(RX_SHADER_DEPS_path_motion_recon_cs_hlsl engine/render/shaders/gi/recon_gbuffer.cs.hlsl)
+  set(RX_SHADER_DEPS_path_motion_recon_cs_hlsl rxe/render/shaders/gi/recon_gbuffer.cs.hlsl)
   if(RX_NRD)
     list(APPEND path_motion_shaders test/shaders/path_motion_nrd.cs.hlsl)
-    set(RX_SHADER_DEPS_path_motion_nrd_cs_hlsl engine/render/shaders/gi/pathtrace_gbuffer.cs.hlsl)
+    set(RX_SHADER_DEPS_path_motion_nrd_cs_hlsl rxe/render/shaders/gi/pathtrace_gbuffer.cs.hlsl)
   endif()
   foreach(shader IN LISTS path_motion_shaders)
     get_filename_component(name ${shader} NAME)
     string(MAKE_C_IDENTIFIER ${name} symbol)
-    list(APPEND RX_SHADER_DEPS_${symbol} engine/render/shaders/rt_geometry.hlsli
-        engine/render/shaders/material_record.hlsli engine/render/shaders/path_continue.hlsli
-        engine/render/shaders/path_motion.hlsli)
+    list(APPEND RX_SHADER_DEPS_${symbol} rxe/render/shaders/rt_geometry.hlsli
+        rxe/render/shaders/material_record.hlsli rxe/render/shaders/path_continue.hlsli
+        rxe/render/shaders/path_motion.hlsli)
   endforeach()
   rx_embed_shaders(path_motion_test ${path_motion_shaders})
   unset(RX_SHADER_INCLUDE_DIRS)
@@ -1135,10 +1144,10 @@ if(RX_BUILD_TESTS AND (RX_RHI_VULKAN OR RX_RHI_D3D12))
   add_executable(morph_test test/morph_test.cc)
   target_link_libraries(morph_test PRIVATE rx::gltf rx::render rx::anim rx::asset rx::foundation)
   set(RX_SHADER_INCLUDE_DIRS
-    ${CMAKE_CURRENT_SOURCE_DIR}/engine/render/shaders
-    ${CMAKE_CURRENT_SOURCE_DIR}/engine/render/shaders/pipeline)
+    ${CMAKE_CURRENT_SOURCE_DIR}/rxe/render/shaders
+    ${CMAKE_CURRENT_SOURCE_DIR}/rxe/render/shaders/pipeline)
   set(RX_SHADER_NO_DXIL morph_apply.cs.hlsl)
-  set(RX_SHADER_DEPS_morph_apply_cs_hlsl engine/render/shaders/pipeline/morph.hlsli)
+  set(RX_SHADER_DEPS_morph_apply_cs_hlsl rxe/render/shaders/pipeline/morph.hlsli)
   rx_embed_shaders(morph_test test/shaders/morph_apply.cs.hlsl)
   unset(RX_SHADER_INCLUDE_DIRS)
   unset(RX_SHADER_NO_DXIL)

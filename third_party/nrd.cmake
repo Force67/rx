@@ -1,7 +1,7 @@
 # NVIDIA NRD real time denoiser, downloaded via tools/get_nrd.sh and built from
 # source. Consumed through the direct Vulkan path (no NRI): the engine reads the
 # embedded SPIR-V pipelines from nrd::GetInstanceDesc and records the dispatches
-# itself (see engine/render/denoiser_nrd.cc).
+# itself (see rxe/render/denoiser_nrd.cc).
 #
 # NRD's CMake pulls MathLib and ShaderMake through FetchContent. The nix build
 # configures with FETCHCONTENT_FULLY_DISCONNECTED, so both are vendored next to

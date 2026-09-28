@@ -5,7 +5,7 @@
 #include "base/memory/mem_ops.h"
 #include "base/strings/string_ref.h"
 #include "base/strings/xstring.h"
-#include "world/world_format.h"
+#include "rxe/world/world_format.h"
 
 #include <math.h>
 #include <stdio.h>

@@ -2,21 +2,21 @@
 #define RX_RUNTIME_SCENE_AUTHORING_H_
 
 
-#include "asset/asset_database.h"
 #include "base/containers/vector.h"
 #include "base/strings/string_ref.h"
 #include "base/strings/xstring.h"
-#include "ecs/world.h"
 #include "foundation/build_config/types.h"
-#include "render/core/renderer.h"
-#include "render/core/settings.h"
+#include "rxe/asset/asset_database.h"
+#include "rxe/ecs/world.h"
+#include "rxe/render/core/renderer.h"
+#include "rxe/render/core/settings.h"
 
 // What a hand-authored .rxscene may carry on top of the engine's builtin
 // components (Transform, Name, Guid, Parent, ...). A text scene has no binary
 // assets to point a Renderable at and no way to describe light or viewpoint, so
 // those are written inline and turned into engine assets at load.
 //
-// They live in the runtime rather than engine/scene because materializing them
+// They live in the runtime rather than rxe/scene because materializing them
 // is viewer policy: the engine has no opinion on where a mesh comes from. Being
 // reflected, they document themselves through --dump-schema.
 namespace rx {

@@ -3,16 +3,16 @@
 // event-based corridor validation and the delta-cost position query, all on
 // a synthetic sampler, no GPU, no physics.
 
-#include "nav/agent.h"
-#include "nav/navmesh.h"
-#include "nav/path.h"
-#include "nav/query.h"
+#include "plugins/nav/agent.h"
+#include "plugins/nav/navmesh.h"
+#include "plugins/nav/path.h"
+#include "plugins/nav/query.h"
 
 #include <math.h>
 #include <stdio.h>
 
-#include "ecs/world.h"
-#include "scene/components.h"
+#include "rxe/ecs/world.h"
+#include "rxe/scene/components.h"
 
 namespace {
 

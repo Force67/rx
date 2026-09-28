@@ -10,7 +10,7 @@
 #include "base/containers/vector.h"
 #include "foundation/math/math.h"
 #include "foundation/math/scalar.h"
-#include "physics/physics_world.h"
+#include "rxe/physics/physics_world.h"
 
 using namespace rx;
 using physics::PhysicsWorld;

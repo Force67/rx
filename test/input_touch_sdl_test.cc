@@ -17,7 +17,7 @@
 
 #include <SDL3/SDL.h>
 
-#include "ui/window/window.h"
+#include "rxe/ui/window/window.h"
 
 namespace {
 

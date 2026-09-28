@@ -34,11 +34,11 @@ light goes after it enters one:
 
 | Piece | Where |
 | --- | --- |
-| The BSDF + dual scattering | `engine/render/shaders/hair_bsdf.hlsli` |
-| CPU side, presets, tiers, CPU mirror | `engine/render/pipeline/hair_material.{h,cc}` |
-| Transmittance volume (deep opacity map) | `engine/render/geometry/hair_strands.{h,cc}`, `shaders/geometry/hair_dom.ps.hlsl` |
-| Volume sampling, shared | `engine/render/shaders/geometry/hair_transmittance.hlsli` |
-| Strand shading | `engine/render/shaders/geometry/hair.ps.hlsl` |
+| The BSDF + dual scattering | `rxe/render/shaders/hair_bsdf.hlsli` |
+| CPU side, presets, tiers, CPU mirror | `rxe/render/pipeline/hair_material.{h,cc}` |
+| Transmittance volume (deep opacity map) | `rxe/render/geometry/hair_strands.{h,cc}`, `shaders/geometry/hair_dom.ps.hlsl` |
+| Volume sampling, shared | `rxe/render/shaders/geometry/hair_transmittance.hlsli` |
+| Strand shading | `rxe/render/shaders/geometry/hair.ps.hlsl` |
 | Card shading | the `kFlagHair` branch in `shaders/pipeline/mesh.ps.hlsl` |
 | Regression test | `test/hair_bsdf_test.cc` |
 

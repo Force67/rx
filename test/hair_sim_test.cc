@@ -9,8 +9,8 @@
 #include <base/containers/vector.h>
 
 #include "foundation/math/math.h"
-#include "physics/physics_world.h"
-#include "render/geometry/hair_groom.h"
+#include "rxe/physics/physics_world.h"
+#include "rxe/render/geometry/hair_groom.h"
 
 using namespace rx;
 

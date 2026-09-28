@@ -4,16 +4,16 @@
 // The overlay records through the engine's RHI imgui render backend
 // (render/util/imgui_renderer.h) - no raw Vulkan, no volk here.
 
-#include "app/world_clock.h"
 #include "foundation/build_config/types.h"
-#include "render/core/renderer.h"
-#include "ui/window/window.h"
+#include "rxe/app/world_clock.h"
+#include "rxe/render/core/renderer.h"
+#include "rxe/ui/window/window.h"
 
 #if defined(RX_HAS_IMGUI)
 #include "base/containers/vector.h"
 #include "base/memory/move.h"
 #include "base/strings/xstring.h"
-#include "render/util/imgui_renderer.h"
+#include "rxe/render/util/imgui_renderer.h"
 #endif
 
 namespace rx {
@@ -104,7 +104,7 @@ class DebugUi {
   WorldClock* clock_ = nullptr;  // day/night cycle, for the Lighting time controls
   base::String world_status_;     // --world: one status-bar line, empty when off
   int preset_choice_ = 0;  // 0 = custom/hand-tuned, else a QualityPreset combo row
-  // The platform tier files (rx/config) the debug ui edits: the discovered file
+  // The platform tier files (rxe/resources/config) the debug ui edits: the discovered file
   // list (lazy-scanned, rescannable), the combo selection, the save-as name
   // buffer and the last load/save status line.
   base::Vector<base::String> preset_files_;

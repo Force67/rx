@@ -23,13 +23,13 @@
 
 #include <base/containers/vector.h>
 
-#include "asset/pack.h"
-#include "asset/vfs.h"
 #include "base/memory/move.h"
 #include "base/strings/xstring.h"
-#include "world/world_bake.h"
-#include "world/world_format.h"
-#include "world/world_map.h"
+#include "rxe/asset/pack.h"
+#include "rxe/asset/vfs.h"
+#include "rxe/world/world_bake.h"
+#include "rxe/world/world_format.h"
+#include "rxe/world/world_map.h"
 
 namespace {
 

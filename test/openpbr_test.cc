@@ -10,7 +10,7 @@
 #include "base/containers/vector.h"
 #include "base/strings/xstring.h"
 #include "foundation/files/file_system.h"
-#include "importers/materialx/materialx.h"
+#include "rxe/importers/materialx/materialx.h"
 
 namespace {
 

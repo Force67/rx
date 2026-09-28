@@ -11,8 +11,8 @@
 #include <stdlib.h>
 #include <string.h>
 
-#include "render/rhi/command_list.h"
-#include "render/rhi/device.h"
+#include "rxe/render/rhi/command_list.h"
+#include "rxe/render/rhi/device.h"
 
 // Build-embedded test shaders (test/shaders/*.slang -> generated/shaders/*.h).
 #include "base/containers/vector.h"

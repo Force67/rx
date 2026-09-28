@@ -1,8 +1,8 @@
 #include <stdio.h>
 
-#include "asset/material.h"
-#include "asset/mesh.h"
-#include "render/core/renderer.h"
+#include "rxe/asset/material.h"
+#include "rxe/asset/mesh.h"
+#include "rxe/render/core/renderer.h"
 
 using namespace rx;
 using namespace rx::render;

@@ -1,4 +1,4 @@
-// Headless proof that the vehicle handling profiles (engine/physics/
+// Headless proof that the vehicle handling profiles (rxe/physics/
 // vehicle_profiles.h) genuinely differ, over the real Jolt vehicle path (no
 // GPU). Each scenario builds its own flat height-field world so the tagged
 // ground surface is fixed, drives a profile through a measured manoeuvre, and
@@ -20,8 +20,8 @@
 #include "base/containers/vector.h"
 #include "foundation/math/math.h"
 #include "foundation/math/scalar.h"
-#include "physics/physics_world.h"
-#include "vehicles/vehicle_profiles.h"
+#include "plugins/vehicles/vehicle_profiles.h"
+#include "rxe/physics/physics_world.h"
 
 using namespace rx;
 using physics::PhysicsWorld;

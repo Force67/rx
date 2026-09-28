@@ -3,12 +3,12 @@
 #include <stdlib.h>
 #include <string.h>
 
-#include "asset/mesh.h"
 #include "base/memory/mem_ops.h"
-#include "render/gi/raytracing.h"
-#include "render/gi/skinned_rt.h"
-#include "render/pipeline/material_system.h"
-#include "render/rhi/device.h"
+#include "rxe/asset/mesh.h"
+#include "rxe/render/gi/raytracing.h"
+#include "rxe/render/gi/skinned_rt.h"
+#include "rxe/render/pipeline/material_system.h"
+#include "rxe/render/rhi/device.h"
 #include "shaders/rt_query_cs_hlsl.h"
 
 using namespace rx;

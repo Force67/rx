@@ -11,22 +11,22 @@
 #include <stdio.h>
 #include <string.h>
 
-#include "authoring/command_bridge.h"
-#include "authoring/command_endpoint.h"
 #include "base/containers/vector.h"
 #include "base/memory/mem_ops.h"
 #include "base/memory/move.h"
 #include "base/optional.h"
 #include "base/strings/xstring.h"
-#include "ecs/world.h"
 #include "foundation/strings/format.h"
-#include "rpc/rpc_message.h"
-#include "scene/components.h"
-#include "scene/scene_handlers.h"
-#include "script/handler_context.h"
-#include "script/handler_registry.h"
-#include "script/script_arena.h"
-#include "script/script_symbols.h"
+#include "rxe/authoring/command_bridge.h"
+#include "rxe/authoring/command_endpoint.h"
+#include "rxe/ecs/world.h"
+#include "rxe/rpc/rpc_message.h"
+#include "rxe/scene/components.h"
+#include "rxe/scene/scene_handlers.h"
+#include "rxe/script/handler_context.h"
+#include "rxe/script/handler_registry.h"
+#include "rxe/script/script_arena.h"
+#include "rxe/script/script_symbols.h"
 
 namespace {
 

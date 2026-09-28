@@ -3,14 +3,14 @@
 #include <math.h>
 #include <stdlib.h>
 
-#include "asset/primitives.h"
 #include "base/containers/span.h"
 #include "base/memory/unique_pointer.h"
 #include "foundation/logging/log.h"
 #include "foundation/math/scalar.h"
-#include "placement/placement_math.h"
 #include "placement_demo_assets.h"
-#include "scene/components.h"
+#include "plugins/placement/placement_math.h"
+#include "rxe/asset/primitives.h"
+#include "rxe/scene/components.h"
 
 namespace rx {
 namespace {

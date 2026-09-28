@@ -1,0 +1,160 @@
+#ifndef RX_UI_WINDOW_WINDOW_H_
+#define RX_UI_WINDOW_WINDOW_H_
+
+
+#include "base/containers/vector.h"
+#include "base/functional/function.h"
+#include "base/memory/move.h"
+#include "base/memory/unique_pointer.h"
+#include "base/strings/xstring.h"
+#include "foundation/build_config/export.h"
+#include "foundation/build_config/types.h"
+#include "rxe/ui/events/input.h"
+
+#if defined(__ANDROID__)
+struct ANativeWindow;
+#endif
+
+namespace rx {
+
+struct WindowDesc {
+  base::String title = "rx";
+  u32 width = 1920;
+  u32 height = 1080;
+  bool fullscreen = false;
+  // Render at the panel's real pixel count rather than letting the compositor
+  // upscale a smaller buffer. Off is blurry on any scaled display; on means
+  // width()/height() exceed the size the desktop lays the window out at, and
+  // UI sized in pixels has to scale by pixel_density() to keep its physical
+  // size.
+  bool high_pixel_density = true;
+  // When true (the platform default) a touch also emits synthetic mouse events,
+  // so mouse-only UI keeps working under a finger. Handhelds want it off: with
+  // mouse look in relative mode a stray thumb on the panel drags the camera.
+  // Games that read touch() directly should turn it off.
+  bool touch_emits_mouse = true;
+};
+
+// Opaque handles the renderer needs to create a surface. With the SDL3
+// backend `window` is the SDL_Window, headless leaves them null.
+struct NativeWindowHandles {
+  void* window = nullptr;
+  void* display = nullptr;
+  // The operating system's own window handle (HWND on windows), for APIs that
+  // take one directly instead of going through SDL: the DXGI swapchain is the
+  // only one so far. Vulkan does not need it, SDL creates that surface itself.
+  void* platform_window = nullptr;
+};
+
+class RX_WINDOW_EXPORT Window {
+ public:
+  virtual ~Window() = default;
+
+  virtual bool PumpEvents() = 0;
+  virtual NativeWindowHandles native_handles() const = 0;
+  virtual u32 width() const = 0;
+  virtual u32 height() const = 0;
+
+  // Pixels per unit of the size the desktop lays this window out at, i.e. the
+  // display's scaling factor when high_pixel_density is on, otherwise 1.
+  //
+  // Input is already in pixels, converted by the backend, so nothing needs this
+  // to hit-test. What needs it is anything whose size is authored in pixels and
+  // must keep its physical size as the buffer grows: fonts, panel widths, hit
+  // boxes drawn to match them. Multiply those by this.
+  virtual f32 pixel_density() const { return 1.0f; }
+
+  // Input collected by the last PumpEvents.
+  const InputState& input() const { return input_; }
+  const GamepadState& gamepad() const { return gamepad_; }
+  const TouchState& touch() const { return touch_; }
+
+  // Gamepad haptics. No-ops unless a pad is connected; the DualSense-only
+  // effects (trigger resistance, lightbar) silently do nothing on other pads,
+  // so callers can issue them unconditionally.
+  virtual void SetRumble(f32 low_freq, f32 high_freq, u32 duration_ms) {}
+  virtual void SetTriggerEffect(bool left, bool right, const TriggerEffect& effect) {}
+  virtual void SetLedColor(u8 r, u8 g, u8 b) {}
+
+  // While enabled the cursor is hidden and mouse_dx/dy keep accumulating
+  // without hitting the screen edge. Mouse look uses this.
+  virtual void SetRelativeMouseMode(bool enabled) {}
+  virtual bool relative_mouse_mode() const { return false; }
+
+  // Whether the platform should translate keystrokes into the InputState::text
+  // stream. An application asserts this while one of ITS text fields has focus.
+  //
+  // It has to be asked for, and asked for every frame, because it is not the
+  // application's alone to hold: Dear ImGui's SDL3 backend drives
+  // SDL_StartTextInput/SDL_StopTextInput from whether an IMGUI widget wants
+  // text, and it stops it on the window for everyone else too. A host that
+  // enabled text input once at startup therefore lost it on the first frame
+  // imgui ran, silently, leaving every non-imgui text field dead while mouse
+  // and key events kept working perfectly.
+  virtual void SetTextInputActive(bool active) {}
+
+  // The window's desktop and taskbar icon, as tightly packed RGBA8. The
+  // platform copies the pixels, so they are the caller's again the moment this
+  // returns. Headless, and the platforms that take the icon from the package
+  // manifest rather than the process, no-op.
+  virtual void SetIcon(const u8* rgba, u32 width, u32 height) {}
+
+  // Runtime borderless-fullscreen toggle (settings menus); headless and
+  // platforms without the concept no-op and report false.
+  virtual void SetFullscreen(bool enabled) { (void)enabled; }
+  virtual bool fullscreen() const { return false; }
+
+  // False while the window lacks input focus (alt-tab, another app on top);
+  // games auto-pause on it. Headless stays focused.
+  virtual bool focused() const { return true; }
+
+  // True when the OS actually has HDR enabled (Windows advanced-color toggle,
+  // KWin's per-output HDR setting via kde_output_device_v2, macOS EDR) - NOT
+  // merely an HDR-capable display. The renderer gates its HDR swapchain
+  // request on this: a Vulkan surface can advertise HDR10 formats while the
+  // system toggle is off, and presenting PQ then washes out. Can flip at
+  // runtime (OS setting, window moved between monitors); polled per frame.
+  virtual bool hdr_enabled() const { return false; }
+
+  // Called for every native event before the window handles it. With the
+  // SDL3 backend the pointer is an SDL_Event. ImGui hooks in here.
+  void set_event_hook(base::Function<void(const void* native_event)> hook) {
+    event_hook_ = base::move(hook);
+  }
+
+  // Vulkan glue. Backends that can present return the instance extensions
+  // they need and write a VkSurfaceKHR through the opaque out pointer.
+  // Headless windows return nothing, which tells the renderer to stay off.
+  virtual base::Vector<const char*> vulkan_instance_extensions() const { return {}; }
+  virtual bool CreateVulkanSurface(void* vk_instance, void* out_vk_surface) { return false; }
+
+  // Returns a platform window, or a headless stub when none is available.
+  static base::UniquePointer<Window> Create(const WindowDesc& desc);
+
+ protected:
+  InputState input_;
+  GamepadState gamepad_;
+  TouchState touch_;
+  base::Function<void(const void*)> event_hook_;
+};
+
+#if defined(__ANDROID__)
+// Android window the activity drives. The activity owns the native-glue event
+// loop and feeds input and lifecycle into the window each frame, so the engine
+// keeps its own Run()/RunFrame() structure unchanged.
+class AndroidWindowBase : public Window {
+ public:
+  virtual InputState& mutable_input() = 0;
+  virtual void RequestQuit() = 0;
+  virtual ::ANativeWindow* native_window() const = 0;
+  // Rebinds to a new ANativeWindow across the activity lifecycle (the old one
+  // is released, the new one acquired). null marks the window as gone.
+  virtual void SetNativeWindow(::ANativeWindow* window) = 0;
+};
+
+base::UniquePointer<AndroidWindowBase> CreateAndroidWindow(::ANativeWindow* window);
+#endif
+
+}  // namespace rx
+
+#endif  // RX_UI_WINDOW_WINDOW_H_

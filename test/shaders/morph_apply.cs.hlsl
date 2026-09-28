@@ -1,5 +1,5 @@
 // Regression-test wrapper around the shared morph accumulation
-// (engine/render/shaders/pipeline/morph.hlsli): applies the pushed weight
+// (rxe/render/shaders/pipeline/morph.hlsli): applies the pushed weight
 // pairs to every vertex of a base {position, normal, tangent} stream, exactly
 // what mesh.vs does before skinning. SPIR-V only, like the other
 // buffer-device-address users (RX_SHADER_NO_DXIL).

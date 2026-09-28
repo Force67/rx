@@ -2,13 +2,13 @@
 
 #include <math.h>
 
-#include "asset/asset_id.h"
-#include "asset/primitives.h"
 #include "base/containers/span.h"
 #include "foundation/logging/log.h"
 #include "foundation/math/scalar.h"
 #include "foundation/strings/format.h"
-#include "scene/components.h"
+#include "rxe/asset/asset_id.h"
+#include "rxe/asset/primitives.h"
+#include "rxe/scene/components.h"
 
 namespace rx {
 namespace {

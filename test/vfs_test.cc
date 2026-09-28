@@ -6,15 +6,15 @@
 #include <stdio.h>
 #include <string.h>
 
-#include "asset/asset_id.h"
-#include "asset/pack.h"
-#include "asset/vfs.h"
 #include "base/memory/mem_ops.h"
 #include "base/memory/move.h"
 #include "base/optional.h"
 #include "base/strings/string_ref.h"
 #include "base/strings/xstring.h"
 #include "foundation/files/file_system.h"
+#include "rxe/asset/asset_id.h"
+#include "rxe/asset/pack.h"
+#include "rxe/asset/vfs.h"
 
 namespace fs = rx::fs;
 namespace asset = rx::asset;

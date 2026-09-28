@@ -5,16 +5,16 @@
 #include "base/containers/vector.h"
 #include "base/memory/unique_pointer.h"
 #include "base/strings/xstring.h"
-#include "character/character.h"
-#include "character/jetpack.h"
 #include "engine_context.h"
 #include "foundation/math/math.h"
-#include "inventory/item_catalog.h"
-#include "inventory/world_item.h"
-#include "render/core/renderer.h"
-#include "ui/events/input.h"
-#include "ui/events/input_actions.h"
-#include "vehicles/vehicle_audio.h"
+#include "plugins/character/character.h"
+#include "plugins/character/jetpack.h"
+#include "plugins/inventory/item_catalog.h"
+#include "plugins/inventory/world_item.h"
+#include "plugins/vehicles/vehicle_audio.h"
+#include "rxe/render/core/renderer.h"
+#include "rxe/ui/events/input.h"
+#include "rxe/ui/events/input_actions.h"
 
 namespace rx {
 
@@ -23,9 +23,9 @@ namespace rx {
 // third person and tunes eye heights, capsule dims and player scale against
 // known-size geometry (0.25/0.5/1/2 m cubes, a 2.1 m doorway, 0.15/0.30 m stairs,
 // 30/45/60 deg ramps, a crouch tunnel, furniture-scale obstacles, a narrow gap
-// and a moving platform). It exercises engine/character (locomotion + FP/TP view
+// and a moving platform). It exercises plugins/character (locomotion + FP/TP view
 // modes over Jolt CharacterVirtual, with real camera-obstruction collision) and
-// garnishes engine/inventory (drop/pick-up world items). An imgui panel exposes
+// garnishes plugins/inventory (drop/pick-up world items). An imgui panel exposes
 // every tuning knob live.
 //
 // The gym owns the player camera: unlike the other demos it drives the scene

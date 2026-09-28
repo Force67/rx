@@ -2,7 +2,7 @@
 
 Pregenerated wayland-scanner client code for KDE's `kde-output-device-v2`
 protocol (MIT-CMU, upstream: plasma-wayland-protocols). Used by
-`engine/ui/window/wayland_kde_hdr.cc` to read the per-output HDR toggle KWin
+`rxe/ui/window/wayland_kde_hdr.cc` to read the per-output HDR toggle KWin
 exposes (the same source `kscreen-doctor -o` prints), because the standard
 color-management protocol does not carry the toggle and SDL's HDR properties
 derive from luminance headroom, which KWin reports > 1 even in SDR mode.

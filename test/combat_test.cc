@@ -2,12 +2,12 @@
 #include <stdio.h>
 #include <stdlib.h>
 
-#include "combat/damage.h"
-#include "combat/projectile.h"
-#include "combat/weapon.h"
-#include "ecs/world.h"
-#include "physics/physics_world.h"
-#include "scene/components.h"
+#include "plugins/combat/damage.h"
+#include "plugins/combat/projectile.h"
+#include "plugins/combat/weapon.h"
+#include "rxe/ecs/world.h"
+#include "rxe/physics/physics_world.h"
+#include "rxe/scene/components.h"
 
 using namespace rx;
 using namespace rx::combat;

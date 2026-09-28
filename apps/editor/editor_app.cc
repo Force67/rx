@@ -8,27 +8,27 @@
 #include <stdlib.h>
 #include <string.h>
 
-#include "anim/morph.h"
-#include "app/host.h"
-#include "asset/primitives.h"
-#include "asset/vfs.h"
 #include "base/algorithm.h"
 #include "base/containers/span.h"
 #include "base/containers/vector.h"
 #include "base/memory/move.h"
 #include "base/strings/string_ref.h"
 #include "base/strings/xstring.h"
-#include "edit/hierarchy.h"
 #include "editor_input.h"
 #include "foundation/files/file_system.h"
 #include "foundation/logging/log.h"
 #include "foundation/math/scalar.h"
 #include "foundation/strings/format.h"
-#include "importers/blend/blend_import.h"
-#include "importers/gltf/gltf_loader.h"
-#include "importers/usd/usd_loader.h"
-#include "render/core/settings.h"
-#include "scene/components.h"
+#include "rxe/anim/morph.h"
+#include "rxe/app/host.h"
+#include "rxe/asset/primitives.h"
+#include "rxe/asset/vfs.h"
+#include "rxe/edit/hierarchy.h"
+#include "rxe/importers/blend/blend_import.h"
+#include "rxe/importers/gltf/gltf_loader.h"
+#include "rxe/importers/usd/usd_loader.h"
+#include "rxe/render/core/settings.h"
+#include "rxe/scene/components.h"
 
 namespace rx::editor {
 

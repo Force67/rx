@@ -15,12 +15,11 @@
 #include <ugui/widgets/widget.h>
 #include <ugui/widgets/widget_registry.h>
 
-#include "edit/hierarchy.h"
 #include "editor_app.h"
 #include "foundation/files/file_system.h"
 #include "foundation/logging/log.h"
+#include "rxe/edit/hierarchy.h"
 
-#include "anim/morph.h"
 #include "base/algorithm.h"
 #include "base/containers/pair.h"
 #include "base/containers/vector.h"
@@ -29,8 +28,9 @@
 #include "base/strings/string_ref.h"
 #include "base/strings/xstring.h"
 #include "foundation/math/scalar.h"
-#include "render/rhi/vulkan_interop.h"
-#include "scene/components.h"
+#include "rxe/anim/morph.h"
+#include "rxe/render/rhi/vulkan_interop.h"
+#include "rxe/scene/components.h"
 
 namespace rx::editor {
 namespace {

@@ -3,12 +3,12 @@
 #include <stdlib.h>
 #include <string.h>
 
-#include "render/post/antialiasing.h"
-#include "render/post/upscaler.h"
-#include "render/rhi/device.h"
+#include "rxe/render/post/antialiasing.h"
+#include "rxe/render/post/upscaler.h"
+#include "rxe/render/rhi/device.h"
 #if defined(RX_HAS_DLSS) && !defined(__aarch64__)
 #include "base/containers/vector.h"
-#include "render/gi/denoiser_rr.h"
+#include "rxe/render/gi/denoiser_rr.h"
 #endif
 
 using namespace rx;

@@ -4,10 +4,10 @@
 
 #include <base/option.h>
 
-#include "asset/primitives.h"
 #include "foundation/logging/log.h"
 #include "foundation/math/scalar.h"
-#include "scene/components.h"
+#include "rxe/asset/primitives.h"
+#include "rxe/scene/components.h"
 
 namespace rx {
 namespace {

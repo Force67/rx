@@ -9,11 +9,11 @@
 
 #include "foundation/build_config/types.h"
 #include "foundation/math/math.h"
-#include "locomotion/footstep.h"
-#include "locomotion/gait.h"
-#include "locomotion/rig.h"
-#include "locomotion/types.h"
-#include "locomotion/whole_body.h"
+#include "plugins/locomotion/footstep.h"
+#include "plugins/locomotion/gait.h"
+#include "plugins/locomotion/rig.h"
+#include "plugins/locomotion/types.h"
+#include "plugins/locomotion/whole_body.h"
 
 namespace {
 

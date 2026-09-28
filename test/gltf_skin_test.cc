@@ -3,7 +3,7 @@
 
 #include "base/strings/xstring.h"
 #include "foundation/files/file_system.h"
-#include "importers/gltf/gltf_loader.h"
+#include "rxe/importers/gltf/gltf_loader.h"
 
 namespace {
 

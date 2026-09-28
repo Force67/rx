@@ -6,7 +6,7 @@ in the viewer, the editor and the renderer through one path.
 
 - Viewer: `./build/linux/runtime/rx --usd assets/usd/attic/Attic_NVIDIA.usd`
 - Editor: open a `.usd*` file like any other document (File > Open, or drop it in)
-- API: `asset::LoadUsdScene(path, &scene)` in `engine/importers/usd/usd_loader.h` (link `rx::usd`)
+- API: `asset::LoadUsdScene(path, &scene)` in `rxe/importers/usd/usd_loader.h` (link `rx::usd`)
 
 ## Building
 

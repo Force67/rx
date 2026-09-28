@@ -56,7 +56,7 @@ if(@RX_INSTALL_UI@ AND NOT TARGET ultragui)
   add_library(yogacore STATIC IMPORTED)
   set_target_properties(yogacore PROPERTIES
     IMPORTED_LOCATION "${_rx_deps_lib}/libyogacore.a")
-  # Built with ULTRAGUI_USE_BASE (engine/ui/CMakeLists.txt): its headers pick
+  # Built with ULTRAGUI_USE_BASE (rxe/ui/CMakeLists.txt): its headers pick
   # base containers only when the define is seen, so it travels with them.
   add_library(ultragui STATIC IMPORTED)
   set_target_properties(ultragui PROPERTIES

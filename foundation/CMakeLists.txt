@@ -1,6 +1,6 @@
 # rx::foundation: what rx adds to equilibrium base (docs/STRUCTURE.md). One
 # module, like Chromium's base, with a subdirectory per topic. Nothing here may
-# include engine/.
+# include rxe/ or plugins/.
 rx_add_module(foundation
   logging/log.cc
   strings/format.cc
@@ -17,9 +17,6 @@ rx_add_module(foundation
   memory/chunk_pool.cc
   memory/memory_config.cc
 )
-
-# Includes are spelled from the repository root ("foundation/logging/log.h").
-target_include_directories(rx_foundation PUBLIC $<BUILD_INTERFACE:${PROJECT_SOURCE_DIR}>)
 
 # equilibrium's base library; linking it here makes base:: containers and
 # strings available to every engine module.

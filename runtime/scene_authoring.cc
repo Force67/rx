@@ -6,12 +6,6 @@
 #include <stdlib.h>
 #include <string.h>
 
-#include "asset/image_file.h"
-#include "asset/primitives.h"
-#include "asset/procedural_texture.h"
-#include "asset/scene_import.h"
-#include "asset/texture_compress.h"
-#include "asset/vfs.h"
 #include "base/algorithm.h"
 #include "base/containers/pair.h"
 #include "base/containers/unordered_map.h"
@@ -22,17 +16,23 @@
 #include "base/memory/unique_pointer.h"
 #include "base/strings/string_ref.h"
 #include "base/strings/xstring.h"
-#include "edit/hierarchy.h"
-#include "edit/reflect.h"
-#include "edit/scene_io.h"
 #include "foundation/files/file_system.h"
 #include "foundation/math/math.h"
 #include "foundation/math/scalar.h"
 #include "foundation/strings/format.h"
 #include "foundation/strings/text_reader.h"
-#include "importers/gltf/gltf_loader.h"
-#include "importers/materialx/materialx.h"
-#include "scene/components.h"
+#include "rxe/asset/image_file.h"
+#include "rxe/asset/primitives.h"
+#include "rxe/asset/procedural_texture.h"
+#include "rxe/asset/scene_import.h"
+#include "rxe/asset/texture_compress.h"
+#include "rxe/asset/vfs.h"
+#include "rxe/edit/hierarchy.h"
+#include "rxe/edit/reflect.h"
+#include "rxe/edit/scene_io.h"
+#include "rxe/importers/gltf/gltf_loader.h"
+#include "rxe/importers/materialx/materialx.h"
+#include "rxe/scene/components.h"
 
 namespace rx {
 namespace {

@@ -11,21 +11,21 @@
 
 #include <base/option.h>
 
-#include "asset/primitives.h"
-#include "asset/scene_import.h"
 #include "base/containers/span.h"
 #include "base/containers/vector.h"
 #include "base/memory/mem_ops.h"
 #include "base/memory/move.h"
 #include "base/memory/unique_pointer.h"
 #include "base/strings/xstring.h"
-#include "ecs/world.h"
 #include "foundation/files/file_system.h"
 #include "foundation/logging/log.h"
 #include "foundation/math/scalar.h"
-#include "importers/gltf/gltf_loader.h"
-#include "render/post/reference_compare.h"
-#include "scene/components.h"
+#include "rxe/asset/primitives.h"
+#include "rxe/asset/scene_import.h"
+#include "rxe/ecs/world.h"
+#include "rxe/importers/gltf/gltf_loader.h"
+#include "rxe/render/post/reference_compare.h"
+#include "rxe/scene/components.h"
 
 namespace rx {
 namespace {

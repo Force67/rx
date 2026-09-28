@@ -13,10 +13,10 @@
 #include <stdlib.h>
 #include <string.h>
 
-#include "anim/expression.h"
-#include "asset/asset_id.h"
 #include "base/memory/mem_ops.h"
 #include "foundation/math/scalar.h"
+#include "rxe/anim/expression.h"
+#include "rxe/asset/asset_id.h"
 
 using namespace rx;
 

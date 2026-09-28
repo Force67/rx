@@ -1,4 +1,4 @@
-// Headless proof of the force-based tethered kite (engine/physics/kite.{h,cc}).
+// Headless proof of the force-based tethered kite (rxe/physics/kite.{h,cc}).
 // Needs the Jolt-enabled physics build (like boat_test/aircraft_test). Each
 // lettered scenario prints its measured numbers to stderr and returns Fail(...)
 // on the first bad assert.
@@ -15,8 +15,8 @@
 
 #include "foundation/math/math.h"
 #include "foundation/math/scalar.h"
-#include "physics/physics_world.h"
-#include "vehicles/kite.h"
+#include "plugins/vehicles/kite.h"
+#include "rxe/physics/physics_world.h"
 
 using rx::f32;
 using rx::Vec3;

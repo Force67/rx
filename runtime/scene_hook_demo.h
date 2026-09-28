@@ -6,8 +6,8 @@
 #include <base/containers/vector.h>
 
 #include "foundation/math/math.h"
-#include "render/core/renderer.h"
-#include "render/rhi/resources.h"
+#include "rxe/render/core/renderer.h"
+#include "rxe/render/rhi/resources.h"
 
 namespace rx {
 

@@ -1,15 +1,15 @@
 #include <math.h>
 #include <stdio.h>
 
-#include "anim/body_dynamics.h"
-#include "anim/pose.h"
-#include "anim/procedural_gait.h"
-#include "asset/asset_id.h"
 #include "base/algorithm.h"
 #include "base/strings/xstring.h"
 #include "foundation/math/scalar.h"
-#include "importers/blend/blend_import.h"
-#include "importers/gltf/gltf_loader.h"
+#include "rxe/anim/body_dynamics.h"
+#include "rxe/anim/pose.h"
+#include "rxe/anim/procedural_gait.h"
+#include "rxe/asset/asset_id.h"
+#include "rxe/importers/blend/blend_import.h"
+#include "rxe/importers/gltf/gltf_loader.h"
 
 namespace {
 

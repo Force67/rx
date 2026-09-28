@@ -7,7 +7,7 @@
 #include "base/containers/vector.h"
 #include "base/memory/mem_ops.h"
 #include "foundation/math/scalar.h"
-#include "render/post/post.h"
+#include "rxe/render/post/post.h"
 
 using namespace rx;
 using namespace rx::render;

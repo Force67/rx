@@ -1,15 +1,15 @@
 #ifndef RX_RUNTIME_DEMO_LOOKDEV_H_
 #define RX_RUNTIME_DEMO_LOOKDEV_H_
 
-#include "asset/material.h"
 #include "base/containers/span.h"
 #include "base/memory/unique_pointer.h"
 #include "engine_context.h"
 #include "foundation/math/math.h"
-#include "render/core/renderer.h"
-#include "render/pipeline/human_material.h"
-#include "ui/events/input.h"
-#include "ui/events/input_actions.h"
+#include "rxe/asset/material.h"
+#include "rxe/render/core/renderer.h"
+#include "rxe/render/pipeline/human_material.h"
+#include "rxe/ui/events/input.h"
+#include "rxe/ui/events/input_actions.h"
 
 namespace rx {
 

@@ -5,19 +5,19 @@
 #include <stdlib.h>
 #include <string.h>
 
-#include "asset/material.h"
-#include "asset/primitives.h"
-#include "asset/texture.h"
 #include "base/memory/unique_pointer.h"
 #include "base/strings/xstring.h"
-#include "ecs/world.h"
 #include "foundation/logging/log.h"
 #include "foundation/math/scalar.h"
-#include "inventory/components.h"
-#include "inventory/inventory.h"
-#include "scene/camera.h"
-#include "scene/camera_rig.h"
-#include "scene/components.h"
+#include "plugins/inventory/components.h"
+#include "plugins/inventory/inventory.h"
+#include "rxe/asset/material.h"
+#include "rxe/asset/primitives.h"
+#include "rxe/asset/texture.h"
+#include "rxe/ecs/world.h"
+#include "rxe/scene/camera.h"
+#include "rxe/scene/camera_rig.h"
+#include "rxe/scene/components.h"
 
 #if defined(RX_HAS_IMGUI)
 #include <imgui.h>

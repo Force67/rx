@@ -1,7 +1,7 @@
 #ifndef RX_RUNTIME_PLACEMENT_DEMO_ASSETS_H_
 #define RX_RUNTIME_PLACEMENT_DEMO_ASSETS_H_
 
-#include "asset/mesh.h"
+#include "rxe/asset/mesh.h"
 
 namespace rx {
 

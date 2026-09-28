@@ -13,14 +13,14 @@
 #include "base/memory/unique_pointer.h"
 #include "base/optional.h"
 #include "base/strings/xstring.h"
-#include "edit/reflect.h"
 #include "foundation/files/file_system.h"
 #include "foundation/logging/log.h"
 #include "foundation/math/scalar.h"
 #include "foundation/strings/format.h"
-#include "importers/gltf/gltf_loader.h"
-#include "render/core/renderer.h"
-#include "scene/components.h"
+#include "rxe/edit/reflect.h"
+#include "rxe/importers/gltf/gltf_loader.h"
+#include "rxe/render/core/renderer.h"
+#include "rxe/scene/components.h"
 
 namespace rx::editor {
 

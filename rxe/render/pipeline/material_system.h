@@ -1,0 +1,430 @@
+#ifndef RX_RENDER_MATERIAL_SYSTEM_H_
+#define RX_RENDER_MATERIAL_SYSTEM_H_
+
+
+#include <base/containers/unordered_map.h>
+#include <base/containers/vector.h>
+
+#include "base/memory/unique_pointer.h"
+#include "rxe/asset/material.h"
+#include "rxe/asset/texture.h"
+#include "rxe/render/core/bindless.h"
+#include "rxe/render/rhi/device.h"
+
+namespace rx::render {
+
+// GPU side of the asset Material/Texture types. Owns uploaded textures, a
+// shared trilinear anisotropic sampler, a parameter buffer and one persistent
+// binding set per material (set 1 of the mesh pipeline):
+//   binding 0  uniform MaterialParams
+//   binding 1  base color        (srgb)
+//   binding 2  normal map        (linear)
+//   binding 3  metallic roughness(linear; glTF ORM, or a lone roughness map)
+//   binding 4  emissive          (srgb)
+//   binding 5  height            (linear)
+//   binding 6  metallic          (linear; only when separate_metallic)
+//   binding 7  occlusion         (linear; multiplies ambient)
+//   binding 8  env mask          (linear; r scales the env reflection)
+// Missing maps fall back to builtin 1x1 defaults (white metallic = the mr map
+// alone, white occlusion = no AO) so the shader never branches on presence.
+//
+// Texture streaming: multi-mip BCn textures above the tail size keep a CPU copy
+// and demote to a low-mip tail under VRAM pressure (SetBudget), promoting again
+// when drawn (Touch feeds the LRU). A swap creates a fresh image, so affected
+// materials get NEW binding sets (live ones may be GPU-pending); the bindless
+// slot moves to a fresh index and the old image/set/slot retire once every
+// in-flight frame has drained (BeginFrame flushes the ring).
+class MaterialSystem {
+ public:
+  // Matches the std140 block in mesh.frag.
+  struct Params {
+    f32 base_color_factor[4] = {1, 1, 1, 1};
+    f32 emissive_factor[3] = {0, 0, 0};
+    f32 metallic_factor = 0;
+    f32 roughness_factor = 1;
+    f32 alpha_cutoff = 0.5f;
+    u32 flags = 0;
+    f32 height_scale = 0;  // pom depth (uv units); 0 skips the march
+    // Extended pbr lobes, one 16-byte row each (matches std140 in mesh.ps).
+    f32 clearcoat = 0;
+    f32 clearcoat_roughness = 0;
+    f32 anisotropy = 0;
+    f32 ior = 1.5f;
+    f32 sheen_color[3] = {0, 0, 0};
+    f32 sheen_roughness = 0.3f;
+    f32 subsurface_color[3] = {0.9f, 0.3f, 0.2f};
+    f32 subsurface = 0;
+    f32 iridescence = 0;
+    f32 iridescence_thickness = 400.0f;
+    f32 transmission = 0;
+    f32 silhouette_curvature = 0;  // silhouette-pom curvature gain (0 = classic flat pom)
+    // Animated texture scroll rate (uv units/sec); the shader adds
+    // frame.time * uv_scroll to the uv before sampling.
+    f32 uv_scroll[2] = {0, 0};
+    f32 ao_strength = 1.0f;  // occlusion-map strength (1 = full), else pads the row
+    f32 scroll_pad = 0;
+    // Effect-shader (unlit vfx) view-angle falloff: start angle, stop angle,
+    // start opacity, stop opacity (dot-of-view thresholds). Only read on the
+    // mesh.ps unlit branch (kFlagEffect).
+    f32 effect_falloff[4] = {1, 1, 1, 1};
+    // Emissive pulse from a shader controller: x frequency (Hz), y amount
+    // (0..1 of the mean the emission swings). Applies to lit glow and effects.
+    f32 emissive_pulse[2] = {0, 0};
+    f32 effect_pad[2] = {0, 0};
+    // Terrain splat v2 (kFlagTerrainV2): bindless indices of the per-cell
+    // palette, albedo then normal (kInvalidIndex = flat). uint4-row layout in
+    // the shader mirror, so this block must stay 16-byte aligned. The indices
+    // bake into this uniform, so the palette textures are pinned against
+    // streaming.
+    u32 terrain_albedo[8] = {~0u, ~0u, ~0u, ~0u, ~0u, ~0u, ~0u, ~0u};
+    u32 terrain_normal[8] = {~0u, ~0u, ~0u, ~0u, ~0u, ~0u, ~0u, ~0u};
+    // Skin subsurface scattering (kFlagSkin). Physical coefficients pre-mapped
+    // from asset SkinParams via Kulla-Conty at upload; std140 rows (float3+float
+    // pack into one 16-byte slot). Mirrors the tail of MaterialParams in
+    // mesh.ps.hlsl. See render/shaders/sss_profile.hlsli.
+    f32 sss_sigma_t[3] = {0, 0, 0};
+    f32 sss_anisotropy_g = 0;
+    f32 sss_sigma_s[3] = {0, 0, 0};
+    f32 sss_perfusion = 0;
+    f32 sss_scatter_color[3] = {0, 0, 0};
+    f32 sss_ior = 1.4f;
+    // Bethesda lighting-shader inputs (see asset::Material): a specular tint
+    // and strength that scale the direct lobe, an environment reflection layer,
+    // and the soft/rim/back light fills. Neutral at these defaults.
+    f32 specular_color[3] = {1, 1, 1};
+    f32 specular_strength = 1.0f;
+    f32 env_reflect = 0;
+    f32 soft_lighting = 0;
+    f32 rim_lighting = 0;
+    f32 back_lighting = 0;
+    // Character surface model (kFlagHuman). Four floats per std140 row,
+    // mirroring the human_* rows at the tail of MaterialParams in mesh.ps.hlsl
+    // and HumanSurfaceParams in human_brdf.hlsli. Neutral here means "shades
+    // exactly like the stock Lambert + GGX path", so a material that never
+    // opts in pays nothing but the uniform bytes.
+    f32 human_diffuse_fresnel[4] = {0, 5, 5, 0};  // peak, falloff, tangent falloff, retro peak
+    f32 human_retro[4] = {5, 5, 0, 0};        // retro falloff, retro tangent falloff, term amount, term length
+    f32 human_spec[4] = {5, 3, 0, 0.001f};    // spec fresnel falloff, secondary scale, secondary weight, mfp (m)
+    f32 human_transport[4] = {1, 0, 1, 0};    // subsurface scale, transmission, extinction scale, corneal wetness
+    f32 human_tint[4] = {1, 0.35f, 0.2f, 0};  // transmission tint rgb, residual weight
+    f32 human_layer[4] = {0, 1, 0.01f, 0};    // cavity occlusion, spec-normal strength, thickness scale (m), region
+    f32 human_eye0[4] = {0.0028f, 0.16f, 1, 0.035f};  // iris depth (m), radius (uv), pupil scale, limbal size
+    f32 human_eye1[4] = {2, 1.376f, 0.5f, 0};         // limbal power, cornea ior, iris shadow depth, light-shape response
+    // Hair-card fibre material (kFlagHair). Mirrors the hair_* rows in
+    // mesh.ps.hlsl; the same BSDF the strand grooms use.
+    f32 hair0[4] = {0.06f, 0.10f, 0.20f, 0.3f};  // xyz sigma_a, w beta_m
+    f32 hair1[4] = {0.3f, 0.0349066f, 1.55f, 1.0f};  // beta_n, alpha, eta, scatter scale
+    f32 hair2[4] = {6.0f, 5.0f, 1.0f, 0};  // colour ref depth, assumed depth, colour-from-albedo, unused
+    // OpenPBR Surface lobes, appended last so no existing offset moves. Defaults are
+    // the neutral ones: white openpbr_specular_color reduces the F82-tint metal Fresnel
+    // to plain Schlick and leaves the dielectric untinted, white coat_color is a
+    // clear coat, zero base_diffuse_roughness keeps the Lambert diffuse path,
+    // and zero coat_darkening disables the darkening compensation. See
+    // asset/material.h and docs/OPENPBR.md.
+    f32 openpbr_specular_color[3] = {1, 1, 1};
+    f32 specular_weight = 1.0f;
+    f32 coat_color[3] = {1, 1, 1};
+    f32 coat_ior = 1.5f;
+    f32 base_diffuse_roughness = 0;
+    f32 coat_darkening = 0;
+    f32 thin_film_ior = 1.3f;
+    f32 openpbr_pad = 0;
+  };
+  static constexpr u32 kFlagAlphaMask = 1u << 0;
+  static constexpr u32 kFlagHasNormalMap = 1u << 1;
+  static constexpr u32 kFlagTerrain = 1u << 2;  // splat: slots are 3 layers + weight map
+  static constexpr u32 kFlagWind = 1u << 3;     // vertex wind sway (cloth/foliage)
+  static constexpr u32 kFlagWater = 1u << 4;    // gerstner vertex displacement
+  static constexpr u32 kFlagHasHeightMap = 1u << 5;  // parallax occlusion march
+  static constexpr u32 kFlagSkin = 1u << 6;          // screen-space subsurface scattering
+  static constexpr u32 kFlagHair = 1u << 7;          // kajiya-kay strand specular
+  static constexpr u32 kFlagVirtualAlbedo = 1u << 8;  // albedo via the virtual-texture atlas
+  static constexpr u32 kFlagEffect = 1u << 9;          // unlit emissive vfx (torch flames, glows)
+  static constexpr u32 kFlagEffectAdditive = 1u << 10;  // additive blend (fire) vs alpha (mist)
+  static constexpr u32 kFlagEffectGrayColor = 1u << 11;  // remap luminance through the palette
+  static constexpr u32 kFlagEffectGrayAlpha = 1u << 12;  // coverage from luminance
+  static constexpr u32 kFlagEffectFalloff = 1u << 13;    // view-angle opacity fade
+  static constexpr u32 kFlagNormalModelSpace = 1u << 14;  // _msn object-space normal map
+  static constexpr u32 kFlagTerrainV2 = 1u << 15;  // splat v2: bindless palette + 2 weight maps
+  static constexpr u32 kFlagSeparateMetallic = 1u << 16;  // metallic from metallic_map.r, not mr.b
+  static constexpr u32 kFlagHasOcclusion = 1u << 17;      // dedicated occlusion map multiplies ambient
+  static constexpr u32 kFlagSilhouettePom = 1u << 18;  // curvature-aware pom that carves silhouettes
+  static constexpr u32 kFlagSpecularMask = 1u << 19;   // normal-map alpha masks the specular lobe
+  static constexpr u32 kFlagEnvMask = 1u << 20;        // env mask map bound at binding 8
+  // The bound normal map is BC5, which stores xy only: the shader has to put
+  // z back as sqrt(1 - x^2 - y^2) instead of reading it. Derived at WriteSet
+  // from the uploaded texture's format, never from the loader's intent, so a
+  // normal map that declined to compress cannot end up flagged.
+  static constexpr u32 kFlagNormalReconstructZ = 1u << 21;
+  static constexpr u32 kFlagHuman = 1u << 22;           // character surface model (skin/eyes/teeth)
+  static constexpr u32 kFlagSpecularNormal = 1u << 23;  // dedicated Ns map at binding 9
+  static constexpr u32 kFlagThicknessMap = 1u << 24;    // local thickness map at binding 10
+  static constexpr u32 kFlagEye = 1u << 25;             // corneal refraction + iris parallax
+  static constexpr u32 kFlagResidual = 1u << 26;        // measured residual maps at bindings 11/12
+
+  // Looks up an uploaded texture by asset hash (null when absent). Used by
+  // systems that bind textures outside the material sets (decal atlas).
+  const GpuImage* find_texture(u64 hash) const;
+
+  // registry may be null (no raytracing); hit-shading tables are skipped.
+  static base::UniquePointer<MaterialSystem> Create(Device& device, BindlessRegistry* registry);
+  ~MaterialSystem();
+
+  MaterialSystem(const MaterialSystem&) = delete;
+  MaterialSystem& operator=(const MaterialSystem&) = delete;
+
+  // Uploads pixel data and generates a full mip chain for single-mip
+  // uncompressed textures. BCn data uploads its baked mips as-is. id_salt
+  // namespaces the texture key per content domain (asset paths collide across
+  // games); 0 keeps the unsalted key.
+  bool UploadTexture(const asset::Texture& texture, u64 id_salt = 0);
+
+  // Builds the binding set for a material. Referenced textures must be
+  // uploaded first or they fall back to the defaults. id_salt namespaces the
+  // material key and its texture references per content domain (it must match
+  // the salt the referenced textures were uploaded with); 0 keeps the unsalted
+  // key.
+  bool UploadMaterial(const asset::Material& material, u64 id_salt = 0);
+
+  // Rewrites an ALREADY-uploaded material's uniform parameters in place,
+  // leaving its textures and binding set alone. This is the live look-dev
+  // editing path: the tool needs a slider to move the shipped material this
+  // frame, and re-uploading would allocate a new set per keystroke.
+  //
+  // The write lands in a mapped uniform a frame in flight may still be reading.
+  // That is deliberate and bounded: every field is a continuously-varying
+  // scalar, so the worst case is one frame of a half-applied slider. The
+  // binding SET is untouched (a live one may be pending on the GPU and Vulkan
+  // forbids updating it), so swapping a MAP still goes through UploadMaterial
+  // with a fresh id.
+  bool UpdateMaterialParams(const asset::Material& material, u64 id_salt = 0);
+
+  // Set for a material hash; 0 or unknown hashes get the default material.
+  BindingSetHandle set(u64 material_hash) const;
+
+  // Blended materials draw in the sorted transparent pass instead of the
+  // opaque one. Unknown hashes are opaque.
+  bool is_blend(u64 material_hash) const;
+  bool is_water(u64 material_hash) const;
+  // Alpha-masked (cutout) materials: kept in the tlas but flagged non-opaque so
+  // ray traces can alpha-test them. Unknown hashes are opaque.
+  bool is_mask(u64 material_hash) const;
+  // Effect-shader (unlit vfx) materials draw through the transparent pass's
+  // unlit branch; additive ones use the additive blend pipeline (fire), the
+  // rest the alpha one (mist). Unknown hashes are neither.
+  bool is_effect(u64 material_hash) const;
+  bool is_effect_additive(u64 material_hash) const;
+  bool is_normal_model_space(u64 material_hash) const;
+
+  // Bindless material record index for ray hit shading; 0 (the default
+  // material) for unknown hashes.
+  u32 bindless_material(u64 material_hash) const;
+
+  // Flat surface colour factors (base-colour rgb + emissive rgb) retained
+  // CPU-side for coarse GI proxies (the SDF clipmap's per-mesh average colour).
+  // Texture averaging is out of scope, so this is the factor only. Unknown
+  // hashes return the default material's grey albedo, zero emissive.
+  struct MaterialColor {
+    f32 albedo[3] = {0.6f, 0.6f, 0.65f};
+    f32 emissive[3] = {0, 0, 0};
+  };
+  MaterialColor material_color(u64 material_hash) const;
+
+  // A coarse average-opacity map of an alpha-bearing color texture, baked at
+  // upload from the mip-0 alpha channel. `mean` is the whole-texture average
+  // opacity (1 = fully opaque). `alpha` is a width*height grid of per-cell mean
+  // opacity (row major, 0..255), empty when the texture is effectively opaque.
+  // Feeds the ray-traced vegetation "opaque approximation": masked meshes shrink
+  // their realtime BLAS stand-in triangles by the average opacity over their UV
+  // footprint (see Renderer mesh upload).
+  struct AlphaCoverage {
+    u32 width = 0;
+    u32 height = 0;
+    f32 mean = 1.0f;
+    base::Vector<u8> alpha;
+    // Bilinear opacity (0..1) at wrapped uv; falls back to `mean` with no grid.
+    f32 Sample(f32 u, f32 v) const;
+  };
+  // Average-opacity map of a material's base-color texture, or null when the
+  // material / texture is unknown or was uploaded fully opaque.
+  const AlphaCoverage* material_base_alpha(u64 material_hash) const;
+
+  // A material's base-color map and the cutoff an alpha-masked one tests
+  // against (0 when the material is not masked). `image` is null when the
+  // material is unknown or binds no base-color map. For passes that sample a
+  // material's albedo outside its binding set, which is what an imposter bake
+  // does: it renders geometry it has no mesh pipeline for and only needs the
+  // one map.
+  struct BaseColor {
+    const GpuImage* image = nullptr;
+    f32 alpha_cutoff = 0.0f;
+  };
+  BaseColor material_base_color(u64 material_hash) const;
+
+  // Bindless texture-table index for an uploaded (sRGB) texture, or
+  // BindlessRegistry::kInvalidIndex when absent. Used to texture particles.
+  u32 bindless_texture(u64 texture_hash) const;
+
+  BindingLayoutHandle set_layout() const { return set_layout_; }
+  u32 texture_count() const { return static_cast<u32>(texture_records_.size()); }
+  u32 material_count() const { return static_cast<u32>(sets_.size()); }
+
+  // texture streaming
+  // VRAM budget for material textures, bytes; 0 = unlimited (streaming off).
+  void SetBudget(u64 bytes) { budget_bytes_ = bytes; }
+  bool streaming_active() const { return budget_bytes_ != 0; }
+  // Excludes a texture from streaming. Required for consumers that cache its
+  // view or bindless index outside the material sets (decal atlas, particle
+  // emitters); a streamed swap would leave their copies dangling.
+  void Pin(u64 texture_hash);
+  // Marks a material (and its maps) used this frame; feeds the LRU. Called
+  // from the renderer's once-per-frame draw walk.
+  void Touch(u64 material_hash, u32 frame_index);
+  // Flushes the retire ring. Call once per frame, after Device::BeginFrame
+  // (its fence wait is what makes retired resources safe to destroy).
+  void BeginFrame(u32 frame_index);
+  // Runs the streaming policy: promotes hot demoted textures (budget
+  // permitting, evicting cold ones to make room) and demotes the coldest
+  // textures while over budget. Call before the frame's passes record so
+  // every pass sees this frame's binding sets consistently.
+  void UpdateStreaming(u32 frame_index);
+
+  struct StreamingStats {
+    u64 resident_bytes = 0;
+    u64 budget_bytes = 0;
+    u32 demoted_count = 0;   // textures currently at their tail
+    u32 streamable_count = 0;
+    u64 promotes = 0;  // lifetime op counts
+    u64 demotes = 0;
+  };
+  StreamingStats streaming_stats() const;
+
+ private:
+  static constexpr u32 kMaterialsPerPool = 256;
+  // Must hold a whole Params and stay a multiple of the worst-case
+  // minUniformBufferOffsetAlignment (256), so it steps in 256s. Params outgrew
+  // 256 bytes when the skin sss rows landed: every write then spilled 16 bytes
+  // into the next material's slot and the last slot of each pool ran off the end
+  // of the mapped buffer (VUID-VkDescriptorBufferInfo-range-00342).
+  static constexpr u32 kParamStride = 768;
+  static_assert(sizeof(Params) <= kParamStride,
+                "kParamStride must cover sizeof(Params); bump it by 256");
+  // Streaming tuning. Tail = the always-resident low mips (top mip at most
+  // kTailMaxDim). A texture is hot while a material using it was drawn within
+  // kHotWindow frames; only textures cold for kColdWindow are demoted to make
+  // room for promotes. Op caps bound the per-frame upload hitch.
+  static constexpr u32 kTailMaxDim = 128;
+  static constexpr u32 kHotWindow = 2;
+  static constexpr u32 kColdWindow = 120;
+  static constexpr u32 kMaxPromotesPerFrame = 2;
+  static constexpr u32 kMaxDemotesPerFrame = 8;
+
+  struct TextureRecord {
+    u64 key = 0;  // salted asset hash (textures_ key), for map upkeep
+    GpuImage image;
+    // What was uploaded, which is what decides kFlagNormalReconstructZ. The
+    // asset-side intent is not enough: a normal map that declined to compress
+    // is still rgba8 and still has a real z.
+    asset::TextureFormat format = asset::TextureFormat::kUnknown;
+    u32 bindless = BindlessRegistry::kInvalidIndex;
+    u32 total_mips = 1;          // source chain length
+    u32 resident_first_mip = 0;  // source mip backing image mip 0 (0 = full)
+    u32 tail_first_mip = 0;      // demote target
+    u64 resident_bytes = 0;
+    u64 full_bytes = 0;
+    u32 last_used = 0;
+    bool streamable = false;
+    bool pinned = false;
+    asset::Texture source;                // retained CPU copy (streamable only)
+    base::Vector<u32> material_indices;   // material_records_ entries binding it
+  };
+
+  struct MaterialRuntime {
+    BindingSetHandle set;
+    u32 pool = 0;         // param_buffers_ index of the uniform slot
+    u32 param_index = 0;  // slot within the pool
+    u64 map_keys[12] = {};  // salted texture hashes for bindings 1..12
+    u32 bindless_material = BindlessRegistry::kInvalidIndex;
+    u32 last_used = 0;
+    f32 alpha_cutoff = 0;  // masked materials only; 0 = no cutout
+  };
+
+  struct Retired {
+    GpuImage image;
+    BindingSetHandle set;
+    u32 bindless_slot = BindlessRegistry::kInvalidIndex;
+    u32 frame = 0;
+  };
+
+  explicit MaterialSystem(Device& device) : device_(device) {}
+
+  bool CreateDefaults();
+  // first_mip > 0 uploads only the chain's tail (baked-mips sources only).
+  GpuImage UploadTextureImage(const asset::Texture& texture, u32 first_mip = 0);
+  bool AddPool();
+  BindingSetHandle AllocateSet();
+  // The bindless record the ray paths shade from. Built in one place so the
+  // uniform and the record cannot describe two different materials.
+  BindlessRegistry::MaterialRecord BuildBindlessRecord(const asset::Material& material,
+                                                       u64 id_salt, asset::AlphaMode mode);
+  // Resolves an asset material into the uniform block and the texture keys its
+  // bindings need. No GPU state is touched.
+  void BuildParams(const asset::Material& material, u64 id_salt, Params& params,
+                   u64 out_map_keys[12]);
+  bool WriteSet(BindingSetHandle set, u32 pool, u32 param_index,
+                const asset::Material& material, u64 id_salt, u64 out_map_keys[12]);
+  void WriteSetBindings(BindingSetHandle set, const MaterialRuntime& runtime);
+  const GpuImage* texture_or(u64 hash, const GpuImage& fallback) const;
+  TextureRecord* record_for(u64 hash);
+  // Registers (or returns) the bindless slot for an uploaded texture.
+  u32 EnsureBindless(u64 key);
+  // Swaps a streamable texture's resident image to the chain starting at
+  // first_mip; rebuilds the affected material sets and retires the old state.
+  bool SwapResident(TextureRecord& record, u32 first_mip, u32 frame_index);
+  u64 BytesForMips(const asset::Texture& texture, u32 first_mip) const;
+
+  // Grow-only staging buffer reused across texture uploads: streaming used to
+  // create + destroy a VMA allocation per streamed texture, fragmenting the
+  // GPU heap over long sessions. Safe to reuse because uploads go through the
+  // synchronous ImmediateSubmit.
+  GpuBuffer* AcquireStaging(u64 bytes);
+
+  Device& device_;
+  BindlessRegistry* registry_ = nullptr;
+  SamplerHandle sampler_;
+  u32 sets_in_last_pool_ = 0;
+  GpuBuffer staging_;
+  u64 staging_bytes_ = 0;
+
+  base::Vector<GpuBuffer> param_buffers_;  // one per pool, host visible
+  base::Vector<base::UniquePointer<TextureRecord>> texture_records_;
+  base::Vector<MaterialRuntime> material_records_;
+  base::Vector<Retired> retired_;
+  base::UnorderedMap<u64, u32> textures_;   // texture hash -> texture_records_
+  base::UnorderedMap<u64, u32> sets_;       // material hash -> material_records_
+  base::UnorderedMap<u64, u8> blend_modes_;  // asset::AlphaMode per material
+  base::UnorderedMap<u64, u8> water_;        // material hash -> is_water
+  base::UnorderedMap<u64, u8> effects_;      // 0 none, 1 alpha effect, 2 additive effect
+  base::UnorderedMap<u64, u8> normal_model_space_;
+  base::UnorderedMap<u64, u32> bindless_materials_;  // material hash -> registry index
+  base::UnorderedMap<u64, MaterialColor> colors_;    // material hash -> flat colour factors
+  base::UnorderedMap<u64, AlphaCoverage> texture_alpha_;  // texture key -> baked opacity map
+  BindingLayoutHandle set_layout_;
+  BindingSetHandle default_set_;
+  u64 budget_bytes_ = 0;    // 0 = unlimited
+  u64 resident_bytes_ = 0;  // material texture bytes currently on the GPU
+  u32 current_frame_ = 0;   // last BeginFrame; timestamps retires outside UpdateStreaming
+  u64 promotes_ = 0;
+  u64 demotes_ = 0;
+  bool over_budget_warned_ = false;
+  u64 logged_ops_ = 0;    // promote+demote count at the last activity log
+  u32 logged_frame_ = 0;
+
+  GpuImage white_;        // srgb-safe 1x1 white, also neutral mr/emissive
+  GpuImage flat_normal_;  // 1x1 (0.5, 0.5, 1)
+  GpuImage black_;        // 1x1 transparent black; the neutral (absent) residual
+};
+
+}  // namespace rx::render
+
+#endif  // RX_RENDER_MATERIAL_SYSTEM_H_

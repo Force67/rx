@@ -1,0 +1,51 @@
+#include "rxe/render/post/upscaler.h"
+
+#include "base/memory/unique_pointer.h"
+#include "foundation/logging/log.h"
+#include "rxe/render/rhi/device.h"
+
+namespace rx::render {
+
+#if defined(RX_HAS_FSR3)
+base::UniquePointer<Upscaler> CreateFsr3Upscaler(const UpscalerDesc& desc, Device& device);
+#endif
+#if defined(RX_HAS_DLSS)
+base::UniquePointer<Upscaler> CreateDlssUpscaler(const UpscalerDesc& desc, Device& device);
+#endif
+
+// SDK backed implementations (FSR3, DLSS, XeSS) plug in here behind build
+// options. Anything not compiled in falls back to TAA.
+base::UniquePointer<Upscaler> CreateUpscaler(const UpscalerDesc& desc, Device& device) {
+  switch (desc.kind) {
+    case UpscalerKind::kFsr3:
+#if defined(RX_HAS_FSR3)
+      if (!device.is_stub()) return CreateFsr3Upscaler(desc, device);
+#endif
+      RX_WARN("upscaler backend not compiled in");
+      return nullptr;
+    case UpscalerKind::kDlss:
+#if defined(RX_HAS_DLSS)
+      if (!device.is_stub()) return CreateDlssUpscaler(desc, device);
+#endif
+      RX_WARN("upscaler backend not compiled in");
+      return nullptr;
+    case UpscalerKind::kXess:
+      RX_WARN("upscaler backend not compiled in");
+      return nullptr;
+    case UpscalerKind::kNone:
+      return nullptr;
+  }
+  return nullptr;
+}
+
+const char* UpscalerName(UpscalerKind kind) {
+  switch (kind) {
+    case UpscalerKind::kFsr3: return "fsr3";
+    case UpscalerKind::kDlss: return "dlss";
+    case UpscalerKind::kXess: return "xess";
+    case UpscalerKind::kNone: return "none";
+  }
+  return "none";
+}
+
+}  // namespace rx::render

@@ -381,9 +381,19 @@ and after.
 3. **Foundation.** Split `core` into `foundation/*`, `ui/window`, `ui/events`.
    Done: `foundation/` already sits at its final place, `rx::window` and
    `rx::events` wait in `engine/ui/` for phase 4.
-4. **Move the tree** one top-level folder per commit: `git mv` plus a scripted
-   include rewrite. Tests move next to their code. `render/util` dissolves
-   into `gpu/rhi`, `asset` and `ui/imgui`. The lint becomes an error.
+4. **Move the tree**, one PR per step, each a `git mv` plus the include rewrite
+   tool:
+   - 4a (done): `engine/` becomes `rxe/` and `plugins/` (module names and
+     namespaces unchanged), replication gets its own plugin folder, includes
+     are spelled from the repository root, and `engine/assets` plus `config/`
+     become `rxe/resources/`.
+   - 4b: tests move next to their code (`rx_module(... TESTS)`).
+   - 4c: the grouping inside `rxe/`: `gpu/` out of `render`, `net/` gathering
+     `http` and `rpc`, `ui/ugui`; `render/util` dissolves into `gpu/rhi`,
+     `asset` and `ui/imgui`.
+   - 4d: namespace and module renames (`app` to `host`, `authoring` to
+     `devtools`, `edit` split between `scene` and `editor`, the namespaces
+     table below).
 5. **Development shared build.** Add the single-instance fixes and the `-dev`
    presets, then per-module feature flags on the single registry.
 6. **Plugins and apps.** Add `RX_PLUGIN`, `PluginRegistry` and `rx_add_app`.

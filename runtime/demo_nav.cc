@@ -3,12 +3,12 @@
 #include <math.h>
 #include <stdlib.h>
 
-#include "asset/primitives.h"
 #include "base/containers/span.h"
 #include "foundation/logging/log.h"
-#include "nav/nav_debug.h"
-#include "nav/path.h"
-#include "scene/components.h"
+#include "plugins/nav/nav_debug.h"
+#include "plugins/nav/path.h"
+#include "rxe/asset/primitives.h"
+#include "rxe/scene/components.h"
 
 namespace rx {
 namespace {

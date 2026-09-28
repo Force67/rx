@@ -2,7 +2,7 @@
 
 How an rx app says who it is, how it finds its files, and how the engine, the
 game and the player decide how it runs on a given machine. Every file goes
-through the vfs (`engine/asset/vfs.h`); nothing is compiled into the binary.
+through the vfs (`rxe/asset/vfs.h`); nothing is compiled into the binary.
 
 ## Identity
 
@@ -65,7 +65,7 @@ anything else it needs after `OnInitialize` starts, over all of this.
 
 ### In a build tree
 
-CMake packs `engine/assets/` and `rx/config/` into `Data/rx_engine.rxp` and
+CMake packs `rxe/resources/` (fonts and `config/`) into `Data/rx_engine.rxp` and
 reproduces the layout beside build-tree executables, re-copied every build:
 
 ```cmake
@@ -164,7 +164,7 @@ For options: built-in default < the layers < the environment.
 
 ### The engine's tiers
 
-`rx/config/` holds one file per tier. `steamdeck.ini` is spelled out in full;
+`rxe/resources/config/` holds one file per tier. `steamdeck.ini` is spelled out in full;
 the others include their neighbour and list what they change, each with the
 hardware it targets and how its numbers were measured or estimated:
 
