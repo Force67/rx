@@ -13,7 +13,7 @@
 namespace rx::script {
 
 // The closed set of types that cross the handler boundary. This is the ONE type
-// vocabulary every runtime and the wire codec speak; it mirrors edit::PropType
+// vocabulary every runtime and the wire codec speak; it mirrors scene::PropType
 // but stays independent so the script layer does not depend on the editor.
 // Everything here is a scalar, an entity id, a small POD (Vec3), or ScriptString
 // (no engine object pointers, no runtime types), which is what keeps a handler

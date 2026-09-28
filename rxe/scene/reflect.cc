@@ -1,4 +1,4 @@
-#include "rxe/edit/reflect.h"
+#include "rxe/scene/reflect.h"
 
 #include <string.h>
 
@@ -14,7 +14,7 @@
 #include "foundation/logging/log.h"
 #include "rxe/scene/components.h"
 
-namespace rx::edit {
+namespace rx::scene {
 
 namespace detail {
 
@@ -327,4 +327,4 @@ bool RemoveComponentByDesc(ecs::World& world, ecs::Entity entity, const Componen
   return true;
 }
 
-}  // namespace rx::edit
+}  // namespace rx::scene

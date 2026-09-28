@@ -7,7 +7,7 @@
 #include "foundation/build_config/export.h"
 #include "foundation/build_config/types.h"
 
-namespace rx::authoring {
+namespace rx::devtools {
 
 class CommandBridge;
 
@@ -27,7 +27,7 @@ class CommandBridge;
 // so a command mutates the ECS on the same thread the simulation does. The cost
 // is a reply latency of up to one frame, which is nothing against the round trip
 // of a tool that spawns a process per call.
-class RX_AUTHORING_EXPORT CommandEndpoint {
+class RX_DEVTOOLS_EXPORT CommandEndpoint {
  public:
   ~CommandEndpoint();
 
@@ -56,6 +56,6 @@ class RX_AUTHORING_EXPORT CommandEndpoint {
   base::Vector<base::Vector<u8>> inbox_;  // per client, parallel to clients_
 };
 
-}  // namespace rx::authoring
+}  // namespace rx::devtools
 
 #endif  // RX_AUTHORING_COMMAND_ENDPOINT_H_

@@ -14,8 +14,8 @@
 #include "rxe/asset/asset_database.h"
 #include "rxe/asset/vfs.h"
 #include "rxe/ecs/world.h"
-#include "rxe/edit/reflect.h"
-#include "rxe/edit/scene_io.h"
+#include "rxe/scene/reflect.h"
+#include "rxe/scene/scene_io.h"
 #include "scene_authoring.h"
 
 namespace rx {
@@ -72,15 +72,15 @@ base::String LeadingComment(const base::String& path) {
 // component, so the dump can print what the preset SAYS rather than all 22
 // fields of a Surface. Only the props a value was written to carry information;
 // the rest are the defaults --dump-schema already documents.
-bool SameAsDefault(const edit::PropValue& value, const edit::PropValue& fallback) {
+bool SameAsDefault(const scene::PropValue& value, const scene::PropValue& fallback) {
   switch (value.type) {
-    case edit::PropType::kBool: return value.b == fallback.b;
-    case edit::PropType::kI32: return value.i == fallback.i;
-    case edit::PropType::kU32:
-    case edit::PropType::kU64:
-    case edit::PropType::kAssetId: return value.u == fallback.u;
-    case edit::PropType::kString: return value.s == fallback.s;
-    case edit::PropType::kEntity: return value.e == fallback.e;
+    case scene::PropType::kBool: return value.b == fallback.b;
+    case scene::PropType::kI32: return value.i == fallback.i;
+    case scene::PropType::kU32:
+    case scene::PropType::kU64:
+    case scene::PropType::kAssetId: return value.u == fallback.u;
+    case scene::PropType::kString: return value.s == fallback.s;
+    case scene::PropType::kEntity: return value.e == fallback.e;
     default: break;
   }
   for (u32 lane = 0; lane < 4; ++lane) {
@@ -90,24 +90,24 @@ bool SameAsDefault(const edit::PropValue& value, const edit::PropValue& fallback
 }
 
 // Lanes a type occupies in PropValue::f, 0 for the ones carrying no float.
-u32 FloatLanes(edit::PropType type) {
+u32 FloatLanes(scene::PropType type) {
   switch (type) {
-    case edit::PropType::kF32: return 1;
-    case edit::PropType::kVec2: return 2;
-    case edit::PropType::kVec3: return 3;
-    case edit::PropType::kVec4:
-    case edit::PropType::kQuat:
-    case edit::PropType::kColor: return 4;
+    case scene::PropType::kF32: return 1;
+    case scene::PropType::kVec2: return 2;
+    case scene::PropType::kVec3: return 3;
+    case scene::PropType::kVec4:
+    case scene::PropType::kQuat:
+    case scene::PropType::kColor: return 4;
     default: return 0;
   }
 }
 
-void PrintValue(const edit::PropValue& value) {
-  if (value.type == edit::PropType::kString) {
+void PrintValue(const scene::PropValue& value) {
+  if (value.type == scene::PropType::kString) {
     PrintJsonString(value.s);
     return;
   }
-  if (value.type == edit::PropType::kBool) {
+  if (value.type == scene::PropType::kBool) {
     ::printf("%s", value.b ? "true" : "false");
     return;
   }
@@ -122,7 +122,7 @@ void PrintValue(const edit::PropValue& value) {
     return;
   }
   // i32 is the one integer the reader signs, and it lives in a different field.
-  if (value.type == edit::PropType::kI32) {
+  if (value.type == scene::PropType::kI32) {
     ::printf("%lld", static_cast<long long>(value.i));
     return;
   }
@@ -135,26 +135,26 @@ void PrintValue(const edit::PropValue& value) {
 void PrintComponents(ecs::World& world, ecs::Entity entity, ecs::Entity defaults) {
   ::printf("{");
   bool first_comp = true;
-  for (const edit::ComponentDesc* comp : edit::ComponentsOn(world, entity)) {
+  for (const scene::ComponentDesc* comp : scene::ComponentsOn(world, entity)) {
     // A component the registry cannot default-construct has no "unset" to
     // compare against, so every prop of it is printed rather than the component
     // being dropped: a listing that silently omits what it cannot summarize is
     // worse than a verbose one.
-    const bool has_defaults = edit::AddComponentByDesc(world, defaults, *comp);
+    const bool has_defaults = scene::AddComponentByDesc(world, defaults, *comp);
     bool first_prop = true;
     ::printf("%s\n        ", first_comp ? "" : ",");
     PrintJsonString(comp->name);
     ::printf(": {");
     for (u32 p = 0; p < comp->prop_count; ++p) {
-      const edit::PropDesc& prop = comp->props[p];
-      edit::PropValue value;
-      edit::PropValue fallback;
-      if (!edit::GetProp(world, entity, *comp, prop, &value)) continue;
-      const bool compare = has_defaults && edit::GetProp(world, defaults, *comp, prop, &fallback);
+      const scene::PropDesc& prop = comp->props[p];
+      scene::PropValue value;
+      scene::PropValue fallback;
+      if (!scene::GetProp(world, entity, *comp, prop, &value)) continue;
+      const bool compare = has_defaults && scene::GetProp(world, defaults, *comp, prop, &fallback);
       // A name is never noise, so a string prop prints whenever it has one:
       // Pattern.kind = "checker" IS the pattern even though it is also the
       // default, and a listing that dropped it would read as no kind at all.
-      const bool named = prop.type == edit::PropType::kString && !value.s.empty();
+      const bool named = prop.type == scene::PropType::kString && !value.s.empty();
       if (!named && compare && SameAsDefault(value, fallback)) continue;
       ::printf("%s", first_prop ? "" : ", ");
       first_prop = false;
@@ -164,7 +164,7 @@ void PrintComponents(ecs::World& world, ecs::Entity entity, ecs::Entity defaults
     }
     ::printf("}");
     first_comp = false;
-    if (has_defaults) edit::RemoveComponentByDesc(world, defaults, *comp);
+    if (has_defaults) scene::RemoveComponentByDesc(world, defaults, *comp);
   }
   ::printf("%s}", first_comp ? "" : "\n      ");
 }
@@ -206,7 +206,7 @@ bool DumpMaterialPalette(const base::String& dir) {
     // world would make "first" mean the first entity of the first file.
     auto preset = base::MakeUnique<Preset>();
     base::String error;
-    if (!edit::LoadScene(preset->world, preset->db, file, &error, /*strict=*/true)) {
+    if (!scene::LoadScene(preset->world, preset->db, file, &error, /*strict=*/true)) {
       RX_ERROR("material preset '{}' does not load: {}", file, error);
       return false;
     }

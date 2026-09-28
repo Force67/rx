@@ -6,11 +6,11 @@
 #include <base/containers/vector.h>
 
 #include "rxe/anim/expression.h"
-#include "rxe/app/application.h"
-#include "rxe/app/host.h"
 #include "rxe/asset/mesh.h"
-#include "rxe/authoring/command_bridge.h"
-#include "rxe/authoring/command_endpoint.h"
+#include "rxe/devtools/command_bridge.h"
+#include "rxe/devtools/command_endpoint.h"
+#include "rxe/app/host.h"
+#include "rxe/app/application.h"
 #include "rxe/importers/gltf/gltf_loader.h"
 #include "rxe/importers/usd/usd_loader.h"
 #include "rxe/script/handler_context.h"
@@ -181,8 +181,8 @@ class Viewer : public app::Application {
   script::ScriptSymbols symbols_;
   script::ScriptArena script_scratch_;
   script::HandlerContext script_ctx_;
-  base::UniquePointer<authoring::CommandBridge> bridge_;
-  authoring::CommandEndpoint authoring_endpoint_;
+  base::UniquePointer<devtools::CommandBridge> bridge_;
+  devtools::CommandEndpoint authoring_endpoint_;
 
   // Shared service bundle handed to the demo scenes and the debug overlay.
   EngineContext ctx_;

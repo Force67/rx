@@ -22,10 +22,9 @@ BASELINE = os.path.join(os.path.dirname(os.path.abspath(__file__)), "baseline.tx
 # Modules that work on their own handles and must not know the entity world.
 ENTITY_FREE = {"foundation", "events", "window", "gpu", "imgui_renderer", "ui", "asset", "audio", "net", "http", "rpc", "physics",
                "anim", "render", "render2d"}
-ENTITY_WORLD = {"ecs", "scene", "script", "world", "edit", "authoring", "app"}
+ENTITY_WORLD = {"ecs", "scene", "script", "world", "edit", "devtools", "app"}
 # Headers only the editor and tools may use; a shipping game never links them.
-EDITOR_ONLY = {"rxe/edit/hierarchy.h", "rxe/edit/selection.h",
-               "rxe/edit/undo.h", "rxe/world/world_bake.h"}
+EDITOR_ONLY = {"rxe/edit/selection.h", "rxe/edit/undo.h", "rxe/world/world_bake.h"}
 HEADER_EXTS = (".h", ".hpp", ".inl", ".def")
 SOURCE_EXTS = (".cc", ".cpp", ".c") + HEADER_EXTS
 CODE_DIRS = ("foundation", "rxe", "plugins", "runtime", "apps", "tools", "test", "examples")

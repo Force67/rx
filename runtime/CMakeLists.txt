@@ -44,7 +44,7 @@ set(RX_RUNTIME_MODULES
   # --world: baked worlds streamed around the camera.
   rx::world
   # --authoring-endpoint / --dump-commands: the live script command surface.
-  rx::authoring
+  rx::devtools
   rx::script
   rx::audio
   rx::render

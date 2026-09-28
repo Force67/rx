@@ -9,7 +9,7 @@
 #include "foundation/logging/log.h"
 #include "material_palette.h"
 #include "rxe/app/host.h"
-#include "rxe/edit/reflect.h"
+#include "rxe/scene/reflect.h"
 #include "rxe/scene/scene_handlers.h"
 #include "rxe/script/handler_registry.h"
 #include "rxe/script/script_value.h"
@@ -88,18 +88,18 @@ void PrintJsonString(const char* s) {
 void DumpSchema() {
   rx::RegisterSceneComponents();
   ::printf("{\n  \"components\": [\n");
-  const auto components = rx::edit::AllComponents();
+  const auto components = rx::scene::AllComponents();
   for (size_t i = 0; i < components.size(); ++i) {
-    const rx::edit::ComponentDesc& comp = *components[i];
+    const rx::scene::ComponentDesc& comp = *components[i];
     ::printf("    {\n      \"name\": ");
     PrintJsonString(comp.name);
     ::printf(",\n      \"props\": [");
     for (rx::u32 p = 0; p < comp.prop_count; ++p) {
-      const rx::edit::PropDesc& prop = comp.props[p];
+      const rx::scene::PropDesc& prop = comp.props[p];
       ::printf("%s\n        {\"name\": ", p ? "," : "");
       PrintJsonString(prop.name);
       ::printf(", \"type\": ");
-      PrintJsonString(rx::edit::PropTypeName(prop.type));
+      PrintJsonString(rx::scene::PropTypeName(prop.type));
       // 0/0 is "unbounded" (PropDesc), so only a real Range prints.
       if (prop.min != 0.0f || prop.max != 0.0f)
         ::printf(", \"min\": %g, \"max\": %g", prop.min, prop.max);

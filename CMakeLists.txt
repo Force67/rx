@@ -296,7 +296,7 @@ if(NOT DEFINED RX_MODULES)
     audio
     vehicles
     net/rpc
-    authoring
+    devtools
     net/transport
     replication
     net/http

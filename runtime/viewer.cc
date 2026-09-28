@@ -12,9 +12,9 @@
 #include "rxe/anim/morph.h"
 #include "rxe/asset/asset_database.h"
 #include "rxe/asset/primitives.h"
-#include "rxe/edit/scene_io.h"
 #include "rxe/importers/gltf/gltf_loader.h"
 #include "rxe/scene/scene_handlers.h"
+#include "rxe/scene/scene_io.h"
 
 // Radiance .hdr decode for imported dome environment maps.
 #include <stb_image.h>
@@ -234,7 +234,7 @@ void Viewer::StartAuthoringEndpoint() {
   script_ctx_.log_sink = [](void*, script::ScriptStringView message) {
     RX_INFO("authoring: {}", message.view());
   };
-  bridge_ = base::MakeUnique<authoring::CommandBridge>(commands_, script_ctx_);
+  bridge_ = base::MakeUnique<devtools::CommandBridge>(commands_, script_ctx_);
 
   base::String error;
   if (!authoring_endpoint_.Start(config_.authoring_socket, &error)) {
@@ -287,7 +287,7 @@ bool Viewer::LoadRxScene() {
   // the textures BuildSceneShapes synthesizes for the scene's patterns.
   asset::AssetDatabase db(*ctx_.vfs);
   base::String error;
-  if (!edit::LoadScene(*world_, db, config_.scene_path, &error, /*strict=*/true)) {
+  if (!scene::LoadScene(*world_, db, config_.scene_path, &error, /*strict=*/true)) {
     RX_ERROR("rxscene: {}", error);
     return false;
   }

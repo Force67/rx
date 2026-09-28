@@ -52,7 +52,7 @@ struct Name {
 // A stable identity independent of the ecs handle (which is reused after a
 // destroy). Scene files reference entities by this, and the undo system tracks
 // entities by it so a handle invalidated by destroy/recreate can be re-resolved.
-// edit::EnsureGuid assigns a random nonzero value when absent.
+// scene::EnsureGuid assigns a random nonzero value when absent.
 struct Guid {
   u64 value = 0;
 };
@@ -65,7 +65,7 @@ struct SpawnedFrom {
 };
 
 // A parent link. When present, the entity's Transform is expressed in the
-// parent's local space rather than world space; edit::WorldTransform composes
+// parent's local space rather than world space; scene::WorldTransform composes
 // the chain. A parent-free entity has no Parent component and its Transform is
 // world space, unchanged from before hierarchy existed.
 struct Parent {

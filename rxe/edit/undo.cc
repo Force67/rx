@@ -9,8 +9,8 @@
 #include "base/strings/xstring.h"
 #include "foundation/math/math.h"
 #include "foundation/strings/format.h"
-#include "rxe/edit/hierarchy.h"
 #include "rxe/scene/components.h"
+#include "rxe/scene/hierarchy.h"
 
 namespace rx::edit {
 namespace {
@@ -30,21 +30,21 @@ u64 RandomGuid() {
 // kEntity props are stored by the referenced entity's guid (in PropValue.u) so
 // they survive the target being destroyed and recreated.
 struct CompSnap {
-  const ComponentDesc *comp;
-  base::Vector<base::Pair<const PropDesc *, PropValue>> props;
+  const scene::ComponentDesc *comp;
+  base::Vector<base::Pair<const scene::PropDesc *, scene::PropValue>> props;
 };
 
 base::Vector<CompSnap> SnapshotEntity(ecs::World &world, ecs::Entity entity) {
   base::Vector<CompSnap> out;
-  for (const ComponentDesc *comp : ComponentsOn(world, entity)) {
+  for (const scene::ComponentDesc *comp : scene::ComponentsOn(world, entity)) {
     CompSnap snap{comp, {}};
     for (u32 i = 0; i < comp->prop_count; ++i) {
-      const PropDesc &prop = comp->props[i];
-      PropValue v;
-      if (!GetProp(world, entity, *comp, prop, &v))
+      const scene::PropDesc &prop = comp->props[i];
+      scene::PropValue v;
+      if (!scene::GetProp(world, entity, *comp, prop, &v))
         continue;
-      if (prop.type == PropType::kEntity) {
-        v.u = (v.e && world.IsAlive(v.e)) ? EnsureGuid(world, v.e)
+      if (prop.type == scene::PropType::kEntity) {
+        v.u = (v.e && world.IsAlive(v.e)) ? scene::EnsureGuid(world, v.e)
                                           : 0; // stash target guid
       }
       snap.props.emplace_back(&prop, base::move(v));
@@ -57,12 +57,12 @@ base::Vector<CompSnap> SnapshotEntity(ecs::World &world, ecs::Entity entity) {
 void RestoreComponents(ecs::World &world, ecs::Entity entity,
                        const base::Vector<CompSnap> &snaps) {
   for (const CompSnap &snap : snaps) {
-    AddComponentByDesc(world, entity, *snap.comp);
+    scene::AddComponentByDesc(world, entity, *snap.comp);
     for (const auto &[prop, value] : snap.props) {
-      PropValue v = value;
-      if (prop->type == PropType::kEntity)
-        v.e = v.u ? FindByGuid(world, v.u) : ecs::kInvalidEntity;
-      SetProp(world, entity, *snap.comp, *prop, v);
+      scene::PropValue v = value;
+      if (prop->type == scene::PropType::kEntity)
+        v.e = v.u ? scene::FindByGuid(world, v.u) : ecs::kInvalidEntity;
+      scene::SetProp(world, entity, *snap.comp, *prop, v);
     }
   }
 }
@@ -95,29 +95,29 @@ void SetTransform(ecs::World &world, ecs::Entity e, const scene::Transform &t) {
 class SetPropCommand : public Command {
 public:
   SetPropCommand(ecs::World &world, ecs::Entity entity,
-                 const ComponentDesc &comp, const PropDesc &prop,
-                 PropValue new_value)
+                 const scene::ComponentDesc &comp, const scene::PropDesc &prop,
+                 scene::PropValue new_value)
       : comp_(&comp), prop_(&prop), new_value_(base::move(new_value)) {
-    guid_ = EnsureGuid(world, entity);
-    GetProp(world, entity, comp, prop, &old_value_);
+    guid_ = scene::EnsureGuid(world, entity);
+    scene::GetProp(world, entity, comp, prop, &old_value_);
     label_ = rx::StrFormat("Set {}.{}", comp.name, prop.name);
   }
   void Apply(ecs::World &world) override {
-    if (ecs::Entity e = FindByGuid(world, guid_))
-      SetProp(world, e, *comp_, *prop_, new_value_);
+    if (ecs::Entity e = scene::FindByGuid(world, guid_))
+      scene::SetProp(world, e, *comp_, *prop_, new_value_);
   }
   void Revert(ecs::World &world) override {
-    if (ecs::Entity e = FindByGuid(world, guid_))
-      SetProp(world, e, *comp_, *prop_, old_value_);
+    if (ecs::Entity e = scene::FindByGuid(world, guid_))
+      scene::SetProp(world, e, *comp_, *prop_, old_value_);
   }
   const char *label() const override { return label_.c_str(); }
 
 private:
   u64 guid_;
-  const ComponentDesc *comp_;
-  const PropDesc *prop_;
-  PropValue old_value_;
-  PropValue new_value_;
+  const scene::ComponentDesc *comp_;
+  const scene::PropDesc *prop_;
+  scene::PropValue old_value_;
+  scene::PropValue new_value_;
   base::String label_;
 };
 
@@ -125,8 +125,8 @@ class CreateEntityCommand : public Command {
 public:
   CreateEntityCommand(
       base::Vector<
-          base::Pair<const ComponentDesc *,
-                    base::Vector<base::Pair<const PropDesc *, PropValue>>>>
+          base::Pair<const scene::ComponentDesc *,
+                    base::Vector<base::Pair<const scene::PropDesc *, scene::PropValue>>>>
           initial,
       ecs::Entity *out)
       : initial_(base::move(initial)), out_(out), guid_(RandomGuid()) {}
@@ -135,9 +135,9 @@ public:
     ecs::Entity e = world.Create();
     world.Add(e, scene::Guid{guid_});
     for (const auto &[comp, props] : initial_) {
-      AddComponentByDesc(world, e, *comp);
+      scene::AddComponentByDesc(world, e, *comp);
       for (const auto &[prop, value] : props)
-        SetProp(world, e, *comp, *prop, value);
+        scene::SetProp(world, e, *comp, *prop, value);
     }
     // Only the first Apply (which runs inside UndoStack::Push, while the
     // caller's pointer is still valid) reports the handle. Callers routinely
@@ -149,14 +149,14 @@ public:
     }
   }
   void Revert(ecs::World &world) override {
-    if (ecs::Entity e = FindByGuid(world, guid_))
+    if (ecs::Entity e = scene::FindByGuid(world, guid_))
       world.Destroy(e);
   }
   const char *label() const override { return "Create entity"; }
 
 private:
-  base::Vector<base::Pair<const ComponentDesc *,
-                        base::Vector<base::Pair<const PropDesc *, PropValue>>>>
+  base::Vector<base::Pair<const scene::ComponentDesc *,
+                        base::Vector<base::Pair<const scene::PropDesc *, scene::PropValue>>>>
       initial_;
   ecs::Entity *out_;
   u64 guid_;
@@ -165,11 +165,11 @@ private:
 class DestroyEntityCommand : public Command {
 public:
   DestroyEntityCommand(ecs::World &world, ecs::Entity entity) {
-    guid_ = EnsureGuid(world, entity);
+    guid_ = scene::EnsureGuid(world, entity);
     snapshot_ = SnapshotEntity(world, entity);
   }
   void Apply(ecs::World &world) override {
-    if (ecs::Entity e = FindByGuid(world, guid_))
+    if (ecs::Entity e = scene::FindByGuid(world, guid_))
       world.Destroy(e);
   }
   void Revert(ecs::World &world) override {
@@ -188,19 +188,19 @@ class ReparentCommand : public Command {
 public:
   ReparentCommand(ecs::World &world, ecs::Entity entity,
                   ecs::Entity new_parent) {
-    guid_ = EnsureGuid(world, entity);
-    Mat4 world_matrix = WorldMatrix(world, entity);
+    guid_ = scene::EnsureGuid(world, entity);
+    Mat4 world_matrix = scene::WorldMatrix(world, entity);
 
     if (scene::Transform *t = world.Get<scene::Transform>(entity))
       old_local_ = *t;
     if (scene::Parent *p = world.Get<scene::Parent>(entity);
         p && p->value && world.IsAlive(p->value)) {
-      old_parent_guid_ = EnsureGuid(world, p->value);
+      old_parent_guid_ = scene::EnsureGuid(world, p->value);
     }
 
     if (new_parent && world.IsAlive(new_parent)) {
-      new_parent_guid_ = EnsureGuid(world, new_parent);
-      Mat4 parent_world = WorldMatrix(world, new_parent);
+      new_parent_guid_ = scene::EnsureGuid(world, new_parent);
+      Mat4 parent_world = scene::WorldMatrix(world, new_parent);
       new_local_ = TransformFromMatrix(Inverse(parent_world) * world_matrix);
     } else {
       new_parent_guid_ = 0;
@@ -218,12 +218,12 @@ public:
 private:
   void SetLink(ecs::World &world, u64 parent_guid,
                const scene::Transform &local) {
-    ecs::Entity e = FindByGuid(world, guid_);
+    ecs::Entity e = scene::FindByGuid(world, guid_);
     if (!e)
       return;
     SetTransform(world, e, local);
     if (parent_guid != 0) {
-      ecs::Entity parent = FindByGuid(world, parent_guid);
+      ecs::Entity parent = scene::FindByGuid(world, parent_guid);
       if (scene::Parent *p = world.Get<scene::Parent>(e))
         p->value = parent;
       else
@@ -243,29 +243,29 @@ private:
 class AddComponentCommand : public Command {
 public:
   AddComponentCommand(ecs::World &world, ecs::Entity entity,
-                      const ComponentDesc &comp)
+                      const scene::ComponentDesc &comp)
       : comp_(&comp) {
-    guid_ = EnsureGuid(world, entity);
+    guid_ = scene::EnsureGuid(world, entity);
     existed_ = world.HasRaw(entity, comp.id);
     label_ = rx::StrFormat("Add {}", comp.name);
   }
   void Apply(ecs::World &world) override {
     if (existed_)
       return;
-    if (ecs::Entity e = FindByGuid(world, guid_))
-      AddComponentByDesc(world, e, *comp_);
+    if (ecs::Entity e = scene::FindByGuid(world, guid_))
+      scene::AddComponentByDesc(world, e, *comp_);
   }
   void Revert(ecs::World &world) override {
     if (existed_)
       return;
-    if (ecs::Entity e = FindByGuid(world, guid_))
-      RemoveComponentByDesc(world, e, *comp_);
+    if (ecs::Entity e = scene::FindByGuid(world, guid_))
+      scene::RemoveComponentByDesc(world, e, *comp_);
   }
   const char *label() const override { return label_.c_str(); }
 
 private:
   u64 guid_;
-  const ComponentDesc *comp_;
+  const scene::ComponentDesc *comp_;
   bool existed_;
   base::String label_;
 };
@@ -273,18 +273,18 @@ private:
 class RemoveComponentCommand : public Command {
 public:
   RemoveComponentCommand(ecs::World &world, ecs::Entity entity,
-                         const ComponentDesc &comp)
+                         const scene::ComponentDesc &comp)
       : comp_(&comp) {
-    guid_ = EnsureGuid(world, entity);
+    guid_ = scene::EnsureGuid(world, entity);
     existed_ = world.HasRaw(entity, comp.id);
     if (existed_) {
       for (u32 i = 0; i < comp.prop_count; ++i) {
-        const PropDesc &prop = comp.props[i];
-        PropValue v;
-        if (!GetProp(world, entity, comp, prop, &v))
+        const scene::PropDesc &prop = comp.props[i];
+        scene::PropValue v;
+        if (!scene::GetProp(world, entity, comp, prop, &v))
           continue;
-        if (prop.type == PropType::kEntity)
-          v.u = (v.e && world.IsAlive(v.e)) ? EnsureGuid(world, v.e) : 0;
+        if (prop.type == scene::PropType::kEntity)
+          v.u = (v.e && world.IsAlive(v.e)) ? scene::EnsureGuid(world, v.e) : 0;
         props_.emplace_back(&prop, base::move(v));
       }
     }
@@ -293,30 +293,30 @@ public:
   void Apply(ecs::World &world) override {
     if (!existed_)
       return;
-    if (ecs::Entity e = FindByGuid(world, guid_))
-      RemoveComponentByDesc(world, e, *comp_);
+    if (ecs::Entity e = scene::FindByGuid(world, guid_))
+      scene::RemoveComponentByDesc(world, e, *comp_);
   }
   void Revert(ecs::World &world) override {
     if (!existed_)
       return;
-    ecs::Entity e = FindByGuid(world, guid_);
+    ecs::Entity e = scene::FindByGuid(world, guid_);
     if (!e)
       return;
-    AddComponentByDesc(world, e, *comp_);
+    scene::AddComponentByDesc(world, e, *comp_);
     for (const auto &[prop, value] : props_) {
-      PropValue v = value;
-      if (prop->type == PropType::kEntity)
-        v.e = v.u ? FindByGuid(world, v.u) : ecs::kInvalidEntity;
-      SetProp(world, e, *comp_, *prop, v);
+      scene::PropValue v = value;
+      if (prop->type == scene::PropType::kEntity)
+        v.e = v.u ? scene::FindByGuid(world, v.u) : ecs::kInvalidEntity;
+      scene::SetProp(world, e, *comp_, *prop, v);
     }
   }
   const char *label() const override { return label_.c_str(); }
 
 private:
   u64 guid_;
-  const ComponentDesc *comp_;
+  const scene::ComponentDesc *comp_;
   bool existed_;
-  base::Vector<base::Pair<const PropDesc *, PropValue>> props_;
+  base::Vector<base::Pair<const scene::PropDesc *, scene::PropValue>> props_;
   base::String label_;
 };
 
@@ -408,16 +408,16 @@ void UndoStack::Clear() {
 // Factories
 
 base::UniquePointer<Command> MakeSetProp(ecs::World &world, ecs::Entity entity,
-                                     const ComponentDesc &comp,
-                                     const PropDesc &prop,
-                                     PropValue new_value) {
+                                     const scene::ComponentDesc &comp,
+                                     const scene::PropDesc &prop,
+                                     scene::PropValue new_value) {
   return base::MakeUnique<SetPropCommand>(world, entity, comp, prop,
                                           base::move(new_value));
 }
 
 base::UniquePointer<Command> MakeCreateEntity(
-    base::Vector<base::Pair<const ComponentDesc *,
-                          base::Vector<base::Pair<const PropDesc *, PropValue>>>>
+    base::Vector<base::Pair<const scene::ComponentDesc *,
+                          base::Vector<base::Pair<const scene::PropDesc *, scene::PropValue>>>>
         initial,
     ecs::Entity *out_entity) {
   return base::MakeUnique<CreateEntityCommand>(base::move(initial), out_entity);
@@ -434,13 +434,13 @@ base::UniquePointer<Command> MakeReparent(ecs::World &world, ecs::Entity entity,
 }
 
 base::UniquePointer<Command> MakeAddComponent(ecs::World &world, ecs::Entity entity,
-                                          const ComponentDesc &comp) {
+                                          const scene::ComponentDesc &comp) {
   return base::MakeUnique<AddComponentCommand>(world, entity, comp);
 }
 
 base::UniquePointer<Command> MakeRemoveComponent(ecs::World &world,
                                              ecs::Entity entity,
-                                             const ComponentDesc &comp) {
+                                             const scene::ComponentDesc &comp) {
   return base::MakeUnique<RemoveComponentCommand>(world, entity, comp);
 }
 

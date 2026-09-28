@@ -21,9 +21,9 @@
 #include "rxe/asset/asset_database.h"
 #include "rxe/asset/vfs.h"
 #include "rxe/ecs/world.h"
-#include "rxe/edit/hierarchy.h"
-#include "rxe/edit/scene_io.h"
 #include "rxe/scene/components.h"
+#include "rxe/scene/hierarchy.h"
+#include "rxe/scene/scene_io.h"
 #include "scene_authoring.h"
 
 using namespace rx;
@@ -61,7 +61,7 @@ base::String ReadFile(const base::String& path) {
 bool LoadAndBuild(ecs::World& world, asset::AssetDatabase& db, const base::String& path) {
   base::String error;
   const base::String file = path;
-  if (!edit::LoadScene(world, db, file, &error, /*strict=*/true)) {
+  if (!scene::LoadScene(world, db, file, &error, /*strict=*/true)) {
     ::printf("load error: %s\n", error.c_str());
     return false;
   }
@@ -84,7 +84,7 @@ bool LoadAndBuild(ecs::World& world, asset::AssetDatabase& db, const base::Strin
 base::String LoadAndBuildError(ecs::World& world, asset::AssetDatabase& db, const base::String& path) {
   base::String error;
   const base::String file = path;
-  if (!edit::LoadScene(world, db, file, &error, /*strict=*/true)) return error;
+  if (!scene::LoadScene(world, db, file, &error, /*strict=*/true)) return error;
   if (!BuildSceneGrids(world, file, &error) || !BuildScenePrefabs(world, file, &error)) {
     return error;
   }
@@ -106,7 +106,7 @@ ecs::Entity FindByName(ecs::World& world, const base::String& name) {
 }
 
 Quat WorldRotation(ecs::World& world, ecs::Entity entity) {
-  const scene::Transform t = edit::WorldTransform(world, entity);
+  const scene::Transform t = scene::WorldTransform(world, entity);
   return {t.rotation[0], t.rotation[1], t.rotation[2], t.rotation[3]};
 }
 
@@ -185,11 +185,11 @@ Shape.size = 0.3 0.3 0.3
   const base::String saved_a = fs::Join(fs::TempDirectory(), "rx_rotation_roundtrip_a.rxscene");
   const base::String saved_b = fs::Join(fs::TempDirectory(), "rx_rotation_roundtrip_b.rxscene");
   base::String error;
-  CHECK(edit::SaveScene(first, saved_a, &error));
+  CHECK(scene::SaveScene(first, saved_a, &error));
 
   ecs::World second;
   CHECK(LoadAndBuild(second, db, saved_a));
-  CHECK(edit::SaveScene(second, saved_b, &error));
+  CHECK(scene::SaveScene(second, saved_b, &error));
   CHECK(ReadFile(saved_a) == ReadFile(saved_b));
 
   // The source declaration survives alongside the value it resolved into: a
@@ -308,7 +308,7 @@ Stretch.scale = 1 4 1
   // avoid in the first place.
   const base::String saved = fs::Join(fs::TempDirectory(), "rx_anchor_offset_saved.rxscene");
   base::String error;
-  CHECK(edit::SaveScene(world, saved, &error));
+  CHECK(scene::SaveScene(world, saved, &error));
   CHECK(ReadFile(saved).find("Anchor.offset") != base::String::npos);
 
   ecs::World reloaded;
@@ -354,7 +354,7 @@ Shape.size = 0.5 0.5 0.5
 
   // Cell 1 sits 4 along local +x, and the container's 90 degree yaw takes local
   // +x onto world -z.
-  const scene::Transform second = edit::WorldTransform(world, FindByName(world, "Second"));
+  const scene::Transform second = scene::WorldTransform(world, FindByName(world, "Second"));
   CHECK_NEAR(second.position[0], 0.0f, 1e-4f);
   CHECK_NEAR(second.position[2], -4.0f, 1e-4f);
   // ... and the member's own 45 adds to the container's 90, so its +z face ends
@@ -660,7 +660,7 @@ Prefab.path = "rx_stretch_prefab_cell.rxscene"
   // instance's Stretch survives beside the Shape the expansion left on it.
   const base::String saved = fs::Join(fs::TempDirectory(), "rx_stretch_prefab_saved.rxscene");
   base::String error;
-  CHECK(edit::SaveScene(world, saved, &error));
+  CHECK(scene::SaveScene(world, saved, &error));
   CHECK(ReadFile(saved).find("Stretch.scale = 2 0.5 1") != base::String::npos);
   ecs::World reloaded;
   CHECK(LoadAndBuild(reloaded, db, saved));
@@ -751,7 +751,7 @@ Stretch.scale = 1 1 2
   ecs::World world;
   CHECK(LoadAndBuild(world, db, path));
 
-  const scene::Transform second = edit::WorldTransform(world, FindByName(world, "Second"));
+  const scene::Transform second = scene::WorldTransform(world, FindByName(world, "Second"));
   CHECK_NEAR(second.position[0], 3.0f, 1e-4f);
 
   // An oval column: 0.5 across x and 1 across z, which no Shape.size can say
@@ -806,10 +806,10 @@ Stretch.scale = 2.5 6 1.75
   const base::String saved_a = fs::Join(fs::TempDirectory(), "rx_stretch_roundtrip_a.rxscene");
   const base::String saved_b = fs::Join(fs::TempDirectory(), "rx_stretch_roundtrip_b.rxscene");
   base::String error;
-  CHECK(edit::SaveScene(first, saved_a, &error));
+  CHECK(scene::SaveScene(first, saved_a, &error));
   ecs::World second;
   CHECK(LoadAndBuild(second, db, saved_a));
-  CHECK(edit::SaveScene(second, saved_b, &error));
+  CHECK(scene::SaveScene(second, saved_b, &error));
   CHECK(ReadFile(saved_a) == ReadFile(saved_b));
   CHECK(ReadFile(saved_a).find("Stretch.scale = 2.5 6 1.75") != base::String::npos);
 

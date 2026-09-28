@@ -17,10 +17,10 @@
 #include "foundation/logging/log.h"
 #include "foundation/math/scalar.h"
 #include "foundation/strings/format.h"
-#include "rxe/edit/reflect.h"
 #include "rxe/importers/gltf/gltf_loader.h"
 #include "rxe/render/core/renderer.h"
 #include "rxe/scene/components.h"
+#include "rxe/scene/reflect.h"
 
 namespace rx::editor {
 
@@ -439,19 +439,19 @@ void Editor::UpdateModeInteraction(bool lmb_down, bool lmb_edge) {
   if (!placement_preview_ || !over_viewport) return;
 
   auto place = [&](const Vec3& position) {
-    const edit::ComponentDesc* transform = edit::FindComponentByName("Transform");
-    const edit::ComponentDesc* renderable = edit::FindComponentByName("Renderable");
-    const edit::ComponentDesc* name = edit::FindComponentByName("Name");
+    const scene::ComponentDesc* transform = scene::FindComponentByName("Transform");
+    const scene::ComponentDesc* renderable = scene::FindComponentByName("Renderable");
+    const scene::ComponentDesc* name = scene::FindComponentByName("Name");
     if (!transform || !renderable || !name) return;
-    base::Vector<base::Pair<const edit::ComponentDesc*,
-                          base::Vector<base::Pair<const edit::PropDesc*, edit::PropValue>>>>
+    base::Vector<base::Pair<const scene::ComponentDesc*,
+                          base::Vector<base::Pair<const scene::PropDesc*, scene::PropValue>>>>
         initial;
     initial.push_back(
-        {transform, {{&transform->props[0], edit::PropValue::Vec3(position.x, position.y,
+        {transform, {{&transform->props[0], scene::PropValue::Vec3(position.x, position.y,
                                                                   position.z)}}});
     initial.push_back(
-        {renderable, {{&renderable->props[0], edit::PropValue::AssetIdV(placement_.mesh.hash)}}});
-    initial.push_back({name, {{&name->props[0], edit::PropValue::String(placement_.name)}}});
+        {renderable, {{&renderable->props[0], scene::PropValue::AssetIdV(placement_.mesh.hash)}}});
+    initial.push_back({name, {{&name->props[0], scene::PropValue::String(placement_.name)}}});
     undo_.Push(*world_, edit::MakeCreateEntity(base::move(initial), nullptr));
     doc_dirty_ = true;
     MarkDirty();

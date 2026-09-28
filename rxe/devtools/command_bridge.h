@@ -14,7 +14,7 @@ struct HandlerContext;
 class HandlerRegistry;
 }  // namespace rx::script
 
-namespace rx::authoring {
+namespace rx::devtools {
 
 // The seam between the typed script command registry (script/handler_registry.h)
 // and the rpc wire vocabulary (rpc/rpc_value.h): decodes an RpcCall against the
@@ -45,7 +45,7 @@ namespace rx::authoring {
 // Equals tx::network::ZPeerId::invalid_id, so no connected peer can present it.
 inline constexpr u32 kLocalSender = 0xffffffffu;
 
-class RX_AUTHORING_EXPORT CommandBridge {
+class RX_DEVTOOLS_EXPORT CommandBridge {
  public:
   // Registers every command currently in `commands` under its own name in the
   // bridge's rpc registry. `commands` and `ctx` must outlive the bridge, and a
@@ -82,6 +82,6 @@ class RX_AUTHORING_EXPORT CommandBridge {
   Reply* pending_ = nullptr;
 };
 
-}  // namespace rx::authoring
+}  // namespace rx::devtools
 
 #endif  // RX_AUTHORING_COMMAND_BRIDGE_H_

@@ -20,15 +20,15 @@
 #include "foundation/math/scalar.h"
 #include "foundation/strings/format.h"
 #include "rxe/anim/morph.h"
-#include "rxe/app/host.h"
 #include "rxe/asset/primitives.h"
 #include "rxe/asset/vfs.h"
-#include "rxe/edit/hierarchy.h"
+#include "rxe/app/host.h"
 #include "rxe/importers/blend/blend_import.h"
 #include "rxe/importers/gltf/gltf_loader.h"
 #include "rxe/importers/usd/usd_loader.h"
 #include "rxe/render/core/settings.h"
 #include "rxe/scene/components.h"
+#include "rxe/scene/hierarchy.h"
 
 namespace rx::editor {
 
@@ -254,7 +254,7 @@ ecs::Entity Editor::SpawnMesh(const base::String &mesh_name, asset::AssetId mesh
   ecs::Entity e = world_->Create();
   world_->Add(e, scene::Transform{.position = {pos.x, pos.y, pos.z}});
   world_->Add(e, scene::Renderable{mesh});
-  edit::EnsureGuid(*world_, e);
+  scene::EnsureGuid(*world_, e);
   SetName(e, label);
   (void)mesh_name;
   return e;
@@ -920,7 +920,7 @@ void Editor::FocusSelection() {
   ecs::Entity e = selection_.primary();
   if (!e)
     return;
-  scene::Transform t = edit::WorldTransform(*world_, e);
+  scene::Transform t = scene::WorldTransform(*world_, e);
   Vec3 center{t.position[0], t.position[1], t.position[2]};
   Vec3 eye = center - camera_.forward() * 4.0f;
   camera_.set_position(eye);
@@ -1006,7 +1006,7 @@ ecs::Entity Editor::PickAt(f32 mx, f32 my) const {
     const MeshRecord *rec = FindMesh(r.mesh.hash);
     if (!rec || rec->mesh.lods.empty())
       return;
-    scene::Transform wt = edit::WorldTransform(*world_, e);
+    scene::Transform wt = scene::WorldTransform(*world_, e);
     Mat4 world = MatOf(wt);
     // Broad phase: bounding sphere.
     Vec3 c = TransformPoint(world, {rec->mesh.bounds_center[0],
@@ -1078,7 +1078,7 @@ void Editor::UpdateGizmo(f32 mx, f32 my, bool lmb_down, bool lmb_edge) {
   scene::Transform *lt = world_->Get<scene::Transform>(e);
   if (!lt)
     return;
-  scene::Transform wt = edit::WorldTransform(*world_, e);
+  scene::Transform wt = scene::WorldTransform(*world_, e);
   Vec3 origin{wt.position[0], wt.position[1], wt.position[2]};
 
   if (gizmo_drag_.active) {
@@ -1096,11 +1096,11 @@ void Editor::UpdateGizmo(f32 mx, f32 my, bool lmb_down, bool lmb_edge) {
               gizmo_drag_.axis == 1 ? 1.0f : 0.0f,
               gizmo_drag_.axis == 2 ? 1.0f : 0.0f};
     Vec3 np = gizmo_drag_.base_pos + axis * world_delta;
-    const edit::ComponentDesc *comp = edit::FindComponentByName("Transform");
+    const scene::ComponentDesc *comp = scene::FindComponentByName("Transform");
     if (comp) {
       undo_.Push(*world_,
                  edit::MakeSetProp(*world_, e, *comp, comp->props[0],
-                                   edit::PropValue::Vec3(np.x, np.y, np.z)));
+                                   scene::PropValue::Vec3(np.x, np.y, np.z)));
       doc_dirty_ = true;
     }
     return;
@@ -1279,7 +1279,7 @@ void Editor::DoSave(const base::String &path) {
   }
   base::String scene_error;
   bool scene_saved =
-      edit::SaveScene(*world_, scene_stage, &scene_error);
+      scene::SaveScene(*world_, scene_stage, &scene_error);
   for (auto &[key, visual] : terrain_tiles_) {
     (void)key;
     visual.entity = SpawnTerrainTile(visual.key, visual.mesh);
@@ -1412,7 +1412,7 @@ void Editor::DoLoad(const base::String &path) {
   world_->Each<scene::Transform>(
       [&](ecs::Entity e, scene::Transform &) { old.push_back(e); });
   base::String err;
-  if (edit::LoadScene(*world_, *assets_, path, &err)) {
+  if (scene::LoadScene(*world_, *assets_, path, &err)) {
     // Resolve meshes that are not already resident (notably glTF assets placed
     // by the surface brush) before discarding the old document's entities.
     world_->Each<scene::Renderable>([&](ecs::Entity,
@@ -1536,7 +1536,7 @@ void Editor::RunAutopilot() {
       RX_WARN("autopilot: no entity '{}'", n);
       return;
     }
-    scene::Transform wt = edit::WorldTransform(*world_, e);
+    scene::Transform wt = scene::WorldTransform(*world_, e);
     bool in_front;
     Vec2 px = ProjectToScreen({wt.position[0], wt.position[1], wt.position[2]},
                               &in_front);
@@ -1551,7 +1551,7 @@ void Editor::RunAutopilot() {
             got == expect ? "PASS" : "FAIL");
   };
 
-  const edit::ComponentDesc *xf = edit::FindComponentByName("Transform");
+  const scene::ComponentDesc *xf = scene::FindComponentByName("Transform");
   switch (f) {
   case 100:
     pick_at_entity("Cube");
@@ -1578,10 +1578,10 @@ void Editor::RunAutopilot() {
     undo_.BeginGroup("Move");
     undo_.Push(*world_,
                edit::MakeSetProp(*world_, e, *xf, xf->props[0],
-                                 edit::PropValue::Vec3(-1.2f, 0.55f, 1.0f)));
+                                 scene::PropValue::Vec3(-1.2f, 0.55f, 1.0f)));
     undo_.Push(*world_,
                edit::MakeSetProp(*world_, e, *xf, xf->props[0],
-                                 edit::PropValue::Vec3(-1.2f, 0.55f, 2.0f)));
+                                 scene::PropValue::Vec3(-1.2f, 0.55f, 2.0f)));
     undo_.EndGroup();
     doc_dirty_ = true;
     MarkDirty();

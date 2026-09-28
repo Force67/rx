@@ -108,3 +108,34 @@ prefix  rxe/net/ rxe/net/transport/
 prefix  rxe/http/ rxe/net/http/
 prefix  rxe/rpc/ rxe/net/rpc/
 prefix  rxe/ui/ rxe/ui/ugui/
+
+# Phase 4d-1: authoring becomes devtools, and the runtime half of edit
+# (reflection, .rxscene io, the transform hierarchy) moves into scene
+prefix  rxe/authoring/ rxe/devtools/
+include rxe/edit/reflect.h rxe/scene/reflect.h
+include rxe/edit/scene_io.h rxe/scene/scene_io.h
+include rxe/edit/hierarchy.h rxe/scene/hierarchy.h
+symbol  authoring:: devtools::
+symbol  edit::AddComponentByDesc scene::AddComponentByDesc
+symbol  edit::AllComponents scene::AllComponents
+symbol  edit::ComponentDesc scene::ComponentDesc
+symbol  edit::ComponentReflector scene::ComponentReflector
+symbol  edit::ComponentsOn scene::ComponentsOn
+symbol  edit::ComposeTransform scene::ComposeTransform
+symbol  edit::EnsureGuid scene::EnsureGuid
+symbol  edit::FindByGuid scene::FindByGuid
+symbol  edit::FindComponent scene::FindComponent
+symbol  edit::FindComponentByName scene::FindComponentByName
+symbol  edit::GetProp scene::GetProp
+symbol  edit::LoadScene scene::LoadScene
+symbol  edit::LocalMatrix scene::LocalMatrix
+symbol  edit::PropDesc scene::PropDesc
+symbol  edit::PropType scene::PropType
+symbol  edit::PropTypeName scene::PropTypeName
+symbol  edit::PropValue scene::PropValue
+symbol  edit::ReflectComponent scene::ReflectComponent
+symbol  edit::RemoveComponentByDesc scene::RemoveComponentByDesc
+symbol  edit::SaveScene scene::SaveScene
+symbol  edit::SetProp scene::SetProp
+symbol  edit::WorldMatrix scene::WorldMatrix
+symbol  edit::WorldTransform scene::WorldTransform

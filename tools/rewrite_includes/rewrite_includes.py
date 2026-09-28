@@ -33,7 +33,12 @@ def load_renames():
       elif kind == "prefix":
         prefixes.append((old, new))
       elif kind == "symbol":
-        symbols.append((re.compile(r"(?<![\w:])" + re.escape(old) + r"\b"), new))
+        # Matches `old` bare or spelled from the root (`rx::old`), never as the
+        # tail of another qualified name.
+        pattern = r"(?<![\w:])(rx::)?" + re.escape(old)
+        if old[-1].isalnum() or old[-1] == "_":
+          pattern += r"\b"
+        symbols.append((re.compile(pattern), r"\1" + new))
       else:
         sys.exit("renames.txt: unknown kind %r" % kind)
   return includes, prefixes, symbols

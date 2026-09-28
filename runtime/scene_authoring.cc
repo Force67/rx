@@ -27,12 +27,12 @@
 #include "rxe/asset/scene_import.h"
 #include "rxe/asset/texture_compress.h"
 #include "rxe/asset/vfs.h"
-#include "rxe/edit/hierarchy.h"
-#include "rxe/edit/reflect.h"
-#include "rxe/edit/scene_io.h"
 #include "rxe/importers/gltf/gltf_loader.h"
 #include "rxe/importers/materialx/materialx.h"
 #include "rxe/scene/components.h"
+#include "rxe/scene/hierarchy.h"
+#include "rxe/scene/reflect.h"
+#include "rxe/scene/scene_io.h"
 
 namespace rx {
 namespace {
@@ -643,14 +643,14 @@ u32 ShapeRequiredSizeAxes(base::StringRef kind) {
 }
 
 void RegisterSceneComponents() {
-  edit::ReflectComponent<SceneShape>("Shape")
+  scene::ReflectComponent<SceneShape>("Shape")
       .Prop("kind", &SceneShape::kind)
       .Hint("box | sphere | plane | cylinder | cone | torus | capsule")
       .Prop("size", &SceneShape::size)
       .Hint("box, plane: half extents x y z; sphere: radius in x; cylinder, cone, capsule: "
             "radius in x, half height in y (a capsule adds a radius-tall cap at each end); "
             "torus: ring radius in x, tube radius in y");
-  edit::ReflectComponent<SceneSurface>("Surface")
+  scene::ReflectComponent<SceneSurface>("Surface")
       .Prop("base_color", &SceneSurface::base_color)
       .Range(0.0f, 1.0f)
       .Prop("roughness", &SceneSurface::roughness)
@@ -732,7 +732,7 @@ void RegisterSceneComponents() {
       .Prop("emissive_map", &SceneSurface::emissive_map)
       .Hint("image file multiplying Surface.emissive, which is 0 0 0 by default and so leaves "
             "the map invisible until emissive is raised");
-  edit::ReflectComponent<ScenePattern>("Pattern")
+  scene::ReflectComponent<ScenePattern>("Pattern")
       .Prop("kind", &ScenePattern::kind)
       .Hint("checker | grid | brick | gradient | noise")
       .Prop("scale", &ScenePattern::scale)
@@ -761,23 +761,23 @@ void RegisterSceneComponents() {
       .Prop("roughness_b", &ScenePattern::roughness_b)
       .Range(0.0f, 1.0f)
       .Hint("roughness at the high end; equal to roughness_a binds no map");
-  edit::ReflectComponent<SceneModel>("Model")
+  scene::ReflectComponent<SceneModel>("Model")
       .Prop("path", &SceneModel::path)
       .Hint("a .gltf/.glb file to place whole (one child entity per instance it describes), or "
             "\"<file>#mesh<N>\" to place just that mesh of it at this entity's Transform; "
             "relative to the working directory");
-  edit::ReflectComponent<ScenePrefab>("Prefab")
+  scene::ReflectComponent<ScenePrefab>("Prefab")
       .Prop("path", &ScenePrefab::path)
       .Hint("a .rxscene to instance here, relative to the file naming it; its first entity's "
             "components land on this entity (whatever this entity already says wins) and the "
             "rest become children of it");
-  edit::ReflectComponent<SceneRotation>("Rotation")
+  scene::ReflectComponent<SceneRotation>("Rotation")
       .Prop("euler", &SceneRotation::euler)
       .Hint("degrees about x, y, z (pitch, yaw, roll), applied yaw then pitch then roll about "
             "the entity's own axes; right-handed and y-up, so y = 90 turns the entity's +z "
             "face onto +x. This replaces Transform.rotation, which needs no hand-written "
             "quaternion once this exists");
-  edit::ReflectComponent<SceneStretch>("Stretch")
+  scene::ReflectComponent<SceneStretch>("Stretch")
       .Prop("scale", &SceneStretch::scale)
       .Hint("per-axis scale baked into the built Shape, on top of Shape.size: this is how a "
             "sphere becomes an ellipsoid, a torus an oval and a cylinder a flattened column, "
@@ -788,7 +788,7 @@ void RegisterSceneComponents() {
             "positive, and the bake corrects the normals so a stretched shape lights correctly. "
             "Refused only where a non-uniform stretch meets a turned prefab part, which would "
             "be a shear");
-  edit::ReflectComponent<SceneAnchor>("Anchor")
+  scene::ReflectComponent<SceneAnchor>("Anchor")
       .Prop("target", &SceneAnchor::target)
       .Hint("Name.value of the entity to stand against; this replaces Transform.position, and "
             "centres on the target across the two axes the mode does not stack along")
@@ -799,7 +799,7 @@ void RegisterSceneComponents() {
       .Hint("world-axis displacement added to the solved position, so an anchor can say WHERE "
             "on a face as well as which face: standing on a ground plane, this is the x and z "
             "to stand at, leaving the height (the only part worth deriving) derived");
-  edit::ReflectComponent<SceneGrid>("Grid")
+  scene::ReflectComponent<SceneGrid>("Grid")
       .Prop("of", &SceneGrid::of)
       .Hint("Name.value of the grid this entity is a cell of; members fill the cells in the "
             "order the file declares them, and this replaces Transform.position")
@@ -810,18 +810,18 @@ void RegisterSceneComponents() {
       .Hint("cells along x, y and z; this entity's Transform is cell 0 0 0")
       .Prop("step", &SceneGrid::step)
       .Hint("spacing between cells along each axis");
-  edit::ReflectComponent<SceneLight>("Light")
+  scene::ReflectComponent<SceneLight>("Light")
       .Prop("color", &SceneLight::color)
       .Range(0.0f, 1.0f)
       .Prop("intensity", &SceneLight::intensity)
       .Prop("radius", &SceneLight::radius)
       .Hint("influence cutoff in meters");
-  edit::ReflectComponent<SceneCamera>("Camera")
+  scene::ReflectComponent<SceneCamera>("Camera")
       .Prop("target", &SceneCamera::target)
       .Hint("world point the eye looks at")
       .Prop("fov_degrees", &SceneCamera::fov_degrees)
       .Range(10.0f, 150.0f);
-  edit::ReflectComponent<SceneSun>("Sun")
+  scene::ReflectComponent<SceneSun>("Sun")
       .Prop("elevation", &SceneSun::elevation)
       .Range(-90.0f, 90.0f)
       .Hint("degrees above the horizon: 90 overhead, 0 on it, below 0 a set sun the sky "
@@ -837,7 +837,7 @@ void RegisterSceneComponents() {
       .Prop("ambient", &SceneSun::ambient)
       .Range(0.0f, 1.0f)
       .Hint("flat fill on what the sun misses, so a shadowed face is dark and not black");
-  edit::ReflectComponent<SceneAtmosphere>("Atmosphere")
+  scene::ReflectComponent<SceneAtmosphere>("Atmosphere")
       .Prop("density", &SceneAtmosphere::density)
       .Range(0.0f, 1.0f)
       .Hint("haze scattered per metre: 0.005 the engine's own subtle base, 0.02 a visibly "
@@ -1206,7 +1206,7 @@ struct PrefabFile {
 // misspelt component would place a subtly wrong thing everywhere it is used.
 base::String OpenPrefab(const base::String& resolved, PrefabFile* file) {
   base::String error;
-  if (!edit::LoadScene(file->world, file->db, resolved, &error, /*strict=*/true)) {
+  if (!scene::LoadScene(file->world, file->db, resolved, &error, /*strict=*/true)) {
     return rx::StrFormat("does not load as '{}': {}", resolved, error);
   }
   const size_t count = file->world.entity_count();
@@ -1230,22 +1230,22 @@ base::String OpenPrefab(const base::String& resolved, PrefabFile* file) {
 // the geometry the copy builds.
 void CopyComponents(ecs::World& src, ecs::Entity from, ecs::World& dst, ecs::Entity to,
                     bool keep_existing, const base::UnorderedMap<u64, ecs::Entity>& remap) {
-  for (const edit::ComponentDesc* comp : edit::ComponentsOn(src, from)) {
+  for (const scene::ComponentDesc* comp : scene::ComponentsOn(src, from)) {
     if (comp->id == ecs::GetComponentId<scene::Guid>()) continue;
     if (dst.HasRaw(to, comp->id)) {
       if (keep_existing) continue;
     } else {
-      edit::AddComponentByDesc(dst, to, *comp);
+      scene::AddComponentByDesc(dst, to, *comp);
     }
     for (u32 i = 0; i < comp->prop_count; ++i) {
-      const edit::PropDesc& prop = comp->props[i];
-      edit::PropValue value;
-      if (!edit::GetProp(src, from, *comp, prop, &value)) continue;
-      if (prop.type == edit::PropType::kEntity) {
+      const scene::PropDesc& prop = comp->props[i];
+      scene::PropValue value;
+      if (!scene::GetProp(src, from, *comp, prop, &value)) continue;
+      if (prop.type == scene::PropType::kEntity) {
         const ecs::Entity* found = remap.find(PackKey(value.e));
-        value = edit::PropValue::EntityV(found ? *found : ecs::kInvalidEntity);
+        value = scene::PropValue::EntityV(found ? *found : ecs::kInvalidEntity);
       }
-      edit::SetProp(dst, to, *comp, prop, value);
+      scene::SetProp(dst, to, *comp, prop, value);
     }
   }
 }
@@ -1322,7 +1322,7 @@ void AccumulateBounds(ecs::World& world, const ChildMap& children, ecs::Entity e
   for (ecs::Entity child : *found) {
     const scene::Transform* local = world.Get<scene::Transform>(child);
     AccumulateBounds(world, children, child,
-                     edit::ComposeTransform(at, local ? *local : scene::Transform{}), out,
+                     scene::ComposeTransform(at, local ? *local : scene::Transform{}), out,
                      depth + 1);
   }
 }
@@ -1762,7 +1762,7 @@ bool BuildSceneAnchors(ecs::World& world, const base::String& scene_path, base::
     bool shared = false;
     const ecs::Entity target = names.Find(target_name, &shared);
     const Aabb around = SubtreeBounds(world, children, target,
-                                      edit::WorldTransform(world, target));
+                                      scene::WorldTransform(world, target));
     if (around.empty) {
       if (error)
         *error = Located(scene_path, owner, "Anchor.target", target_name,

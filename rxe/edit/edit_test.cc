@@ -16,12 +16,12 @@
 #include "rxe/asset/asset_id.h"
 #include "rxe/asset/vfs.h"
 #include "rxe/ecs/world.h"
-#include "rxe/edit/hierarchy.h"
-#include "rxe/edit/reflect.h"
-#include "rxe/edit/scene_io.h"
 #include "rxe/edit/selection.h"
 #include "rxe/edit/undo.h"
 #include "rxe/scene/components.h"
+#include "rxe/scene/hierarchy.h"
+#include "rxe/scene/reflect.h"
+#include "rxe/scene/scene_io.h"
 
 using namespace rx;
 using namespace rx::edit;
@@ -58,7 +58,7 @@ struct TestAll {
 };
 
 void RegisterTestComponent() {
-  ReflectComponent<TestAll>("TestAll")
+  scene::ReflectComponent<TestAll>("TestAll")
       .Prop("b", &TestAll::b)
       .Prop("i", &TestAll::i)
       .Prop("u", &TestAll::u)
@@ -67,15 +67,15 @@ void RegisterTestComponent() {
       .Range(-1.f, 1.f)
       .Prop("v2", &TestAll::v2)
       .Prop("v3", &TestAll::v3)
-      .Prop("v4", &TestAll::v4, PropType::kVec4)
+      .Prop("v4", &TestAll::v4, scene::PropType::kVec4)
       .Prop("q", &TestAll::q)
-      .Prop("col", &TestAll::col, PropType::kColor)
+      .Prop("col", &TestAll::col, scene::PropType::kColor)
       .Prop("s", &TestAll::s)
       .Prop("aid", &TestAll::aid)
       .Prop("ent", &TestAll::ent);
 }
 
-const PropDesc* FindProp(const ComponentDesc& c, base::StringRef name) {
+const scene::PropDesc* FindProp(const scene::ComponentDesc& c, base::StringRef name) {
   for (u32 i = 0; i < c.prop_count; ++i)
     if (name == c.props[i].name) return &c.props[i];
   return nullptr;
@@ -84,54 +84,54 @@ const PropDesc* FindProp(const ComponentDesc& c, base::StringRef name) {
 void TestReflection() {
   RegisterTestComponent();
 
-  const ComponentDesc* desc = FindComponentByName("TestAll");
+  const scene::ComponentDesc* desc = scene::FindComponentByName("TestAll");
   CHECK(desc != nullptr);
   if (!desc) return;
   CHECK(desc->prop_count == 13);
-  CHECK(FindComponent(desc->id) == desc);
+  CHECK(scene::FindComponent(desc->id) == desc);
 
   // Deduced types.
-  CHECK(FindProp(*desc, "b")->type == PropType::kBool);
-  CHECK(FindProp(*desc, "i")->type == PropType::kI32);
-  CHECK(FindProp(*desc, "u")->type == PropType::kU32);
-  CHECK(FindProp(*desc, "uu")->type == PropType::kU64);
-  CHECK(FindProp(*desc, "f")->type == PropType::kF32);
-  CHECK(FindProp(*desc, "v2")->type == PropType::kVec2);
-  CHECK(FindProp(*desc, "v3")->type == PropType::kVec3);
-  CHECK(FindProp(*desc, "v4")->type == PropType::kVec4);
-  CHECK(FindProp(*desc, "q")->type == PropType::kQuat);
-  CHECK(FindProp(*desc, "col")->type == PropType::kColor);
-  CHECK(FindProp(*desc, "s")->type == PropType::kString);
-  CHECK(FindProp(*desc, "aid")->type == PropType::kAssetId);
-  CHECK(FindProp(*desc, "ent")->type == PropType::kEntity);
+  CHECK(FindProp(*desc, "b")->type == scene::PropType::kBool);
+  CHECK(FindProp(*desc, "i")->type == scene::PropType::kI32);
+  CHECK(FindProp(*desc, "u")->type == scene::PropType::kU32);
+  CHECK(FindProp(*desc, "uu")->type == scene::PropType::kU64);
+  CHECK(FindProp(*desc, "f")->type == scene::PropType::kF32);
+  CHECK(FindProp(*desc, "v2")->type == scene::PropType::kVec2);
+  CHECK(FindProp(*desc, "v3")->type == scene::PropType::kVec3);
+  CHECK(FindProp(*desc, "v4")->type == scene::PropType::kVec4);
+  CHECK(FindProp(*desc, "q")->type == scene::PropType::kQuat);
+  CHECK(FindProp(*desc, "col")->type == scene::PropType::kColor);
+  CHECK(FindProp(*desc, "s")->type == scene::PropType::kString);
+  CHECK(FindProp(*desc, "aid")->type == scene::PropType::kAssetId);
+  CHECK(FindProp(*desc, "ent")->type == scene::PropType::kEntity);
   CHECK_NEAR(FindProp(*desc, "f")->min, -1.f, 1e-6f);
   CHECK_NEAR(FindProp(*desc, "f")->max, 1.f, 1e-6f);
 
   ecs::World world;
   ecs::Entity e = world.Create();
   ecs::Entity ref = world.Create();
-  CHECK(AddComponentByDesc(world, e, *desc));
+  CHECK(scene::AddComponentByDesc(world, e, *desc));
 
-  auto set = [&](const char* n, PropValue v) { SetProp(world, e, *desc, *FindProp(*desc, n), v); };
+  auto set = [&](const char* n, scene::PropValue v) { scene::SetProp(world, e, *desc, *FindProp(*desc, n), v); };
   auto get = [&](const char* n) {
-    PropValue v;
-    GetProp(world, e, *desc, *FindProp(*desc, n), &v);
+    scene::PropValue v;
+    scene::GetProp(world, e, *desc, *FindProp(*desc, n), &v);
     return v;
   };
 
-  set("b", PropValue::Bool(true));
-  set("i", PropValue::I32(-42));
-  set("u", PropValue::U32(42));
-  set("uu", PropValue::U64(0x1122334455667788ull));
-  set("f", PropValue::F32(0.5f));
-  set("v2", PropValue::Vec2(1, 2));
-  set("v3", PropValue::Vec3(3, 4, 5));
-  set("v4", PropValue::Vec4(6, 7, 8, 9));
-  set("q", PropValue::Quat(0, 0, 0, 1));
-  set("col", PropValue::Color(0.1f, 0.2f, 0.3f, 0.4f));
-  set("s", PropValue::String("hello world"));
-  set("aid", PropValue::AssetIdV(0xdeadbeef));
-  set("ent", PropValue::EntityV(ref));
+  set("b", scene::PropValue::Bool(true));
+  set("i", scene::PropValue::I32(-42));
+  set("u", scene::PropValue::U32(42));
+  set("uu", scene::PropValue::U64(0x1122334455667788ull));
+  set("f", scene::PropValue::F32(0.5f));
+  set("v2", scene::PropValue::Vec2(1, 2));
+  set("v3", scene::PropValue::Vec3(3, 4, 5));
+  set("v4", scene::PropValue::Vec4(6, 7, 8, 9));
+  set("q", scene::PropValue::Quat(0, 0, 0, 1));
+  set("col", scene::PropValue::Color(0.1f, 0.2f, 0.3f, 0.4f));
+  set("s", scene::PropValue::String("hello world"));
+  set("aid", scene::PropValue::AssetIdV(0xdeadbeef));
+  set("ent", scene::PropValue::EntityV(ref));
 
   CHECK(get("b").b == true);
   CHECK(get("i").i == -42);
@@ -148,37 +148,37 @@ void TestReflection() {
   CHECK(get("ent").e == ref);
 
   // ComponentsOn reports the component; removal drops it.
-  auto on = ComponentsOn(world, e);
+  auto on = scene::ComponentsOn(world, e);
   CHECK(base::Find(on.begin(), on.end(), desc) != on.end());
-  CHECK(RemoveComponentByDesc(world, e, *desc));
+  CHECK(scene::RemoveComponentByDesc(world, e, *desc));
   CHECK(!world.HasRaw(e, desc->id));
 }
 
 // Compares one entity's reflected state across two worlds; kEntity props are
 // compared by the referenced entity's guid.
 bool DeepEqual(ecs::World& wa, ecs::Entity a, ecs::World& wb, ecs::Entity b) {
-  auto ca = ComponentsOn(wa, a);
-  auto cb = ComponentsOn(wb, b);
+  auto ca = scene::ComponentsOn(wa, a);
+  auto cb = scene::ComponentsOn(wb, b);
   if (ca.size() != cb.size()) return false;
-  for (const ComponentDesc* comp : ca) {
+  for (const scene::ComponentDesc* comp : ca) {
     if (!wb.HasRaw(b, comp->id)) return false;
     for (u32 i = 0; i < comp->prop_count; ++i) {
-      const PropDesc& p = comp->props[i];
-      PropValue va, vb;
-      GetProp(wa, a, *comp, p, &va);
-      GetProp(wb, b, *comp, p, &vb);
-      if (p.type == PropType::kEntity) {
-        rx::u64 ga = va.e ? EnsureGuid(wa, va.e) : 0;
-        rx::u64 gb = vb.e ? EnsureGuid(wb, vb.e) : 0;
+      const scene::PropDesc& p = comp->props[i];
+      scene::PropValue va, vb;
+      scene::GetProp(wa, a, *comp, p, &va);
+      scene::GetProp(wb, b, *comp, p, &vb);
+      if (p.type == scene::PropType::kEntity) {
+        rx::u64 ga = va.e ? scene::EnsureGuid(wa, va.e) : 0;
+        rx::u64 gb = vb.e ? scene::EnsureGuid(wb, vb.e) : 0;
         if (ga != gb) return false;
-      } else if (p.type == PropType::kString) {
+      } else if (p.type == scene::PropType::kString) {
         if (va.s != vb.s) return false;
-      } else if (p.type == PropType::kAssetId || p.type == PropType::kU64 ||
-                 p.type == PropType::kU32) {
+      } else if (p.type == scene::PropType::kAssetId || p.type == scene::PropType::kU64 ||
+                 p.type == scene::PropType::kU32) {
         if (va.u != vb.u) return false;
-      } else if (p.type == PropType::kI32) {
+      } else if (p.type == scene::PropType::kI32) {
         if (va.i != vb.i) return false;
-      } else if (p.type == PropType::kBool) {
+      } else if (p.type == scene::PropType::kBool) {
         if (va.b != vb.b) return false;
       } else {
         for (int k = 0; k < 4; ++k)
@@ -223,7 +223,7 @@ void TestSceneRoundTrip() {
   src.Add(transient, scene::Transient{});
 
   base::String err;
-  CHECK(SaveScene(src, path, &err));
+  CHECK(scene::SaveScene(src, path, &err));
   if (!err.empty()) ::printf("save error: %s\n", err.c_str());
 
   // Reload into a fresh world.
@@ -231,7 +231,7 @@ void TestSceneRoundTrip() {
   asset::AssetDatabase db(vfs);
   ecs::World dst;
   err.clear();
-  CHECK(LoadScene(dst, db, path, &err));
+  CHECK(scene::LoadScene(dst, db, path, &err));
   if (!err.empty()) ::printf("load error: %s\n", err.c_str());
 
   // Same number of identity entities and per-entity deep equality (matched by guid).
@@ -245,13 +245,13 @@ void TestSceneRoundTrip() {
 
   bool all_matched = true;
   src.Each<scene::Guid>([&](ecs::Entity se, scene::Guid& g) {
-    ecs::Entity de = FindByGuid(dst, g.value);
+    ecs::Entity de = scene::FindByGuid(dst, g.value);
     if (!de || !DeepEqual(src, se, dst, de)) all_matched = false;
   });
   CHECK(all_matched);
 
   // The renderable path resolved back to the same asset id.
-  ecs::Entity dchild = FindByGuid(dst, src.Get<scene::Guid>(child)->value);
+  ecs::Entity dchild = scene::FindByGuid(dst, src.Get<scene::Guid>(child)->value);
   CHECK(dchild);
   if (dchild) {
     CHECK(dst.Get<scene::Renderable>(dchild)->mesh == with_path);
@@ -277,7 +277,7 @@ void TestStrictLoad() {
     asset::Vfs vfs;
     asset::AssetDatabase db(vfs);
     ecs::World world;
-    bool ok = LoadScene(world, db, path, error, strict);
+    bool ok = scene::LoadScene(world, db, path, error, strict);
     // A rejected load must leave nothing behind.
     size_t entities = 0;
     world.Each<scene::Transform>([&](ecs::Entity, scene::Transform&) { ++entities; });
@@ -329,7 +329,7 @@ void TestNumberLiterals() {
     asset::Vfs vfs;
     asset::AssetDatabase db(vfs);
     ecs::World world;
-    CHECK(LoadScene(world, db, path, nullptr, /*strict=*/false));
+    CHECK(scene::LoadScene(world, db, path, nullptr, /*strict=*/false));
     bool found = false;
     world.Each<scene::Transform>([&](ecs::Entity, scene::Transform& t) {
       if (!found) *out = t;
@@ -342,7 +342,7 @@ void TestNumberLiterals() {
     asset::AssetDatabase db(vfs);
     ecs::World world;
     base::String error;
-    CHECK(!LoadScene(world, db, path, &error, /*strict=*/true));
+    CHECK(!scene::LoadScene(world, db, path, &error, /*strict=*/true));
     // A rejected load must leave nothing behind, numbers included.
     size_t entities = 0;
     world.Each<scene::Transform>([&](ecs::Entity, scene::Transform&) { ++entities; });
@@ -395,7 +395,7 @@ void TestNumberLiterals() {
     asset::Vfs vfs;
     asset::AssetDatabase db(vfs);
     ecs::World world;
-    CHECK(LoadScene(world, db, path, nullptr, /*strict=*/true));
+    CHECK(scene::LoadScene(world, db, path, nullptr, /*strict=*/true));
   }
   lenient(&t);
   CHECK_NEAR(t.position[0], 1.f, 1e-6f);
@@ -442,7 +442,7 @@ void TestNumberLiterals() {
     asset::AssetDatabase db(vfs);
     ecs::World world;
     base::String clean;
-    CHECK(LoadScene(world, db, path, &clean, /*strict=*/true));
+    CHECK(scene::LoadScene(world, db, path, &clean, /*strict=*/true));
   }
 
   rx::fs::Remove(path);
@@ -461,7 +461,7 @@ void TestSaveRejectsNonFinite() {
   world.Add(e, scene::Name{"Poisoned"});
 
   base::String error;
-  CHECK(!SaveScene(world, path, &error));
+  CHECK(!scene::SaveScene(world, path, &error));
   CHECK(error.find("Transform.position") != base::String::npos);
   CHECK(error.find("Poisoned") != base::String::npos);
   CHECK(!rx::fs::Exists(path));  // nothing written, not a truncated file
@@ -469,7 +469,7 @@ void TestSaveRejectsNonFinite() {
   // The same scene saves once the value is one the format can spell.
   world.Get<scene::Transform>(e)->position[1] = 2.f;
   error.clear();
-  CHECK(SaveScene(world, path, &error));
+  CHECK(scene::SaveScene(world, path, &error));
   CHECK(rx::fs::Exists(path));
 
   rx::fs::Remove(path);
@@ -478,22 +478,22 @@ void TestSaveRejectsNonFinite() {
 // The schema dump names every PropType, so an unmapped one would silently
 // document itself as "?".
 void TestPropTypeNames() {
-  const PropType kAll[] = {PropType::kBool,  PropType::kI32,    PropType::kU32,
-                           PropType::kU64,   PropType::kF32,    PropType::kVec2,
-                           PropType::kVec3,  PropType::kVec4,   PropType::kQuat,
-                           PropType::kColor, PropType::kString, PropType::kAssetId,
-                           PropType::kEntity};
-  for (PropType type : kAll) CHECK(base::String(PropTypeName(type)) != "?");
-  CHECK(!AllComponents().empty());
+  const scene::PropType kAll[] = {scene::PropType::kBool,  scene::PropType::kI32,    scene::PropType::kU32,
+                           scene::PropType::kU64,   scene::PropType::kF32,    scene::PropType::kVec2,
+                           scene::PropType::kVec3,  scene::PropType::kVec4,   scene::PropType::kQuat,
+                           scene::PropType::kColor, scene::PropType::kString, scene::PropType::kAssetId,
+                           scene::PropType::kEntity};
+  for (scene::PropType type : kAll) CHECK(base::String(scene::PropTypeName(type)) != "?");
+  CHECK(!scene::AllComponents().empty());
 }
 
 void TestUndo() {
   ecs::World world;
   UndoStack stack;
 
-  const ComponentDesc* transform = FindComponentByName("Transform");
-  const PropDesc* scale = FindProp(*transform, "scale");
-  const ComponentDesc* name = FindComponentByName("Name");
+  const scene::ComponentDesc* transform = scene::FindComponentByName("Transform");
+  const scene::PropDesc* scale = FindProp(*transform, "scale");
+  const scene::ComponentDesc* name = scene::FindComponentByName("Name");
 
   // Create via command.
   ecs::Entity e;
@@ -503,7 +503,7 @@ void TestUndo() {
   rx::u64 guid = world.Get<scene::Guid>(e)->value;
 
   // Set a property, undo, redo.
-  stack.Push(world, MakeSetProp(world, e, *transform, *scale, PropValue::F32(5.0f)));
+  stack.Push(world, MakeSetProp(world, e, *transform, *scale, scene::PropValue::F32(5.0f)));
   CHECK_NEAR(world.Get<scene::Transform>(e)->scale, 5.0f, 1e-6f);
   CHECK(stack.Undo(world));
   CHECK_NEAR(world.Get<scene::Transform>(e)->scale, 1.0f, 1e-6f);
@@ -513,8 +513,8 @@ void TestUndo() {
   // Grouped add-component + set-name.
   stack.BeginGroup("Rename & tag");
   stack.Push(world, MakeAddComponent(world, e, *name));
-  const PropDesc* name_value = FindProp(*name, "value");
-  stack.Push(world, MakeSetProp(world, e, *name, *name_value, PropValue::String("Hero")));
+  const scene::PropDesc* name_value = FindProp(*name, "value");
+  stack.Push(world, MakeSetProp(world, e, *name, *name_value, scene::PropValue::String("Hero")));
   stack.EndGroup();
   CHECK(world.Has<scene::Name>(e));
   CHECK(world.Get<scene::Name>(e)->value == "Hero");
@@ -531,7 +531,7 @@ void TestUndo() {
   stack.Push(world, MakeDestroyEntity(world, e));
   CHECK(!world.IsAlive(e));
   CHECK(stack.Undo(world));
-  ecs::Entity recreated = FindByGuid(world, guid);
+  ecs::Entity recreated = scene::FindByGuid(world, guid);
   CHECK(recreated);
   CHECK(world.Get<scene::Name>(recreated)->value == "Hero");
   CHECK_NEAR(world.Get<scene::Transform>(recreated)->scale, 5.0f, 1e-6f);
@@ -541,16 +541,16 @@ void TestUndo() {
   CHECK(stack.Redo(world));  // redo destroy
   CHECK(!world.IsAlive(recreated));
   CHECK(stack.Undo(world));  // undo destroy again
-  ecs::Entity again = FindByGuid(world, guid);
+  ecs::Entity again = scene::FindByGuid(world, guid);
   CHECK(again);
 
   // Reparent preserving world transform.
   ecs::Entity p = world.Create();
   world.Add(p, scene::Transform{{100, 0, 0}, {0, 0, 0, 1}, 1.0f});
-  scene::Transform before = WorldTransform(world, again);
+  scene::Transform before = scene::WorldTransform(world, again);
   stack.Push(world, MakeReparent(world, again, p));
   CHECK(world.Has<scene::Parent>(again));
-  scene::Transform after = WorldTransform(world, again);
+  scene::Transform after = scene::WorldTransform(world, again);
   CHECK_NEAR(before.position[0], after.position[0], 1e-3f);
   CHECK_NEAR(before.position[1], after.position[1], 1e-3f);
   CHECK_NEAR(before.position[2], after.position[2], 1e-3f);
@@ -587,14 +587,14 @@ void TestHierarchy() {
 
   // Child local +X of 1, under parent scale 2 and 90deg-Y rotation, offset by
   // parent translation: world pos = (10,0,0) + R_y90 * (2 * (1,0,0)) = (10,0,-2).
-  scene::Transform world_t = WorldTransform(world, child);
+  scene::Transform world_t = scene::WorldTransform(world, child);
   CHECK_NEAR(world_t.position[0], 10.0f, 1e-3f);
   CHECK_NEAR(world_t.position[1], 0.0f, 1e-3f);
   CHECK_NEAR(world_t.position[2], -2.0f, 1e-3f);
   CHECK_NEAR(world_t.scale, 6.0f, 1e-3f);  // 2 * 3
 
   // WorldMatrix agrees with WorldTransform on the translation.
-  Mat4 m = WorldMatrix(world, child);
+  Mat4 m = scene::WorldMatrix(world, child);
   CHECK_NEAR(m.m[12], 10.0f, 1e-3f);
   CHECK_NEAR(m.m[14], -2.0f, 1e-3f);
 }
