@@ -6,7 +6,7 @@
 #include "base/containers/vector.h"
 #include "foundation/math/scalar.h"
 #include "rxe/render/atmosphere/clouds.h"
-#include "rxe/render/rhi/device.h"
+#include "rxe/gpu/rhi/device.h"
 
 using namespace rx;
 using namespace rx::render;

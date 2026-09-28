@@ -19,8 +19,8 @@
 
 #include "rxe/anim/morph.h"
 #include "rxe/importers/gltf/gltf_loader.h"
-#include "rxe/render/rhi/command_list.h"
-#include "rxe/render/rhi/device.h"
+#include "rxe/gpu/rhi/command_list.h"
+#include "rxe/gpu/rhi/device.h"
 
 #include "base/containers/vector.h"
 #include "base/memory/mem_ops.h"

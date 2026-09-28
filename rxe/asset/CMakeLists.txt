@@ -6,6 +6,7 @@ rx_add_module(asset
   primitives.cc
   procedural_texture.cc
   image_file.cc
+  exr_write.cc
   bc_encode.cc
   texture_compress.cc
   simplify.cc

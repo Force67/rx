@@ -8,7 +8,7 @@
 #include "foundation/logging/log.h"
 #include "foundation/strings/format.h"
 #include "rxe/authoring/command_bridge.h"
-#include "rxe/rpc/rpc_message.h"
+#include "rxe/net/rpc/rpc_message.h"
 
 #if !defined(_WIN32)
 #include <fcntl.h>

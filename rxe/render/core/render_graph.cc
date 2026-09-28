@@ -3,7 +3,7 @@
 #include "base/memory/move.h"
 #include "base/strings/xstring.h"
 #include "foundation/logging/log.h"
-#include "rxe/render/rhi/device.h"
+#include "rxe/gpu/rhi/device.h"
 
 namespace rx::render {
 namespace {

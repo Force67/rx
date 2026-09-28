@@ -5,8 +5,8 @@
 #include "foundation/logging/log.h"
 #include "foundation/math/math.h"
 #include "plugins/replication/bubble.h"
-#include "rxe/render/rhi/vulkan_interop.h"
-#include "rxe/render/util/shader_util.h"
+#include "rxe/gpu/rhi/vulkan_interop.h"
+#include "rxe/gpu/rhi/shader_util.h"
 
 #include "base/memory/move.h"
 #include "shaders/bubble_wire_ps_hlsl.h"

@@ -5,11 +5,11 @@
 
 #include "foundation/math/math.h"
 #include "rxe/render/core/render_graph.h"
-#include "rxe/render/rhi/resources.h"
+#include "rxe/gpu/rhi/resources.h"
 // Vulkan-only module (compiled under RX_HAS_NRD, which implies the
 // Vulkan backend): the internals speak raw Vulkan through the interop escape
 // hatch, the public surface below stays rhi-typed.
-#include "rxe/render/rhi/vulkan_interop.h"
+#include "rxe/gpu/rhi/vulkan_interop.h"
 
 namespace nrd {
 struct Instance;

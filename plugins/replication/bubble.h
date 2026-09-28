@@ -11,7 +11,7 @@
 #include "foundation/build_config/types.h"
 #include "plugins/replication/replication.h"
 #include "rxe/ecs/world.h"
-#include "rxe/net/protocol.h"
+#include "rxe/net/transport/protocol.h"
 #include "rxe/scene/components.h"
 
 namespace rx::net {

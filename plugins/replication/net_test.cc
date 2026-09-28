@@ -10,8 +10,8 @@
 #include "plugins/replication/bubble.h"
 #include "plugins/replication/replication.h"
 #include "rxe/ecs/world.h"
-#include "rxe/net/protocol.h"
-#include "rxe/net/wire.h"
+#include "rxe/net/transport/protocol.h"
+#include "rxe/net/transport/wire.h"
 #include "rxe/scene/components.h"
 
 namespace {

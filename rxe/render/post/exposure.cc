@@ -3,7 +3,7 @@
 #include <string.h>
 
 #include "foundation/logging/log.h"
-#include "rxe/render/rhi/device.h"
+#include "rxe/gpu/rhi/device.h"
 #include "shaders/exposure_resolve_cs_hlsl.h"
 #include "shaders/histogram_cs_hlsl.h"
 

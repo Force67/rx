@@ -93,3 +93,18 @@ prefix  terrain/ plugins/terrain/
 prefix  nav/ plugins/nav/
 prefix  weather/ plugins/weather/
 prefix  vehicles/ plugins/vehicles/
+
+# Phase 4c: gpu/ out of render, net/ and ui/ grouped, render/util dissolved
+include rxe/render/util/shader_util.h rxe/gpu/rhi/shader_util.h
+include rxe/render/util/gpu_profiler.h rxe/gpu/rhi/gpu_profiler.h
+include rxe/render/util/exr_write.h rxe/asset/exr_write.h
+include rxe/render/util/imgui_renderer.h rxe/ui/imgui/imgui_renderer.h
+include rxe/render/util/imgui_theme.h rxe/ui/imgui/imgui_theme.h
+prefix  rxe/render/rhi/ rxe/gpu/rhi/
+prefix  rxe/render/vulkan/ rxe/gpu/vulkan/
+prefix  rxe/render/d3d12/ rxe/gpu/d3d12/
+prefix  rxe/render/null/ rxe/gpu/null/
+prefix  rxe/net/ rxe/net/transport/
+prefix  rxe/http/ rxe/net/http/
+prefix  rxe/rpc/ rxe/net/rpc/
+prefix  rxe/ui/ rxe/ui/ugui/

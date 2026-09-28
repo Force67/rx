@@ -20,7 +20,7 @@
 #include "foundation/math/math.h"
 #include "rxe/asset/mesh.h"
 #include "rxe/render/core/render_graph.h"
-#include "rxe/render/rhi/device.h"
+#include "rxe/gpu/rhi/device.h"
 
 namespace rx::render {
 

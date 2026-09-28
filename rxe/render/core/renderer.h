@@ -80,8 +80,8 @@
 #include "rxe/render/post/ui_blur.h"
 #include "rxe/render/post/upscaler.h"
 #include "rxe/render/post/vrs_rate.h"
-#include "rxe/render/rhi/device.h"
-#include "rxe/render/rhi/swapchain.h"
+#include "rxe/gpu/rhi/device.h"
+#include "rxe/gpu/rhi/swapchain.h"
 #include "rxe/render/screenspace/ambient_occlusion.h"
 #include "rxe/render/screenspace/reflection_trace.h"
 #include "rxe/render/screenspace/ssao.h"
@@ -89,7 +89,7 @@
 #include "rxe/render/screenspace/ssr.h"
 #include "rxe/render/texturing/decal_bake.h"
 #include "rxe/render/texturing/virtual_texture.h"
-#include "rxe/render/util/gpu_profiler.h"
+#include "rxe/gpu/rhi/gpu_profiler.h"
 #include "rxe/ui/window/window.h"
 
 namespace rx::render {

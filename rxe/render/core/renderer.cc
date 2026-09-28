@@ -26,7 +26,7 @@
 #include "foundation/memory/memory_tracker.h"
 #include "rxe/asset/primitives.h"
 #include "rxe/asset/texture_compress.h"
-#include "rxe/render/util/exr_write.h"
+#include "rxe/asset/exr_write.h"
 #include "shaders/blit_ps_slang.h"
 #include "shaders/cloud_shadow_cs_hlsl.h"
 #include "shaders/contact_shadow_cs_hlsl.h"

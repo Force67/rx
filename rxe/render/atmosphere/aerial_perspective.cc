@@ -1,7 +1,7 @@
 #include "rxe/render/atmosphere/aerial_perspective.h"
 
 #include "foundation/logging/log.h"
-#include "rxe/render/rhi/device.h"
+#include "rxe/gpu/rhi/device.h"
 #include "shaders/aerial_perspective_cs_hlsl.h"
 
 namespace rx::render {

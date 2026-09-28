@@ -2,7 +2,7 @@
 #define RX_RENDER_ADAPTIVE_WATER_H_
 
 #include "foundation/math/math.h"
-#include "rxe/render/rhi/device.h"
+#include "rxe/gpu/rhi/device.h"
 
 namespace rx::render {
 

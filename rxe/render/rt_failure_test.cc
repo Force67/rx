@@ -13,8 +13,8 @@
 #include "rxe/render/gi/recon_path_tracer.h"
 #include "rxe/render/gi/restir_di.h"
 #include "rxe/render/gi/skinned_rt.h"
-#include "rxe/render/rhi/device.h"
-#include "rxe/render/rhi/swapchain.h"
+#include "rxe/gpu/rhi/device.h"
+#include "rxe/gpu/rhi/swapchain.h"
 #include "rxe/render/screenspace/reflection_trace.h"
 
 using namespace rx;

@@ -5,7 +5,7 @@
 
 #include "rxe/render/post/antialiasing.h"
 #include "rxe/render/post/upscaler.h"
-#include "rxe/render/rhi/device.h"
+#include "rxe/gpu/rhi/device.h"
 #if defined(RX_HAS_DLSS) && !defined(__aarch64__)
 #include "base/containers/vector.h"
 #include "rxe/render/gi/denoiser_rr.h"

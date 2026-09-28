@@ -29,7 +29,7 @@
 #include "base/strings/xstring.h"
 #include "foundation/math/scalar.h"
 #include "rxe/anim/morph.h"
-#include "rxe/render/rhi/vulkan_interop.h"
+#include "rxe/gpu/rhi/vulkan_interop.h"
 #include "rxe/scene/components.h"
 
 namespace rx::editor {

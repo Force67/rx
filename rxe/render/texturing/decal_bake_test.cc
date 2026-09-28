@@ -18,8 +18,8 @@
 #include "base/memory/unique_pointer.h"
 #include "rxe/asset/mesh.h"
 #include "rxe/render/core/render_graph.h"
-#include "rxe/render/rhi/command_list.h"
-#include "rxe/render/rhi/device.h"
+#include "rxe/gpu/rhi/command_list.h"
+#include "rxe/gpu/rhi/device.h"
 #include "rxe/render/texturing/decal_bake.h"
 
 using namespace rx::render;

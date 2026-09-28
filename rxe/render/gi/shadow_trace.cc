@@ -5,7 +5,7 @@
 #include "foundation/logging/log.h"
 #include "rxe/render/gi/denoiser_nrd.h"
 #include "rxe/render/gi/raytracing.h"
-#include "rxe/render/rhi/device.h"
+#include "rxe/gpu/rhi/device.h"
 
 // shadow_trace.cs pulls in NRD.hlsli for the SIGMA penumbra packing, so it only
 // compiles (and this pass only exists) when NRD is built in.

@@ -1,7 +1,7 @@
 #include "rxe/render/atmosphere/precipitation.h"
 
 #include "foundation/logging/log.h"
-#include "rxe/render/rhi/device.h"
+#include "rxe/gpu/rhi/device.h"
 #include "shaders/precipitation_cs_hlsl.h"
 
 namespace rx::render {

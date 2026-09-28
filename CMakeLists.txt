@@ -13,7 +13,7 @@ option(RX_DLSS "Enable the NVIDIA DLSS upscaler backend" ON)
 option(RX_NRD "Enable the NVIDIA NRD ray tracing denoiser" ON)
 option(RX_JOLT "Enable Jolt physics" ON)
 # https in rx::http. Off leaves the plain-http client, and an https URL then
-# fails with a message rather than downgrading. See rxe/http/CMakeLists.txt.
+# fails with a message rather than downgrading. See rxe/net/http/CMakeLists.txt.
 option(RX_HTTPS "Build rx::http's https path (needs an mbedTLS checkout)" ON)
 option(RX_USD "Enable OpenUSD scene loading (needs tools/get_tinyusdz.sh)" ON)
 # Vulkan 1.1 accepts SPIR-V 1.3, or 1.4 with VK_KHR_spirv_1_4; the default
@@ -277,6 +277,7 @@ if(NOT DEFINED RX_MODULES)
   set(RX_MODULES
     ui/events
     ui/window
+    gpu
     ecs
     script
     asset
@@ -286,6 +287,7 @@ if(NOT DEFINED RX_MODULES)
     edit
     world
     render
+    ui/imgui
     render2d
     weather
     placement
@@ -293,17 +295,17 @@ if(NOT DEFINED RX_MODULES)
     anim
     audio
     vehicles
-    rpc
+    net/rpc
     authoring
-    net
+    net/transport
     replication
-    http
+    net/http
     nav
     character
     combat
     inventory
     locomotion
-    ui
+    ui/ugui
     app
   )
 endif()
@@ -338,7 +340,7 @@ endif()
 # zetanet's equilibrium configuration: it builds on base alone, without the STL
 # or exceptions, and reuses the equilibrium::base target vendored above rather
 # than compiling its own copy.
-if(NOT TARGET zetanet AND "net" IN_LIST RX_MODULES)
+if(NOT TARGET zetanet AND "net/transport" IN_LIST RX_MODULES)
   set(RX_ZETANET_DIR "${CMAKE_CURRENT_SOURCE_DIR}/../zetanet" CACHE PATH
     "Path to a zetanet checkout (develop branch); missing disables the net sessions")
   if(EXISTS "${RX_ZETANET_DIR}/CMakeLists.txt")
@@ -362,7 +364,7 @@ endif()
 # a second copy on top of that puts two mbedTLS builds in one link with
 # different mbedtls_ssl_context layouts, and the linker picks one set of
 # function bodies for structs laid out by the other.
-if(RX_HTTPS AND "http" IN_LIST RX_MODULES AND NOT TARGET mbedtls AND NOT MBEDTLS_LIB)
+if(RX_HTTPS AND "net/http" IN_LIST RX_MODULES AND NOT TARGET mbedtls AND NOT MBEDTLS_LIB)
   set(RX_MBEDTLS_DIR "" CACHE PATH "Path to an mbedTLS checkout for rx::http's https")
   if(NOT RX_MBEDTLS_DIR)
     foreach(_candidate
@@ -549,7 +551,7 @@ endif()
 # It links rx::rpc rather than reimplementing the frame, so the client and the
 # engine can never disagree about the encoding. Unix sockets only, like the
 # endpoint itself.
-if(RX_BUILD_TOOLS AND NOT WIN32 AND "rpc" IN_LIST RX_MODULES)
+if(RX_BUILD_TOOLS AND NOT WIN32 AND "net/rpc" IN_LIST RX_MODULES)
   add_executable(rxcall tools/rxcall.cc)
   target_link_libraries(rxcall PRIVATE rx::rpc rx::foundation)
   rx_set_warnings(rxcall)

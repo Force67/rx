@@ -9,7 +9,7 @@
 #include "rxe/asset/material.h"
 #include "rxe/asset/texture.h"
 #include "rxe/render/core/bindless.h"
-#include "rxe/render/rhi/device.h"
+#include "rxe/gpu/rhi/device.h"
 
 namespace rx::render {
 

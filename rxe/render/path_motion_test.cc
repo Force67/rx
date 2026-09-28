@@ -7,7 +7,7 @@
 #include "rxe/render/core/bindless.h"
 #include "rxe/render/gi/path_scene_history.h"
 #include "rxe/render/gi/skinned_rt.h"
-#include "rxe/render/rhi/device.h"
+#include "rxe/gpu/rhi/device.h"
 #include "shaders/path_motion_recon_cs_hlsl.h"
 #ifdef RX_HAS_NRD
 #include "base/algorithm.h"

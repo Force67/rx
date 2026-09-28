@@ -6,7 +6,7 @@
 
 #include "base/memory/unique_pointer.h"
 #include "foundation/build_config/types.h"
-#include "rxe/render/rhi/device.h"
+#include "rxe/gpu/rhi/device.h"
 
 namespace rx::render {
 

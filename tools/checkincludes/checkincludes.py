@@ -20,7 +20,7 @@ INCLUDE = re.compile(r'^\s*#\s*include\s+"([^"]+)"')
 BASELINE = os.path.join(os.path.dirname(os.path.abspath(__file__)), "baseline.txt")
 
 # Modules that work on their own handles and must not know the entity world.
-ENTITY_FREE = {"foundation", "events", "window", "ui", "asset", "audio", "net", "http", "rpc", "physics",
+ENTITY_FREE = {"foundation", "events", "window", "gpu", "imgui_renderer", "ui", "asset", "audio", "net", "http", "rpc", "physics",
                "anim", "render", "render2d"}
 ENTITY_WORLD = {"ecs", "scene", "script", "world", "edit", "authoring", "app"}
 # Headers only the editor and tools may use; a shipping game never links them.

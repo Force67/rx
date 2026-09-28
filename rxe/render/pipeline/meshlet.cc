@@ -9,7 +9,7 @@
 #include "base/memory/mem_ops.h"
 #include "foundation/logging/log.h"
 #include "foundation/math/scalar.h"
-#include "rxe/render/rhi/device.h"
+#include "rxe/gpu/rhi/device.h"
 #include "shaders/meshlet_ms_hlsl.h"
 #include "shaders/meshlet_ps_hlsl.h"
 

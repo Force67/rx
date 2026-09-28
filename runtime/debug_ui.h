@@ -13,7 +13,7 @@
 #include "base/containers/vector.h"
 #include "base/memory/move.h"
 #include "base/strings/xstring.h"
-#include "rxe/render/util/imgui_renderer.h"
+#include "rxe/ui/imgui/imgui_renderer.h"
 #endif
 
 namespace rx {

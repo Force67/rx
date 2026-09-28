@@ -5,9 +5,9 @@
 #include "base/strings/xstring.h"
 #include "foundation/build_config/export.h"
 #include "foundation/build_config/types.h"
-#include "rxe/rpc/rpc_message.h"
-#include "rxe/rpc/rpc_registry.h"
-#include "rxe/rpc/rpc_value.h"
+#include "rxe/net/rpc/rpc_message.h"
+#include "rxe/net/rpc/rpc_registry.h"
+#include "rxe/net/rpc/rpc_value.h"
 
 namespace rx::script {
 struct HandlerContext;

@@ -7,7 +7,7 @@
 #include "foundation/build_config/export.h"
 #include "foundation/build_config/types.h"
 #include "rxe/render/core/settings.h"
-#include "rxe/render/rhi/device.h"
+#include "rxe/gpu/rhi/device.h"
 
 namespace rx::render {
 

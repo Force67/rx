@@ -6,8 +6,8 @@
 
 #include "foundation/build_config/types.h"
 #include "foundation/tasks/job_system.h"
-#include "rxe/render/rhi/device.h"
-#include "rxe/render/rhi/resources.h"
+#include "rxe/gpu/rhi/device.h"
+#include "rxe/gpu/rhi/resources.h"
 
 namespace rx::render {
 

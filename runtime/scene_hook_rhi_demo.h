@@ -5,7 +5,7 @@
 
 #include "foundation/math/math.h"
 #include "rxe/render/core/renderer.h"
-#include "rxe/render/rhi/resources.h"
+#include "rxe/gpu/rhi/resources.h"
 
 namespace rx {
 

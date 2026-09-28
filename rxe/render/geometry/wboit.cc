@@ -5,7 +5,7 @@
 #include "base/memory/mem_ops.h"
 #include "foundation/logging/log.h"
 #include "rxe/asset/primitives.h"
-#include "rxe/render/rhi/device.h"
+#include "rxe/gpu/rhi/device.h"
 #include "shaders/fullscreen_vs_slang.h"
 #include "shaders/wboit_ps_hlsl.h"
 #include "shaders/wboit_resolve_ps_hlsl.h"

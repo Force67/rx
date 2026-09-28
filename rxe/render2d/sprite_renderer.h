@@ -6,7 +6,7 @@
 #include "foundation/build_config/export.h"
 #include "foundation/math/math.h"
 #include "rxe/render/core/renderer.h"
-#include "rxe/render/rhi/device.h"
+#include "rxe/gpu/rhi/device.h"
 #include "rxe/render2d/camera2d.h"
 #include "rxe/render2d/tile_map.h"
 #include "rxe/render2d/types2d.h"

@@ -5,7 +5,7 @@
 # Dear ImGui (docking branch). Split into a platform/API-agnostic core and the
 # SDL3 platform + raw-Vulkan render backends:
 #   rx_imgui_core - imgui core only (no SDL3, no volk). The engine's RHI imgui
-#                   render backend (rxe/render/util/imgui_renderer) links this
+#                   render backend (rxe/ui/imgui/imgui_renderer) links this
 #                   for the imgui headers/structs, so rxe/render pulls in
 #                   neither SDL3 nor a second volk copy.
 #   rx_imgui      - the SDL3 platform backend plus the raw imgui_impl_vulkan

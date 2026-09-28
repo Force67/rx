@@ -10,7 +10,7 @@
 #include "foundation/math/scalar.h"
 #include "rxe/render/gi/raytracing.h"
 #include "rxe/render/gi/sdf_clipmap.h"
-#include "rxe/render/rhi/bindings.h"
+#include "rxe/gpu/rhi/bindings.h"
 #include "shaders/rcgi_args_cs_hlsl.h"
 #include "shaders/rcgi_blend_cs_hlsl.h"
 #include "shaders/rcgi_border_cs_hlsl.h"

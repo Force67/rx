@@ -9,7 +9,7 @@
 #include "foundation/logging/log.h"
 #include "foundation/math/scalar.h"
 #include "rxe/asset/mesh.h"
-#include "rxe/render/rhi/device.h"
+#include "rxe/gpu/rhi/device.h"
 
 namespace rx::render {
 namespace {
