@@ -5,7 +5,7 @@
 
 #include "asset/primitives.h"
 #include "base/containers/span.h"
-#include "core/log.h"
+#include "foundation/logging/log.h"
 #include "nav/nav_debug.h"
 #include "nav/path.h"
 #include "scene/components.h"

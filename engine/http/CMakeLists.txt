@@ -11,7 +11,7 @@ rx_add_module(http
   tcp_stream.cc
   tls_stream.cc
 )
-target_link_libraries(rx_http PUBLIC rx::core)
+target_link_libraries(rx_http PUBLIC rx::foundation)
 
 # The mbedtls target comes from the top-level CMakeLists (or from a parent
 # project that already builds one). Absent, MakeTlsStream returns null and

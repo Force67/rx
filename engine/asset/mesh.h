@@ -7,7 +7,7 @@
 #include "asset/asset_id.h"
 #include "asset/skeleton.h"
 #include "base/strings/xstring.h"
-#include "core/types.h"
+#include "foundation/build_config/types.h"
 
 namespace rx::asset {
 

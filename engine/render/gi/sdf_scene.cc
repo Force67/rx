@@ -7,9 +7,9 @@
 #include "base/atomic.h"
 #include "base/memory/mem_ops.h"
 #include "base/time/time.h"
-#include "core/log.h"
-#include "core/math.h"
-#include "core/scalar.h"
+#include "foundation/logging/log.h"
+#include "foundation/math/math.h"
+#include "foundation/math/scalar.h"
 
 namespace rx::render {
 namespace {

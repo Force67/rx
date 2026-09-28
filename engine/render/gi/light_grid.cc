@@ -4,7 +4,7 @@
 #include <string.h>
 
 #include "base/memory/mem_ops.h"
-#include "core/log.h"
+#include "foundation/logging/log.h"
 #include "shaders/light_grid_cs_hlsl.h"
 
 namespace rx::render {

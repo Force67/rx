@@ -2,7 +2,7 @@
 #define RX_ASSET_SUBDIVIDE_H_
 
 #include "asset/mesh.h"
-#include "core/types.h"
+#include "foundation/build_config/types.h"
 
 namespace rx::asset {
 

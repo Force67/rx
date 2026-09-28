@@ -4,7 +4,7 @@
 
 #include "audio/audio_clip.h"
 #include "base/memory/unique_pointer.h"
-#include "core/types.h"
+#include "foundation/build_config/types.h"
 
 namespace rx::audio {
 

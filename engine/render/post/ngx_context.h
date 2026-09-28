@@ -6,7 +6,7 @@
 // NGX is initialized once per VkDevice and shut down when the last user
 // releases it. Vulkan-backend only; compiled under RX_HAS_DLSS.
 
-#include "core/types.h"
+#include "foundation/build_config/types.h"
 
 typedef struct NVSDK_NGX_Parameter NVSDK_NGX_Parameter;
 

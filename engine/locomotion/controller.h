@@ -12,9 +12,9 @@
 // teleports bodies; all actuation goes through joint motors and the bounded
 // root assist. No per-tick heap allocation.
 
-#include "core/export.h"
-#include "core/math.h"
-#include "core/types.h"
+#include "foundation/build_config/export.h"
+#include "foundation/build_config/types.h"
+#include "foundation/math/math.h"
 #include "locomotion/estimator.h"
 #include "locomotion/footstep.h"
 #include "locomotion/gait.h"

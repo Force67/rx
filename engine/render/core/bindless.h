@@ -5,7 +5,7 @@
 #include <base/containers/vector.h>
 
 #include "base/memory/unique_pointer.h"
-#include "core/types.h"
+#include "foundation/build_config/types.h"
 #include "render/rhi/device.h"
 
 namespace rx::render {

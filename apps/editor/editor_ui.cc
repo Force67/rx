@@ -15,10 +15,10 @@
 #include <ugui/widgets/widget.h>
 #include <ugui/widgets/widget_registry.h>
 
-#include "core/file_system.h"
-#include "core/log.h"
 #include "edit/hierarchy.h"
 #include "editor_app.h"
+#include "foundation/files/file_system.h"
+#include "foundation/logging/log.h"
 
 #include "anim/morph.h"
 #include "base/algorithm.h"
@@ -28,7 +28,7 @@
 #include "base/memory/move.h"
 #include "base/strings/string_ref.h"
 #include "base/strings/xstring.h"
-#include "core/scalar.h"
+#include "foundation/math/scalar.h"
 #include "render/rhi/vulkan_interop.h"
 #include "scene/components.h"
 

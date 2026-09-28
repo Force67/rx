@@ -3,8 +3,8 @@
 #include "base/optional.h"
 #include "base/strings/string_ref.h"
 #include "base/strings/xstring.h"
-#include "core/format.h"
-#include "core/scalar.h"
+#include "foundation/math/scalar.h"
+#include "foundation/strings/format.h"
 #include "world/world_map.h"
 
 #include <math.h>

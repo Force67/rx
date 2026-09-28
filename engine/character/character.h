@@ -1,9 +1,9 @@
 #ifndef RX_CHARACTER_CHARACTER_H_
 #define RX_CHARACTER_CHARACTER_H_
 
-#include "core/export.h"
-#include "core/math.h"
 #include "ecs/entity.h"
+#include "foundation/build_config/export.h"
+#include "foundation/math/math.h"
 #include "physics/physics_world.h"
 #include "scene/camera.h"
 

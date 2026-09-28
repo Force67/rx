@@ -2,11 +2,11 @@
 #define RX_SCRIPT_SCRIPT_SYMBOLS_H_
 
 
-#include "core/export.h"
-#include "core/types.h"
+#include "base/containers/unordered_map.h"
+#include "foundation/build_config/export.h"
+#include "foundation/build_config/types.h"
 #include "script/script_arena.h"
 #include "script/script_string.h"
-#include "base/containers/unordered_map.h"
 
 namespace rx::script {
 

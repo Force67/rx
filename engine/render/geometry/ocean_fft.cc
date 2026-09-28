@@ -5,8 +5,8 @@
 
 #include "base/containers/vector.h"
 #include "base/memory/mem_ops.h"
-#include "core/log.h"
-#include "core/types.h"
+#include "foundation/build_config/types.h"
+#include "foundation/logging/log.h"
 #include "shaders/ocean_fft_cs_hlsl.h"
 #include "shaders/ocean_finalize_cs_hlsl.h"
 #include "shaders/ocean_normals_cs_hlsl.h"

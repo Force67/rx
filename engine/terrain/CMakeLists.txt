@@ -3,4 +3,4 @@ rx_add_module(terrain
   terrain_io.cc
 )
 
-target_link_libraries(rx_terrain PUBLIC rx::core rx::asset rx::scene)
+target_link_libraries(rx_terrain PUBLIC rx::foundation rx::asset rx::scene)

@@ -1,7 +1,7 @@
 #include "base/strings/xstring.h"
 #include "render/core/presets.h"
 
-#include "core/platform.h"
+#include "foundation/system/platform.h"
 #include "render/core/settings_ini.h"
 
 #include <ctype.h>

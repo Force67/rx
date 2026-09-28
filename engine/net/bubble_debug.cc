@@ -2,8 +2,8 @@
 
 #include <base/option.h>
 
-#include "core/log.h"
-#include "core/math.h"
+#include "foundation/logging/log.h"
+#include "foundation/math/math.h"
 #include "net/bubble.h"
 #include "render/rhi/vulkan_interop.h"
 #include "render/util/shader_util.h"

@@ -3,8 +3,8 @@
 
 #include <math.h>
 
-#include "core/scalar.h"
-#include "core/types.h"
+#include "foundation/build_config/types.h"
+#include "foundation/math/scalar.h"
 
 namespace rx::render {
 

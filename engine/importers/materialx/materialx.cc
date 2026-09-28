@@ -3,9 +3,9 @@
 
 #include "base/containers/vector.h"
 #include "base/strings/xstring.h"
-#include "core/file_system.h"
-#include "core/log.h"
-#include "core/text_reader.h"
+#include "foundation/files/file_system.h"
+#include "foundation/logging/log.h"
+#include "foundation/strings/text_reader.h"
 
 namespace rx::asset {
 namespace {

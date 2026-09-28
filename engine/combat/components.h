@@ -2,9 +2,9 @@
 #define RX_COMBAT_COMPONENTS_H_
 
 #include "combat/weapon_def.h"
-#include "core/math.h"
-#include "core/types.h"
 #include "ecs/entity.h"
+#include "foundation/build_config/types.h"
+#include "foundation/math/math.h"
 
 // Plain-data components for the shooter systems. Everything here is POD: no
 // component owns a heap allocation, so the archetype storage relocates them by

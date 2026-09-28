@@ -14,7 +14,7 @@
 #include "base/functional/function.h"
 #include "base/strings/string_ref.h"
 #include "base/threading/mutex.h"
-#include "core/export.h"
+#include "foundation/build_config/export.h"
 
 namespace rx::asset {
 

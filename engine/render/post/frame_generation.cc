@@ -4,7 +4,7 @@
 #include <stdlib.h>
 #include <string.h>
 
-#include "core/log.h"
+#include "foundation/logging/log.h"
 // Vulkan escape hatch: the FFX backend speaks raw Vulkan. Also pulls volk
 // (VK_NO_PROTOTYPES) before the ffx vk headers.
 #include "base/memory/unique_pointer.h"

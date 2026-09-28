@@ -3,8 +3,8 @@
 #include "base/memory/mem_ops.h"
 #include "base/memory/move.h"
 #include "base/strings/xstring.h"
-#include "core/format.h"
-#include "core/scalar.h"
+#include "foundation/math/scalar.h"
+#include "foundation/strings/format.h"
 #include "world/world_overlay.h"
 
 #include <math.h>

@@ -4,7 +4,7 @@
 
 #include "asset/primitives.h"
 #include "base/memory/mem_ops.h"
-#include "core/log.h"
+#include "foundation/logging/log.h"
 #include "render/rhi/device.h"
 #include "shaders/fur_ps_hlsl.h"
 #include "shaders/fur_vs_hlsl.h"

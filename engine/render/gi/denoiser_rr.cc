@@ -1,6 +1,6 @@
 #include "render/gi/denoiser_rr.h"
 
-#include "core/log.h"
+#include "foundation/logging/log.h"
 #include "render/post/ngx_context.h"
 #include "render/rhi/device.h"
 // Vulkan escape hatch: NGX speaks raw Vulkan. Also pulls volk

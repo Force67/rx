@@ -29,7 +29,9 @@ set(RX_RUNTIME_SOURCES
 
 set(RX_RUNTIME_MODULES
   rx::app
-  rx::core
+  rx::foundation
+  rx::window
+  rx::events
   rx::ecs
   rx::asset
   rx::gltf
@@ -123,7 +125,7 @@ endif()
 add_library(viewer_scene_authoring STATIC scene_authoring.cc)
 target_include_directories(viewer_scene_authoring PUBLIC ${CMAKE_CURRENT_SOURCE_DIR})
 target_link_libraries(viewer_scene_authoring PUBLIC
-  rx::gltf rx::materialx rx::edit rx::scene rx::ecs rx::asset rx::render rx::core)
+  rx::gltf rx::materialx rx::edit rx::scene rx::ecs rx::asset rx::render rx::foundation)
 rx_set_warnings(viewer_scene_authoring)
 
 add_executable(rx main.cc ${RX_RUNTIME_SOURCES})

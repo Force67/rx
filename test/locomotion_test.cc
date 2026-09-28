@@ -8,8 +8,8 @@
 #include <stdio.h>
 #include <stdlib.h>
 
-#include "core/math.h"
-#include "core/scalar.h"
+#include "foundation/math/math.h"
+#include "foundation/math/scalar.h"
 #include "locomotion/controller.h"
 #include "locomotion/estimator.h"
 #include "locomotion/rig.h"

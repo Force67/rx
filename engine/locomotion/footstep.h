@@ -13,9 +13,9 @@
 // up, yaw 0 faces -Z; metres, m/s, radians. Outputs stay finite for degenerate
 // inputs.
 
-#include "core/export.h"
-#include "core/math.h"
-#include "core/types.h"
+#include "foundation/build_config/export.h"
+#include "foundation/build_config/types.h"
+#include "foundation/math/math.h"
 #include "locomotion/types.h"
 
 namespace rx::locomotion {

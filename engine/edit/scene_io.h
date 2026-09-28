@@ -4,8 +4,8 @@
 
 #include "asset/asset_database.h"
 #include "base/strings/xstring.h"
-#include "core/export.h"
 #include "ecs/world.h"
+#include "foundation/build_config/export.h"
 
 // Text scene serialization (".rxscene"): a versioned, human-readable and
 // git-diffable dump of every reflected component on every identity-bearing

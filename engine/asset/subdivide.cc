@@ -6,7 +6,7 @@
 #include <base/containers/vector.h>
 
 #include "base/memory/move.h"
-#include "core/math.h"
+#include "foundation/math/math.h"
 
 namespace rx::asset {
 namespace {

@@ -4,7 +4,7 @@
 
 #include "base/containers/span.h"
 #include "base/memory/unique_pointer.h"
-#include "core/math.h"
+#include "foundation/math/math.h"
 #include "render/core/bindless.h"
 #include "render/core/render_graph.h"
 #include "render/gi/light_grid.h"

@@ -3,12 +3,12 @@
 #include "base/numeric_limits.h"
 #include "base/strings/string_ref.h"
 #include "base/strings/xstring.h"
-#include "core/scalar.h"
+#include "foundation/math/scalar.h"
 #include "terrain/terrain.h"
 
 #include <math.h>
 
-#include "core/file_system.h"
+#include "foundation/files/file_system.h"
 
 namespace rx::terrain {
 namespace {

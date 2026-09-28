@@ -4,10 +4,10 @@
 
 #include "base/containers/vector.h"
 #include "base/meta/traits.h"
-#include "core/export.h"
-#include "core/math.h"
-#include "core/types.h"
 #include "ecs/entity.h"
+#include "foundation/build_config/export.h"
+#include "foundation/build_config/types.h"
+#include "foundation/math/math.h"
 #include "script/script_string.h"
 
 namespace rx::script {

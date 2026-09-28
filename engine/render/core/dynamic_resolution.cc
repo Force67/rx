@@ -1,4 +1,4 @@
-#include "core/scalar.h"
+#include "foundation/math/scalar.h"
 #include "render/core/dynamic_resolution.h"
 
 #include <math.h>

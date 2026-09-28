@@ -1,5 +1,5 @@
 #include "base/algorithm.h"
-#include "core/scalar.h"
+#include "foundation/math/scalar.h"
 #include "vehicles/aux_synth.h"
 
 #include <math.h>

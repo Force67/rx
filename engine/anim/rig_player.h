@@ -7,7 +7,7 @@
 #include "base/functional/function.h"
 #include "base/memory/unique_pointer.h"
 #include "base/strings/string_ref.h"
-#include "core/math.h"
+#include "foundation/math/math.h"
 
 namespace rx::anim {
 

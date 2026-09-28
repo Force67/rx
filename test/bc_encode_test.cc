@@ -17,7 +17,7 @@
 #include "base/containers/vector.h"
 #include "base/memory/mem_ops.h"
 #include "base/strings/xstring.h"
-#include "core/file_system.h"
+#include "foundation/files/file_system.h"
 
 namespace {
 

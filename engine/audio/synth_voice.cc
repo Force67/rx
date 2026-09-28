@@ -2,7 +2,7 @@
 #include "base/atomic.h"
 #include "base/memory/move.h"
 #include "base/memory/unique_pointer.h"
-#include "core/scalar.h"
+#include "foundation/math/scalar.h"
 
 #include <math.h>
 

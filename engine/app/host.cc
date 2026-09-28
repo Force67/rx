@@ -15,14 +15,14 @@
 #include "base/threading/thread.h"
 #include <base/hashing/cuid2.h>
 
-#include "core/app_identity.h"
-#include "core/feature_registry.h"
-#include "core/log.h"
-#include "core/math.h"
-#include "core/memory/frame_arena.h"
-#include "core/memory/memory_config.h"
-#include "core/platform.h"
-#include "core/sort.h"
+#include "foundation/algorithm/sort.h"
+#include "foundation/features/feature_registry.h"
+#include "foundation/logging/log.h"
+#include "foundation/math/math.h"
+#include "foundation/memory/frame_arena.h"
+#include "foundation/memory/memory_config.h"
+#include "foundation/system/app_identity.h"
+#include "foundation/system/platform.h"
 #include "scene/components.h"
 
 // Host lifecycle and the per-frame heartbeat: subsystem bringup in dependency

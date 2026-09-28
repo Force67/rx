@@ -5,7 +5,7 @@
 #include <base/containers/vector.h>
 
 #include "base/strings/xstring.h"
-#include "core/math.h"
+#include "foundation/math/math.h"
 
 namespace rx {
 

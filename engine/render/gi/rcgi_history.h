@@ -1,7 +1,7 @@
 #ifndef RX_RENDER_RCGI_HISTORY_H_
 #define RX_RENDER_RCGI_HISTORY_H_
 
-#include "core/math.h"
+#include "foundation/math/math.h"
 
 namespace rx::render {
 

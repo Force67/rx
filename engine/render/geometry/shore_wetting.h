@@ -11,7 +11,7 @@
 // ping-pongs and is resampled at the previous origin as the camera moves, so no
 // toroidal bookkeeping is needed. See SHORELINE_WETTING.md.
 
-#include "core/math.h"
+#include "foundation/math/math.h"
 #include "render/core/render_graph.h"
 #include "render/rhi/device.h"
 

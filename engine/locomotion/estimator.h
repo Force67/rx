@@ -6,9 +6,9 @@
 // step; neither assumes the previous plan actually happened. Everything reads
 // through the physics adapter surface, so there are no Jolt includes here.
 
-#include "core/export.h"
-#include "core/math.h"
-#include "core/types.h"
+#include "foundation/build_config/export.h"
+#include "foundation/build_config/types.h"
+#include "foundation/math/math.h"
 #include "locomotion/rig.h"
 #include "locomotion/types.h"
 #include "physics/physics_world.h"

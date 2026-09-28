@@ -1,9 +1,9 @@
 #ifndef RX_SCENE_FLY_CAMERA_H_
 #define RX_SCENE_FLY_CAMERA_H_
 
-#include "core/export.h"
-#include "core/input.h"
-#include "core/math.h"
+#include "foundation/build_config/export.h"
+#include "foundation/math/math.h"
+#include "ui/events/input.h"
 
 namespace rx::scene {
 

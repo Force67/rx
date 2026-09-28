@@ -4,7 +4,7 @@
 #include <stddef.h>
 
 #include "base/memory/unique_pointer.h"
-#include "core/math.h"
+#include "foundation/math/math.h"
 #include "render/rhi/device.h"
 
 namespace rx::render {

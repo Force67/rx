@@ -7,7 +7,7 @@
 // fog composite, translucents and particles all sample the same "everything
 // in front of me" answer. Temporally jittered and reprojected.
 
-#include "core/math.h"
+#include "foundation/math/math.h"
 #include "render/core/render_graph.h"
 #include "render/rhi/device.h"
 

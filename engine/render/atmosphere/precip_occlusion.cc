@@ -3,7 +3,7 @@
 #include <math.h>
 
 #include "base/functional/function.h"
-#include "core/log.h"
+#include "foundation/logging/log.h"
 
 namespace rx::render {
 

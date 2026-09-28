@@ -4,7 +4,7 @@
 #include <string.h>
 
 #include "base/containers/vector.h"
-#include "core/math.h"
+#include "foundation/math/math.h"
 #include "render/rhi/device.h"
 #include "shaders/recon_temporal_cs_hlsl.h"
 

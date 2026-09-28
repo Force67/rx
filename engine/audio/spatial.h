@@ -3,9 +3,9 @@
 
 #include <math.h>
 
-#include "core/math.h"
-#include "core/scalar.h"
-#include "core/types.h"
+#include "foundation/build_config/types.h"
+#include "foundation/math/math.h"
+#include "foundation/math/scalar.h"
 
 namespace rx::audio {
 

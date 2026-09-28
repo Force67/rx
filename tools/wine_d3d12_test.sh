@@ -9,7 +9,7 @@
 # Build the PEs first (inside `nix develop`, host dxc compiles the shaders):
 #   cmake -B build/mingw -G Ninja -DCMAKE_BUILD_TYPE=Release \
 #     -DCMAKE_TOOLCHAIN_FILE=cmake/toolchain-mingw-w64.cmake \
-#     "-DRX_MODULES=core;asset;render" -DRX_RHI_VULKAN=OFF -DRX_RHI_D3D12=ON \
+#     "-DRX_MODULES=ui/events;ui/window;asset;render" -DRX_RHI_VULKAN=OFF -DRX_RHI_D3D12=ON \
 #     -DRX_BUILD_TESTS=ON -DRX_BUILD_RUNTIME=OFF -DRX_NRD=OFF -DRX_DLSS=OFF \
 #     -DRX_FSR3=OFF -DRX_INSTALL=OFF -DCMAKE_DISABLE_FIND_PACKAGE_SDL3=ON \
 #     -DEQ_FMTLIB_DIR=<fmtlib checkout>

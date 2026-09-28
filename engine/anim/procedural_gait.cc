@@ -1,6 +1,6 @@
 #include "anim/procedural_gait.h"
 #include "base/strings/string_ref.h"
-#include "core/scalar.h"
+#include "foundation/math/scalar.h"
 
 #include <math.h>
 #include <initializer_list>

@@ -4,7 +4,7 @@
 #include <initializer_list>
 
 #include "base/containers/span.h"
-#include "core/types.h"
+#include "foundation/build_config/types.h"
 #include "render/rhi/bindings.h"
 #include "render/rhi/resources.h"
 #include "render/rhi/types.h"

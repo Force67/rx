@@ -9,7 +9,7 @@ rx_add_module(anim
   expression.cc
   body_dynamics.cc
 )
-target_link_libraries(rx_anim PUBLIC rx::core rx::asset)
+target_link_libraries(rx_anim PUBLIC rx::foundation rx::asset)
 # kinema is a PRIVATE implementation detail of the graph/rig/foot-placement units
 # (it never appears in a public anim header, mirroring how physics consumes it).
 # BUILD_INTERFACE keeps it out of the installed export; rxConfig re-attaches the

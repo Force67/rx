@@ -6,8 +6,8 @@
 #include "base/memory/move.h"
 #include "base/optional.h"
 #include "base/strings/xstring.h"
-#include "core/format.h"
-#include "core/log.h"
+#include "foundation/logging/log.h"
+#include "foundation/strings/format.h"
 #include "rpc/rpc_message.h"
 
 #if !defined(_WIN32)

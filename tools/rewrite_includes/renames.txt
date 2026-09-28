@@ -1,0 +1,57 @@
+# Every header and symbol rx has renamed since the code-structure work began
+# (docs/STRUCTURE.md), oldest first. A project on an older rx runs
+#   tools/rewrite_includes/rewrite_includes.py <its source dirs>
+# once after bumping; lines are idempotent, so running it twice is harmless.
+#
+#   include <old> <new>   an #include "<old>" becomes #include "<new>"
+#   symbol  <old> <new>   a qualified name, matched as a whole word
+
+# Phase 2
+include physics/shape_desc.h asset/shape_desc.h
+symbol  physics::ShapeDesc asset::ShapeDesc
+include asset/gltf_loader.h importers/gltf/gltf_loader.h
+include asset/usd_loader.h importers/usd/usd_loader.h
+include asset/materialx.h importers/materialx/materialx.h
+include asset/blend_import.h importers/blend/blend_import.h
+include physics/aircraft.h vehicles/aircraft.h
+include physics/boat.h vehicles/boat.h
+include physics/boat_profiles.h vehicles/boat_profiles.h
+include physics/vehicle_profiles.h vehicles/vehicle_profiles.h
+include physics/kite.h vehicles/kite.h
+include audio/vehicle_audio.h vehicles/vehicle_audio.h
+include audio/engine_synth.h vehicles/engine_synth.h
+include audio/aux_synth.h vehicles/aux_synth.h
+include audio/thunder_synth.h weather/thunder_synth.h
+include anim/locomotion.h anim/procedural_gait.h
+symbol  anim::Locomotion anim::ProceduralGait
+
+# Phase 3: core splits into foundation/, ui/window, ui/events
+include core/app_identity.h foundation/system/app_identity.h
+include core/export.h foundation/build_config/export.h
+include core/feature_registry.h foundation/features/feature_registry.h
+include core/file_system.h foundation/files/file_system.h
+include core/format.h foundation/strings/format.h
+include core/frame_timer.h foundation/time/frame_timer.h
+include core/input.h ui/events/input.h
+include core/input_actions.h ui/events/input_actions.h
+include core/input_bindings.h ui/events/input_bindings.h
+include core/job_system.h foundation/tasks/job_system.h
+include core/log.h foundation/logging/log.h
+include core/math.h foundation/math/math.h
+include core/memory/chunk_pool.h foundation/memory/chunk_pool.h
+include core/memory/frame_arena.h foundation/memory/frame_arena.h
+include core/memory/memory_config.h foundation/memory/memory_config.h
+include core/memory/memory_tracker.h foundation/memory/memory_tracker.h
+include core/memory/small_vector.h foundation/memory/small_vector.h
+include core/paths.h foundation/files/paths.h
+include core/platform.h foundation/system/platform.h
+include core/scalar.h foundation/math/scalar.h
+include core/shared.h foundation/memory/shared.h
+include core/sort.h foundation/algorithm/sort.h
+include core/text_reader.h foundation/strings/text_reader.h
+include core/text_writer.h foundation/strings/text_writer.h
+include core/types.h foundation/build_config/types.h
+include core/wayland_kde_hdr.h ui/window/wayland_kde_hdr.h
+include core/window.h ui/window/window.h
+include core/world_clock.h app/world_clock.h
+include core/features.def foundation/features/features.def

@@ -5,9 +5,10 @@
 rx_add_module(app
   host.cc
   platform_config.cc
+  world_clock.cc
 )
 
 target_link_libraries(rx_app PUBLIC
-  rx::core rx::ecs rx::asset rx::scene rx::render rx::physics rx::audio
+  rx::foundation rx::window rx::events rx::ecs rx::asset rx::scene rx::render rx::physics rx::audio
   # The splash plate the host puts up before the application sees a frame.
   rx::ui)

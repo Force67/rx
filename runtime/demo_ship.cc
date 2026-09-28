@@ -8,8 +8,8 @@
 #include "asset/primitives.h"
 #include "base/algorithm.h"
 #include "base/memory/move.h"
-#include "core/log.h"
-#include "core/scalar.h"
+#include "foundation/logging/log.h"
+#include "foundation/math/scalar.h"
 #include "render/geometry/water_field.h"
 #include "scene/components.h"
 

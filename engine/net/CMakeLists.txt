@@ -19,14 +19,14 @@ if(TARGET zetanet)
 endif()
 
 rx_add_module(net ${RX_NET_SOURCES})
-target_link_libraries(rx_net PUBLIC rx::core rx::rpc)
+target_link_libraries(rx_net PUBLIC rx::foundation rx::rpc)
 if(TARGET zetanet)
   target_link_libraries(rx_net PUBLIC zetanet)
   target_compile_definitions(rx_net PUBLIC RX_NET_HAS_ZETANET=1)
 endif()
 
 rx_add_module(replication ${RX_REPLICATION_SOURCES})
-target_link_libraries(rx_replication PUBLIC rx::net rx::core rx::ecs rx::asset rx::scene)
+target_link_libraries(rx_replication PUBLIC rx::net rx::foundation rx::ecs rx::asset rx::scene)
 
 # The 3D bubble visualizer is its own target so a headless dedicated server
 # links rx::replication without dragging the renderer in.

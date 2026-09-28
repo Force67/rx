@@ -20,8 +20,8 @@
 
 
 #include "base/functional/function.h"
-#include "core/math.h" // Vec2 (weather map XZ offset), Vec3
-#include "core/types.h"
+#include "foundation/build_config/types.h"
+#include "foundation/math/math.h" // Vec2 (weather map XZ offset), Vec3
 #include "render/atmosphere/cloudscape_types.h"
 #include "render/core/settings.h"
 #include "weather/export.h"

@@ -8,7 +8,7 @@
 // sample the maps through env slots 28/29 when kFrameFlagFftOcean is set;
 // RX_FFT_OCEAN=0 falls back to Gerstner.
 
-#include "core/math.h"
+#include "foundation/math/math.h"
 #include "render/core/render_graph.h"
 #include "render/rhi/device.h"
 

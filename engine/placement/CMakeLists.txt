@@ -6,7 +6,7 @@ rx_add_module(placement
   density_program.cc
   placement.cc
   world_data.cc)
-target_link_libraries(rx_placement PUBLIC rx::core)
+target_link_libraries(rx_placement PUBLIC rx::foundation)
 
 if(TARGET rx_render)
   rx_add_module(placement_gpu gpu_placement.cc)

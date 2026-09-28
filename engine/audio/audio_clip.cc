@@ -11,8 +11,8 @@
 #include "base/memory/unique_pointer.h"
 #include "base/strings/string_ref.h"
 #include "base/strings/xstring.h"
-#include "core/log.h"
-#include "core/scalar.h"
+#include "foundation/logging/log.h"
+#include "foundation/math/scalar.h"
 
 namespace rx::audio {
 namespace {

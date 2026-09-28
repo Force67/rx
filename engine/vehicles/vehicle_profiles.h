@@ -1,7 +1,7 @@
 #ifndef RX_VEHICLES_VEHICLE_PROFILES_H_
 #define RX_VEHICLES_VEHICLE_PROFILES_H_
 
-#include "core/export.h"
+#include "foundation/build_config/export.h"
 #include "physics/physics_world.h"
 
 namespace rx::physics {

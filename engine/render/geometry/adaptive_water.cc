@@ -2,8 +2,8 @@
 
 #include "asset/mesh.h"
 #include "base/containers/vector.h"
-#include "core/log.h"
-#include "core/scalar.h"
+#include "foundation/logging/log.h"
+#include "foundation/math/scalar.h"
 #include "shaders/adaptive_water_cs_hlsl.h"
 
 namespace rx::render {

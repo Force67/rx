@@ -10,7 +10,7 @@
 #include <znet/z_peer.h>
 
 #include "base/containers/vector.h"
-#include "core/types.h"
+#include "foundation/build_config/types.h"
 #include "net/protocol.h"
 
 namespace rx::net {

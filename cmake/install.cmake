@@ -36,7 +36,7 @@ set(RX_DEPS_LIBDIR ${CMAKE_INSTALL_LIBDIR}/rx)
 set(RX_DEPS_INCDIR ${CMAKE_INSTALL_INCLUDEDIR}/rx-deps)
 
 # rx module targets + export set
-set(RX_MODULE_NAMES core ecs script asset gltf usd materialx blend scene terrain render render2d physics vehicles locomotion anim audio
+set(RX_MODULE_NAMES foundation events window ecs script asset gltf usd materialx blend scene terrain render render2d physics vehicles locomotion anim audio
     weather rpc authoring character inventory inventory_world ui app)
 set(RX_INSTALL_TARGETS)
 foreach(_m ${RX_MODULE_NAMES})
@@ -75,6 +75,9 @@ install(DIRECTORY ${PROJECT_SOURCE_DIR}/engine/
     # not part of the public package: kinema headers are not bundled, so a public
     # header may never include <kinema/kinema.h>.
     PATTERN "*_internal.h" EXCLUDE)
+install(DIRECTORY ${PROJECT_SOURCE_DIR}/foundation
+  DESTINATION ${CMAKE_INSTALL_INCLUDEDIR}
+  FILES_MATCHING PATTERN "*.h" PATTERN "*.def")
 
 # third-party archive + header bundling
 # Resolve an imported/interface target's own include dir(s), stripping the

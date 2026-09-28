@@ -18,7 +18,7 @@
 #include <imgui.h>
 
 #include "base/memory/mem_ops.h"
-#include "core/types.h"
+#include "foundation/build_config/types.h"
 
 namespace rx::render {
 

@@ -4,7 +4,7 @@
 #include <base/containers/vector.h>
 
 #include "asset/asset_id.h"
-#include "core/types.h"
+#include "foundation/build_config/types.h"
 
 namespace rx::asset {
 

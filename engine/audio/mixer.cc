@@ -5,8 +5,8 @@
 #include "base/memory/move.h"
 #include "base/memory/unique_pointer.h"
 #include "base/threading/lock_guard.h"
-#include "core/memory/memory_tracker.h"
-#include "core/scalar.h"
+#include "foundation/math/scalar.h"
+#include "foundation/memory/memory_tracker.h"
 #include <math.h>
 
 namespace rx::audio {

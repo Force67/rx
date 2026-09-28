@@ -17,8 +17,8 @@
 // surface, which is all a demo needs (games with their own movers read
 // `velocity`).
 
-#include "core/export.h"
 #include "ecs/world.h"
+#include "foundation/build_config/export.h"
 #include "nav/path.h"
 
 namespace rx::nav {

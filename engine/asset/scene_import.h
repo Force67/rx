@@ -9,7 +9,7 @@
 #include "asset/skeleton.h"
 #include "asset/texture.h"
 #include "base/strings/xstring.h"
-#include "core/math.h"
+#include "foundation/math/math.h"
 
 namespace rx::asset {
 

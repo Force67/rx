@@ -11,12 +11,12 @@
 #include "base/meta/traits.h"
 #include "base/strings/string_ref.h"
 #include "base/strings/xstring.h"
-#include "core/export.h"
-#include "core/math.h"
-#include "core/types.h"
 #include "ecs/component.h"
 #include "ecs/entity.h"
 #include "ecs/world.h"
+#include "foundation/build_config/export.h"
+#include "foundation/build_config/types.h"
+#include "foundation/math/math.h"
 
 // Field-level reflection for ecs components: enough for a generic property
 // inspector, a text scene serializer and an undo system to read and write any

@@ -5,7 +5,7 @@
 #include "anim/pose.h"
 #include "asset/skeleton.h"
 #include "base/functional/function.h"
-#include "core/math.h"
+#include "foundation/math/math.h"
 
 namespace rx::anim {
 

@@ -1,7 +1,7 @@
 #ifndef RX_EDITOR_INPUT_H_
 #define RX_EDITOR_INPUT_H_
 
-#include "core/input_actions.h"
+#include "ui/events/input_actions.h"
 
 namespace rx {
 

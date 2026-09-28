@@ -2,8 +2,8 @@
 
 #include <math.h>
 
-#include "core/scalar.h"
 #include "asset/shape_desc.h"
+#include "foundation/math/scalar.h"
 
 namespace rx::physics {
 

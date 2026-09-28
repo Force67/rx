@@ -5,10 +5,10 @@
 #include <string.h>
 
 #include "base/functional/function.h"
-#include "core/log.h"
-#include "core/scalar.h"
+#include "foundation/algorithm/sort.h"
+#include "foundation/logging/log.h"
+#include "foundation/math/scalar.h"
 #include "render/gi/shadow.h"
-#include "core/sort.h"
 
 namespace rx::render {
 namespace {

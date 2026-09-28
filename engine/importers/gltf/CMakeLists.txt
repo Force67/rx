@@ -1,5 +1,5 @@
 rx_add_module(gltf gltf_loader.cc)
-target_link_libraries(rx_gltf PUBLIC rx::asset rx::core)
+target_link_libraries(rx_gltf PUBLIC rx::asset rx::foundation)
 # Header-only, PRIVATE: only needed to compile the loader. BUILD_INTERFACE keeps
 # them out of the installed export.
 target_link_libraries(rx_gltf PRIVATE

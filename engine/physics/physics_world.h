@@ -7,9 +7,9 @@
 #include "base/functional/function.h"
 #include "base/memory/move.h"
 #include "base/memory/unique_pointer.h"
-#include "core/export.h"
-#include "core/math.h"
-#include "core/types.h"
+#include "foundation/build_config/export.h"
+#include "foundation/build_config/types.h"
+#include "foundation/math/math.h"
 #include "physics/cloth.h"
 
 namespace rx::physics {

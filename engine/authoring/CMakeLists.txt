@@ -8,4 +8,4 @@ rx_add_module(authoring
 # RUNNING engine. It owns the trust boundary (see command_bridge.h), which is why
 # it is a module of its own rather than a dependency added to either side: script
 # stays runtime-agnostic and rpc stays transport-free.
-target_link_libraries(rx_authoring PUBLIC rx::core rx::ecs rx::rpc rx::script)
+target_link_libraries(rx_authoring PUBLIC rx::foundation rx::ecs rx::rpc rx::script)

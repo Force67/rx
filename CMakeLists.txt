@@ -48,7 +48,7 @@ option(RX_INSTALL "Generate install()/export rules for find_package(rx)"
 # The "DLL test": build each rx module as a shared library instead of a static
 # archive. Off by default (the static build is the shipping configuration). This
 # is a correctness discipline, not a distribution mode: hidden visibility plus
-# explicit per-module export annotations (engine/core/export.h) document each
+# explicit per-module export annotations (foundation/build_config/export.h) document each
 # module's real cross-DSO API and flush out ambient-state bugs.
 option(RX_SHARED "Build rx modules as shared libraries (experimental)" OFF)
 
@@ -275,7 +275,8 @@ add_subdirectory(third_party)
 # packages the d3d12 backend tests for a Windows runtime) can build a slice.
 if(NOT DEFINED RX_MODULES)
   set(RX_MODULES
-    core
+    ui/events
+    ui/window
     ecs
     script
     asset
@@ -424,6 +425,7 @@ endif()
 # with no conflict in the shared build files.
 include("${CMAKE_CURRENT_SOURCE_DIR}/engine/local.cmake" OPTIONAL)
 
+add_subdirectory(foundation)
 foreach(module ${RX_MODULES})
   add_subdirectory(engine/${module})
 endforeach()
@@ -445,7 +447,7 @@ endif()
 # `ctest` runs them everywhere.
 if(RX_BUILD_TESTS AND "net" IN_LIST RX_MODULES)
   add_executable(net_test test/net_test.cc)
-  target_link_libraries(net_test PRIVATE rx::replication rx::net rx::core)
+  target_link_libraries(net_test PRIVATE rx::replication rx::net rx::foundation)
   add_test(NAME net_test COMMAND net_test)
 endif()
 
@@ -454,7 +456,7 @@ endif()
 # network; the live fetch inside it only runs with RX_HTTP_LIVE set.
 if(RX_BUILD_TESTS AND "http" IN_LIST RX_MODULES)
   add_executable(http_test test/http_test.cc)
-  target_link_libraries(http_test PRIVATE rx::http rx::core)
+  target_link_libraries(http_test PRIVATE rx::http rx::foundation)
   add_test(NAME http_test COMMAND http_test)
 endif()
 
@@ -463,20 +465,20 @@ endif()
 # otherwise be the only way to exercise.
 if(RX_BUILD_TESTS)
   add_executable(input_touch_test test/input_touch_test.cc)
-  target_link_libraries(input_touch_test PRIVATE rx::core)
+  target_link_libraries(input_touch_test PRIVATE rx::events rx::foundation)
   add_test(NAME input_touch_test COMMAND input_touch_test)
 
   # Action edges from raw input, including presses that begin and end inside
   # one pump.
   add_executable(input_map_test test/input_map_test.cc)
-  target_link_libraries(input_map_test PRIVATE rx::core)
+  target_link_libraries(input_map_test PRIVATE rx::events rx::foundation)
   add_test(NAME input_map_test COMMAND input_map_test)
 
   # The other half: SDL's own event queue driven through the real backend, so
   # the normalized-to-pixel translation is covered too. Skips without a display.
   if(TARGET SDL3::SDL3)
     add_executable(input_touch_sdl_test test/input_touch_sdl_test.cc)
-    target_link_libraries(input_touch_sdl_test PRIVATE rx::core SDL3::SDL3)
+    target_link_libraries(input_touch_sdl_test PRIVATE rx::window rx::events rx::foundation SDL3::SDL3)
     add_test(NAME input_touch_sdl_test COMMAND input_touch_sdl_test)
   endif()
 endif()
@@ -486,7 +488,7 @@ endif()
 # transport, so plain `ctest` runs them everywhere.
 if(RX_BUILD_TESTS AND "script" IN_LIST RX_MODULES)
   add_executable(script_test test/script_test.cc)
-  target_link_libraries(script_test PRIVATE rx::scene rx::script rx::ecs rx::core)
+  target_link_libraries(script_test PRIVATE rx::scene rx::script rx::ecs rx::foundation)
   add_test(NAME script_test COMMAND script_test)
 endif()
 
@@ -496,7 +498,7 @@ endif()
 if(RX_BUILD_TESTS AND NOT WIN32 AND "authoring" IN_LIST RX_MODULES)
   add_executable(command_bridge_test test/command_bridge_test.cc)
   target_link_libraries(command_bridge_test PRIVATE rx::authoring rx::scene rx::script
-    rx::rpc rx::ecs rx::core)
+    rx::rpc rx::ecs rx::foundation)
   add_test(NAME command_bridge_test COMMAND command_bridge_test)
 endif()
 
@@ -505,7 +507,7 @@ endif()
 # plain `ctest` runs them everywhere.
 if(RX_BUILD_TESTS AND "nav" IN_LIST RX_MODULES)
   add_executable(nav_test test/nav_test.cc)
-  target_link_libraries(nav_test PRIVATE rx::nav rx::scene rx::ecs rx::core)
+  target_link_libraries(nav_test PRIVATE rx::nav rx::scene rx::ecs rx::foundation)
   add_test(NAME nav_test COMMAND nav_test)
 endif()
 
@@ -514,7 +516,7 @@ endif()
 # integrals), no GPU, so plain `ctest` runs them everywhere.
 if(RX_BUILD_TESTS AND "weather" IN_LIST RX_MODULES)
   add_executable(weather_test test/weather_test.cc)
-  target_link_libraries(weather_test PRIVATE rx::weather rx::core)
+  target_link_libraries(weather_test PRIVATE rx::weather rx::foundation)
   add_test(NAME weather_test COMMAND weather_test)
 endif()
 
@@ -531,7 +533,7 @@ endif()
 # archives (engine/asset/pack.h).
 if(RX_BUILD_TOOLS)
   add_executable(rxpack tools/rxpack.cc)
-  target_link_libraries(rxpack PRIVATE rx::asset rx::core)
+  target_link_libraries(rxpack PRIVATE rx::asset rx::foundation)
   rx_set_warnings(rxpack)
 endif()
 
@@ -560,7 +562,7 @@ endif()
 # into one .rxp the engine mounts like any other content.
 if(RX_BUILD_TOOLS AND "world" IN_LIST RX_MODULES)
   add_executable(rxworld tools/rxworld.cc)
-  target_link_libraries(rxworld PRIVATE rx::world rx::edit rx::asset rx::ecs rx::core)
+  target_link_libraries(rxworld PRIVATE rx::world rx::edit rx::asset rx::ecs rx::foundation)
   rx_set_warnings(rxworld)
 endif()
 
@@ -626,7 +628,7 @@ endif()
 # endpoint itself.
 if(RX_BUILD_TOOLS AND NOT WIN32 AND "rpc" IN_LIST RX_MODULES)
   add_executable(rxcall tools/rxcall.cc)
-  target_link_libraries(rxcall PRIVATE rx::rpc rx::core)
+  target_link_libraries(rxcall PRIVATE rx::rpc rx::foundation)
   rx_set_warnings(rxcall)
 endif()
 
@@ -644,38 +646,38 @@ endif()
 # needed, runs everywhere plain `ctest` runs.
 if(RX_BUILD_TESTS)
   add_executable(vfs_test test/vfs_test.cc)
-  target_link_libraries(vfs_test PRIVATE rx::asset rx::core)
+  target_link_libraries(vfs_test PRIVATE rx::asset rx::foundation)
   add_test(NAME vfs_test COMMAND vfs_test)
 
   add_executable(asset_database_test test/asset_database_test.cc)
-  target_link_libraries(asset_database_test PRIVATE rx::asset rx::core)
+  target_link_libraries(asset_database_test PRIVATE rx::asset rx::foundation)
   add_test(NAME asset_database_test COMMAND asset_database_test)
 
   # Procedural texture synthesis and the blockout primitives behind the
   # .rxscene Pattern/Shape components.
   add_executable(procedural_asset_test test/procedural_asset_test.cc)
-  target_link_libraries(procedural_asset_test PRIVATE rx::asset rx::core)
+  target_link_libraries(procedural_asset_test PRIVATE rx::asset rx::foundation)
   add_test(NAME procedural_asset_test COMMAND procedural_asset_test)
 endif()
 
 if(RX_BUILD_TESTS AND "asset" IN_LIST RX_MODULES)
   add_executable(gltf_skin_test test/gltf_skin_test.cc)
-  target_link_libraries(gltf_skin_test PRIVATE rx::gltf rx::asset rx::core)
+  target_link_libraries(gltf_skin_test PRIVATE rx::gltf rx::asset rx::foundation)
   add_test(NAME gltf_skin_test COMMAND gltf_skin_test)
 
   add_executable(gltf_texture_transform_test test/gltf_texture_transform_test.cc)
-  target_link_libraries(gltf_texture_transform_test PRIVATE rx::gltf rx::asset rx::core)
+  target_link_libraries(gltf_texture_transform_test PRIVATE rx::gltf rx::asset rx::foundation)
   add_test(NAME gltf_texture_transform_test COMMAND gltf_texture_transform_test)
 
   add_executable(materialx_test test/materialx_test.cc)
-  target_link_libraries(materialx_test PRIVATE rx::materialx rx::asset rx::core)
+  target_link_libraries(materialx_test PRIVATE rx::materialx rx::asset rx::foundation)
   add_test(NAME materialx_test COMMAND materialx_test)
 
   # BCn block encoders and the import-time compressor, against decoders written
   # from the format definitions. No gpu involved, so this one really runs under
   # a plain ctest.
   add_executable(bc_encode_test test/bc_encode_test.cc)
-  target_link_libraries(bc_encode_test PRIVATE rx::asset rx::core)
+  target_link_libraries(bc_encode_test PRIVATE rx::asset rx::foundation)
   add_test(NAME bc_encode_test COMMAND bc_encode_test)
 endif()
 
@@ -684,7 +686,7 @@ endif()
 # that standard_surface documents keep the legacy path. No USD needed.
 if(RX_BUILD_TESTS AND "asset" IN_LIST RX_MODULES)
   add_executable(openpbr_test test/openpbr_test.cc)
-  target_link_libraries(openpbr_test PRIVATE rx::materialx rx::asset rx::core)
+  target_link_libraries(openpbr_test PRIVATE rx::materialx rx::asset rx::foundation)
   add_test(NAME openpbr_test COMMAND openpbr_test)
 endif()
 
@@ -693,7 +695,7 @@ endif()
 # usda fixture the test writes itself.
 if(RX_BUILD_TESTS AND RX_USD AND "asset" IN_LIST RX_MODULES)
   add_executable(usd_scene_test test/usd_scene_test.cc)
-  target_link_libraries(usd_scene_test PRIVATE rx::usd rx::asset rx::core)
+  target_link_libraries(usd_scene_test PRIVATE rx::usd rx::asset rx::foundation)
   add_test(NAME usd_scene_test COMMAND usd_scene_test)
 endif()
 
@@ -701,13 +703,13 @@ endif()
 # the VehicleAudio driver through the mixer. Pure CPU (no device), always runs.
 if(RX_BUILD_TESTS AND "vehicles" IN_LIST RX_MODULES)
   add_executable(vehicle_audio_test test/vehicle_audio_test.cc)
-  target_link_libraries(vehicle_audio_test PRIVATE rx::vehicles rx::audio rx::core)
+  target_link_libraries(vehicle_audio_test PRIVATE rx::vehicles rx::audio rx::foundation)
   add_test(NAME vehicle_audio_test COMMAND vehicle_audio_test)
 endif()
 
 if(RX_BUILD_TESTS AND "weather" IN_LIST RX_MODULES)
   add_executable(thunder_synth_test test/thunder_synth_test.cc)
-  target_link_libraries(thunder_synth_test PRIVATE rx::weather rx::audio rx::core)
+  target_link_libraries(thunder_synth_test PRIVATE rx::weather rx::audio rx::foundation)
   add_test(NAME thunder_synth_test COMMAND thunder_synth_test)
 endif()
 
@@ -717,7 +719,7 @@ endif()
 # Headless (no GPU), needs the Jolt-enabled physics build like vehicle_test.
 if(RX_BUILD_TESTS AND RX_JOLT AND "vehicles" IN_LIST RX_MODULES)
   add_executable(aircraft_test test/aircraft_test.cc)
-  target_link_libraries(aircraft_test PRIVATE rx::vehicles rx::physics rx::core)
+  target_link_libraries(aircraft_test PRIVATE rx::vehicles rx::physics rx::foundation)
   add_test(NAME aircraft_test COMMAND aircraft_test)
 endif()
 
@@ -727,7 +729,7 @@ endif()
 # Jolt for the physics path (like aircraft_test/vehicle_test/boat_test).
 if(RX_BUILD_TESTS AND RX_JOLT AND "vehicles" IN_LIST RX_MODULES)
   add_executable(vehicle_integration_test test/vehicle_integration_test.cc)
-  target_link_libraries(vehicle_integration_test PRIVATE rx::vehicles rx::physics rx::audio rx::core)
+  target_link_libraries(vehicle_integration_test PRIVATE rx::vehicles rx::physics rx::audio rx::foundation)
   add_test(NAME vehicle_integration_test COMMAND vehicle_integration_test)
 endif()
 
@@ -735,7 +737,7 @@ endif()
 # composition. Fully headless (no GPU), so it always runs under plain ctest.
 if(RX_BUILD_TESTS)
   add_executable(edit_test test/edit_test.cc)
-  target_link_libraries(edit_test PRIVATE rx::edit rx::scene rx::ecs rx::asset rx::core)
+  target_link_libraries(edit_test PRIVATE rx::edit rx::scene rx::ecs rx::asset rx::foundation)
   add_test(NAME edit_test COMMAND edit_test)
 
   # The .rxscene authoring passes themselves (viewer_scene_authoring, the
@@ -752,11 +754,11 @@ endif()
 
 if(RX_BUILD_TESTS)
   add_executable(camera_test test/camera_test.cc)
-  target_link_libraries(camera_test PRIVATE rx::scene rx::ecs rx::core)
+  target_link_libraries(camera_test PRIVATE rx::scene rx::ecs rx::foundation)
   add_test(NAME camera_test COMMAND camera_test)
 
   add_executable(camera_rig_test test/camera_rig_test.cc)
-  target_link_libraries(camera_rig_test PRIVATE rx::scene rx::ecs rx::core)
+  target_link_libraries(camera_rig_test PRIVATE rx::scene rx::ecs rx::foundation)
   add_test(NAME camera_rig_test COMMAND camera_rig_test)
 
   # Vehicle realism over the real Jolt vehicle path: acceleration + auto-shift,
@@ -764,7 +766,7 @@ if(RX_BUILD_TESTS)
   # telemetry ranges and water aquaplaning. Headless (no GPU), needs Jolt.
   if(RX_JOLT)
     add_executable(vehicle_test test/vehicle_test.cc)
-    target_link_libraries(vehicle_test PRIVATE rx::physics rx::core)
+    target_link_libraries(vehicle_test PRIVATE rx::physics rx::foundation)
     add_test(NAME vehicle_test COMMAND vehicle_test)
   endif()
 
@@ -773,7 +775,7 @@ if(RX_BUILD_TESTS)
   # roll, grass launch, under/oversteer and downforce. Headless, needs Jolt.
   if(RX_JOLT AND "vehicles" IN_LIST RX_MODULES)
     add_executable(handling_test test/handling_test.cc)
-    target_link_libraries(handling_test PRIVATE rx::vehicles rx::physics rx::core)
+    target_link_libraries(handling_test PRIVATE rx::vehicles rx::physics rx::foundation)
     add_test(NAME handling_test COMMAND handling_test)
   endif()
 
@@ -782,7 +784,7 @@ if(RX_BUILD_TESTS)
   # buoyancy-exemption and NaN-free chop. Headless (no GPU), needs Jolt.
   if(RX_JOLT AND "vehicles" IN_LIST RX_MODULES)
     add_executable(boat_test test/boat_test.cc)
-    target_link_libraries(boat_test PRIVATE rx::vehicles rx::physics rx::core)
+    target_link_libraries(boat_test PRIVATE rx::vehicles rx::physics rx::foundation)
     add_test(NAME boat_test COMMAND boat_test)
   endif()
 
@@ -793,7 +795,7 @@ if(RX_BUILD_TESTS)
   # overloaded barge near awash, and NaN-free chop. Headless, needs Jolt.
   if(RX_JOLT AND "vehicles" IN_LIST RX_MODULES)
     add_executable(boat_profiles_test test/boat_profiles_test.cc)
-    target_link_libraries(boat_profiles_test PRIVATE rx::vehicles rx::physics rx::core)
+    target_link_libraries(boat_profiles_test PRIVATE rx::vehicles rx::physics rx::foundation)
     add_test(NAME boat_profiles_test COMMAND boat_profiles_test)
   endif()
 
@@ -803,29 +805,29 @@ if(RX_BUILD_TESTS)
   # apparent wind and NaN-free / tension-capped gusting. Headless, needs Jolt.
   if(RX_JOLT AND "vehicles" IN_LIST RX_MODULES)
     add_executable(kite_test test/kite_test.cc)
-    target_link_libraries(kite_test PRIVATE rx::vehicles rx::physics rx::core)
+    target_link_libraries(kite_test PRIVATE rx::vehicles rx::physics rx::foundation)
     add_test(NAME kite_test COMMAND kite_test)
   endif()
 
   add_executable(world_streaming_test test/world_streaming_test.cc)
-  target_link_libraries(world_streaming_test PRIVATE rx::scene rx::ecs rx::core)
+  target_link_libraries(world_streaming_test PRIVATE rx::scene rx::ecs rx::foundation)
   add_test(NAME world_streaming_test COMMAND world_streaming_test)
 
   if("world" IN_LIST RX_MODULES)
     add_executable(world_format_test test/world_format_test.cc)
-    target_link_libraries(world_format_test PRIVATE rx::world rx::core)
+    target_link_libraries(world_format_test PRIVATE rx::world rx::foundation)
     add_test(NAME world_format_test COMMAND world_format_test)
 
     add_executable(world_map_test test/world_map_test.cc)
-    target_link_libraries(world_map_test PRIVATE rx::world rx::asset rx::scene rx::core)
+    target_link_libraries(world_map_test PRIVATE rx::world rx::asset rx::scene rx::foundation)
     add_test(NAME world_map_test COMMAND world_map_test)
 
     add_executable(world_stream_test test/world_stream_test.cc)
-    target_link_libraries(world_stream_test PRIVATE rx::world rx::edit rx::asset rx::scene rx::ecs rx::core)
+    target_link_libraries(world_stream_test PRIVATE rx::world rx::edit rx::asset rx::scene rx::ecs rx::foundation)
     add_test(NAME world_stream_test COMMAND world_stream_test)
 
     add_executable(world_overlay_test test/world_overlay_test.cc)
-    target_link_libraries(world_overlay_test PRIVATE rx::world rx::core)
+    target_link_libraries(world_overlay_test PRIVATE rx::world rx::foundation)
     add_test(NAME world_overlay_test COMMAND world_overlay_test)
 
     # Random mutation over the three decoders. The hand-written refusal tests
@@ -834,13 +836,13 @@ if(RX_BUILD_TESTS)
     # suite; run it under -DRX_SANITIZE=ON for the memory-safety half to bite,
     # and pass an iteration count to run it longer than the suite does.
     add_executable(world_fuzz_test test/world_fuzz_test.cc)
-    target_link_libraries(world_fuzz_test PRIVATE rx::world rx::core)
+    target_link_libraries(world_fuzz_test PRIVATE rx::world rx::foundation)
     add_test(NAME world_fuzz_test COMMAND world_fuzz_test)
 
     # The cook's per-entity verdict, which the editor shows for the selection.
     # A label that lies about what an object will become is worse than no label.
     add_executable(world_classify_test test/world_classify_test.cc)
-    target_link_libraries(world_classify_test PRIVATE rx::world rx::edit rx::ecs rx::core)
+    target_link_libraries(world_classify_test PRIVATE rx::world rx::edit rx::ecs rx::foundation)
     add_test(NAME world_classify_test COMMAND world_classify_test)
 
     # The whole path in one test: an authored scene through the real baker into
@@ -848,36 +850,36 @@ if(RX_BUILD_TESTS)
     # registered when the tools are built.
     if(TARGET rxworld)
       add_executable(world_bake_test test/world_bake_test.cc)
-      target_link_libraries(world_bake_test PRIVATE rx::world rx::asset rx::scene rx::ecs rx::core)
+      target_link_libraries(world_bake_test PRIVATE rx::world rx::asset rx::scene rx::ecs rx::foundation)
       add_test(NAME world_bake_test COMMAND world_bake_test $<TARGET_FILE:rxworld>)
     endif()
   endif()
 
   if("terrain" IN_LIST RX_MODULES)
     add_executable(terrain_test test/terrain_test.cc)
-    target_link_libraries(terrain_test PRIVATE rx::terrain rx::asset rx::scene rx::core)
+    target_link_libraries(terrain_test PRIVATE rx::terrain rx::asset rx::scene rx::foundation)
     add_test(NAME terrain_test COMMAND terrain_test)
   endif()
 
   if("placement" IN_LIST RX_MODULES)
     add_executable(placement_test test/placement_test.cc)
-    target_link_libraries(placement_test PRIVATE rx::placement rx::core)
+    target_link_libraries(placement_test PRIVATE rx::placement rx::foundation)
     add_test(NAME placement_test COMMAND placement_test)
   endif()
 
   if("physics" IN_LIST RX_MODULES)
     add_executable(cloth_collision_test test/cloth_collision_test.cc)
-    target_link_libraries(cloth_collision_test PRIVATE rx::physics rx::core)
+    target_link_libraries(cloth_collision_test PRIVATE rx::physics rx::foundation)
     add_test(NAME cloth_collision_test COMMAND cloth_collision_test)
   endif()
 
   if("render" IN_LIST RX_MODULES)
     add_executable(instance_store_test test/instance_store_test.cc)
-    target_link_libraries(instance_store_test PRIVATE rx::render rx::core)
+    target_link_libraries(instance_store_test PRIVATE rx::render rx::foundation)
     add_test(NAME instance_store_test COMMAND instance_store_test)
 
     add_executable(settings_ini_test test/settings_ini_test.cc)
-    target_link_libraries(settings_ini_test PRIVATE rx::render rx::core)
+    target_link_libraries(settings_ini_test PRIVATE rx::render rx::foundation)
     add_test(NAME settings_ini_test COMMAND settings_ini_test)
   endif()
 
@@ -894,41 +896,41 @@ if(RX_BUILD_TESTS)
     # terminator energy, tier monotonicity. Pure CPU (the mirror of
     # human_brdf.hlsli), so plain `ctest` runs it everywhere.
     add_executable(human_brdf_test test/human_brdf_test.cc)
-    target_link_libraries(human_brdf_test PRIVATE rx::render rx::core)
+    target_link_libraries(human_brdf_test PRIVATE rx::render rx::foundation)
     add_test(NAME human_brdf_test COMMAND human_brdf_test)
 
     # Hair BSDF: energy over the sphere, reciprocity, pigment coupling, multiple
     # scattering behaviour, tier monotonicity. Pure CPU (the mirror of
     # hair_bsdf.hlsli), so plain `ctest` runs it everywhere.
     add_executable(hair_bsdf_test test/hair_bsdf_test.cc)
-    target_link_libraries(hair_bsdf_test PRIVATE rx::render rx::core)
+    target_link_libraries(hair_bsdf_test PRIVATE rx::render rx::foundation)
     add_test(NAME hair_bsdf_test COMMAND hair_bsdf_test)
 
     add_executable(procedural_grass_test test/procedural_grass_test.cc)
-    target_link_libraries(procedural_grass_test PRIVATE rx::render rx::core)
+    target_link_libraries(procedural_grass_test PRIVATE rx::render rx::foundation)
     add_test(NAME procedural_grass_test COMMAND procedural_grass_test)
 
     # Solid-angle TLAS instance culler: the distance/angle predicate, the
     # time-sliced group sweep, teleport accept-all and generation invalidation.
     # Pure CPU logic (no GPU), so it always runs under plain ctest.
     add_executable(rt_instance_cull_test test/rt_instance_cull_test.cc)
-    target_link_libraries(rt_instance_cull_test PRIVATE rx::render rx::core)
+    target_link_libraries(rt_instance_cull_test PRIVATE rx::render rx::foundation)
     add_test(NAME rt_instance_cull_test COMMAND rt_instance_cull_test)
 
     # RCGI leak/occlusion hardening helpers: interior-volume classification and the
     # probe-relocation offset packing round trip (header-only, mirrors the shader).
     add_executable(rcgi_interior_test test/rcgi_interior_test.cc)
-    target_link_libraries(rcgi_interior_test PRIVATE rx::render rx::core)
+    target_link_libraries(rcgi_interior_test PRIVATE rx::render rx::foundation)
     add_test(NAME rcgi_interior_test COMMAND rcgi_interior_test)
 
     add_executable(rcgi_history_test test/rcgi_history_test.cc)
-    target_link_libraries(rcgi_history_test PRIVATE rx::render rx::core)
+    target_link_libraries(rcgi_history_test PRIVATE rx::render rx::foundation)
     add_test(NAME rcgi_history_test COMMAND rcgi_history_test)
 
     # Async-TLAS slot validity bookkeeping: build/read slot selection, unbuilt-slot
     # fallback, and BLAS-revision invalidation. Header-only pure logic (no GPU).
     add_executable(rt_slot_tracker_test test/rt_slot_tracker_test.cc)
-    target_link_libraries(rt_slot_tracker_test PRIVATE rx::render rx::core)
+    target_link_libraries(rt_slot_tracker_test PRIVATE rx::render rx::foundation)
     add_test(NAME rt_slot_tracker_test COMMAND rt_slot_tracker_test)
   endif()
 
@@ -936,13 +938,13 @@ if(RX_BUILD_TESTS)
 # config). rx_enable_mimalloc gives it the tracked new/delete override so the
 # tracker assertions run against the real allocation path.
   add_executable(memory_test test/memory_test.cc)
-  target_link_libraries(memory_test PRIVATE rx::core)
+  target_link_libraries(memory_test PRIVATE rx::foundation)
   rx_enable_mimalloc(memory_test)
   add_test(NAME memory_test COMMAND memory_test)
 
   # Chunked ECS storage: spawn storms, non-POD relocation, chunk reclamation.
   add_executable(ecs_test test/ecs_test.cc)
-  target_link_libraries(ecs_test PRIVATE rx::ecs rx::core)
+  target_link_libraries(ecs_test PRIVATE rx::ecs rx::foundation)
   rx_enable_mimalloc(ecs_test)
   add_test(NAME ecs_test COMMAND ecs_test)
 endif()
@@ -953,18 +955,18 @@ endif()
 # so plain `ctest` passes and a real GPU run under vkrun proves the pixel path.
 if(RX_BUILD_TESTS AND (RX_RHI_VULKAN OR RX_RHI_D3D12))
   add_executable(adaptive_water_test test/adaptive_water_test.cc)
-  target_link_libraries(adaptive_water_test PRIVATE rx::render rx::core)
+  target_link_libraries(adaptive_water_test PRIVATE rx::render rx::foundation)
   add_test(NAME adaptive_water_test COMMAND adaptive_water_test)
 
   # Texture-space decal baking: bake a stamp into a receiver's tile, read the
   # atlas back, then evict the tile and prove the journal replays it. Skips the
   # GPU half without a driver (the projector math still runs).
   add_executable(decal_bake_test test/decal_bake_test.cc)
-  target_link_libraries(decal_bake_test PRIVATE rx::render rx::core)
+  target_link_libraries(decal_bake_test PRIVATE rx::render rx::foundation)
   add_test(NAME decal_bake_test COMMAND decal_bake_test)
 
   add_executable(offscreen_test test/offscreen_test.cc)
-  target_link_libraries(offscreen_test PRIVATE rx::render rx::core)
+  target_link_libraries(offscreen_test PRIVATE rx::render rx::foundation)
   rx_embed_shaders(offscreen_test
     test/shaders/offscreen_tri.vs.slang
     test/shaders/offscreen_tri.ps.slang)
@@ -976,7 +978,7 @@ if(RX_BUILD_TESTS AND (RX_RHI_VULKAN OR RX_RHI_D3D12))
   if("placement" IN_LIST RX_MODULES)
     add_executable(placement_gpu_test test/placement_gpu_test.cc)
     target_link_libraries(placement_gpu_test PRIVATE rx::placement_gpu rx::placement
-      rx::render rx::core)
+      rx::render rx::foundation)
     add_test(NAME placement_gpu_test COMMAND placement_gpu_test)
   endif()
 
@@ -985,7 +987,7 @@ if(RX_BUILD_TESTS AND (RX_RHI_VULKAN OR RX_RHI_D3D12))
   # dam-break flood settles level. Skips (null backend) with no driver; the real
   # GPU path runs under vkrun.
   add_executable(fluid_sim_test test/fluid_sim_test.cc)
-  target_link_libraries(fluid_sim_test PRIVATE rx::render rx::core)
+  target_link_libraries(fluid_sim_test PRIVATE rx::render rx::foundation)
   add_test(NAME fluid_sim_test COMMAND fluid_sim_test)
 
   # Acceleration-structure compaction: builds a BLAS with allow_compaction,
@@ -993,27 +995,27 @@ if(RX_BUILD_TESTS AND (RX_RHI_VULKAN OR RX_RHI_D3D12))
   # tight structure and builds a TLAS over it. Skips (exit 0) with no driver or
   # no ray tracing; the real path runs under vkrun.
   add_executable(compaction_test test/compaction_test.cc)
-  target_link_libraries(compaction_test PRIVATE rx::render rx::core)
+  target_link_libraries(compaction_test PRIVATE rx::render rx::foundation)
   add_test(NAME compaction_test COMMAND compaction_test)
 
   add_executable(rt_failure_test test/rt_failure_test.cc)
-  target_link_libraries(rt_failure_test PRIVATE rx::render rx::core)
+  target_link_libraries(rt_failure_test PRIVATE rx::render rx::foundation)
   add_test(NAME rt_failure_test COMMAND rt_failure_test)
 
   add_executable(raytracing_test test/raytracing_test.cc)
-  target_link_libraries(raytracing_test PRIVATE rx::render rx::core)
+  target_link_libraries(raytracing_test PRIVATE rx::render rx::foundation)
   rx_embed_shaders(raytracing_test test/shaders/rt_query.cs.hlsl)
   add_test(NAME raytracing_test COMMAND raytracing_test)
   set_tests_properties(raytracing_test PROPERTIES FAIL_REGULAR_EXPRESSION "VUID|hazard detected")
 
   add_executable(recon_temporal_test test/recon_temporal_test.cc)
-  target_link_libraries(recon_temporal_test PRIVATE rx::render rx::core)
+  target_link_libraries(recon_temporal_test PRIVATE rx::render rx::foundation)
   target_include_directories(recon_temporal_test PRIVATE ${CMAKE_BINARY_DIR}/generated)
   add_test(NAME recon_temporal_test COMMAND recon_temporal_test)
   set_tests_properties(recon_temporal_test PROPERTIES FAIL_REGULAR_EXPRESSION "VUID|hazard detected")
 
   add_executable(path_sampling_test test/path_sampling_test.cc)
-  target_link_libraries(path_sampling_test PRIVATE rx::render rx::core)
+  target_link_libraries(path_sampling_test PRIVATE rx::render rx::foundation)
   target_include_directories(path_sampling_test PRIVATE ${CMAKE_BINARY_DIR}/generated)
   set(RX_SHADER_INCLUDE_DIRS ${PROJECT_SOURCE_DIR}/engine/render/shaders)
   set(RX_SHADER_DEPS_path_continue_cs_hlsl engine/render/shaders/path_continue.hlsli)
@@ -1023,7 +1025,7 @@ if(RX_BUILD_TESTS AND (RX_RHI_VULKAN OR RX_RHI_D3D12))
   set_tests_properties(path_sampling_test PROPERTIES FAIL_REGULAR_EXPRESSION "VUID|hazard detected")
 
   add_executable(path_alpha_test test/path_alpha_test.cc)
-  target_link_libraries(path_alpha_test PRIVATE rx::render rx::core)
+  target_link_libraries(path_alpha_test PRIVATE rx::render rx::foundation)
   set(RX_SHADER_INCLUDE_DIRS ${PROJECT_SOURCE_DIR}/engine/render/shaders
       ${PROJECT_SOURCE_DIR}/third_party/NRD/Shaders)
   set(path_alpha_shaders test/shaders/path_alpha_recon.cs.hlsl test/shaders/path_alpha_di.cs.hlsl)
@@ -1046,7 +1048,7 @@ if(RX_BUILD_TESTS AND (RX_RHI_VULKAN OR RX_RHI_D3D12))
   set_tests_properties(path_alpha_test PROPERTIES FAIL_REGULAR_EXPRESSION "VUID|hazard detected")
 
   add_executable(upscaler_motion_test test/upscaler_motion_test.cc)
-  target_link_libraries(upscaler_motion_test PRIVATE rx::render rx::core)
+  target_link_libraries(upscaler_motion_test PRIVATE rx::render rx::foundation)
   add_test(NAME upscaler_motion_test COMMAND upscaler_motion_test)
   set_tests_properties(upscaler_motion_test PROPERTIES FAIL_REGULAR_EXPRESSION "VUID|hazard detected|dispatch failed")
   if(RX_DLSS)
@@ -1056,28 +1058,28 @@ if(RX_BUILD_TESTS AND (RX_RHI_VULKAN OR RX_RHI_D3D12))
   endif()
 
   add_executable(recon_atrous_test test/recon_atrous_test.cc)
-  target_link_libraries(recon_atrous_test PRIVATE rx::render rx::core)
+  target_link_libraries(recon_atrous_test PRIVATE rx::render rx::foundation)
   target_include_directories(recon_atrous_test PRIVATE ${CMAKE_BINARY_DIR}/generated)
   add_test(NAME recon_atrous_test COMMAND recon_atrous_test)
   set_tests_properties(recon_atrous_test PROPERTIES FAIL_REGULAR_EXPRESSION "VUID|hazard detected")
 
   add_executable(cloud_lighting_test test/cloud_lighting_test.cc)
-  target_link_libraries(cloud_lighting_test PRIVATE rx::render rx::core)
+  target_link_libraries(cloud_lighting_test PRIVATE rx::render rx::foundation)
   add_test(NAME cloud_lighting_test COMMAND cloud_lighting_test)
 
   add_executable(lens_flare_test test/lens_flare_test.cc)
-  target_link_libraries(lens_flare_test PRIVATE rx::render rx::core)
+  target_link_libraries(lens_flare_test PRIVATE rx::render rx::foundation)
   add_test(NAME lens_flare_test COMMAND lens_flare_test)
   set_tests_properties(lens_flare_test PROPERTIES FAIL_REGULAR_EXPRESSION "VUID|hazard detected")
 
   add_executable(post_sampling_test test/post_sampling_test.cc)
-  target_link_libraries(post_sampling_test PRIVATE rx::render rx::core)
+  target_link_libraries(post_sampling_test PRIVATE rx::render rx::foundation)
   target_include_directories(post_sampling_test PRIVATE ${CMAKE_BINARY_DIR}/generated)
   add_test(NAME post_sampling_test COMMAND post_sampling_test)
   set_tests_properties(post_sampling_test PROPERTIES FAIL_REGULAR_EXPRESSION "VUID|hazard detected")
 
   add_executable(path_motion_test test/path_motion_test.cc)
-  target_link_libraries(path_motion_test PRIVATE rx::render rx::core)
+  target_link_libraries(path_motion_test PRIVATE rx::render rx::foundation)
   set(RX_SHADER_INCLUDE_DIRS ${PROJECT_SOURCE_DIR}/engine/render/shaders
       ${PROJECT_SOURCE_DIR}/third_party/NRD/Shaders)
   set(path_motion_shaders test/shaders/path_motion_recon.cs.hlsl)
@@ -1099,7 +1101,7 @@ if(RX_BUILD_TESTS AND (RX_RHI_VULKAN OR RX_RHI_D3D12))
   set_tests_properties(path_motion_test PROPERTIES FAIL_REGULAR_EXPRESSION "VUID|hazard detected")
 
   add_executable(path_material_test test/path_material_test.cc)
-  target_link_libraries(path_material_test PRIVATE rx::render rx::core)
+  target_link_libraries(path_material_test PRIVATE rx::render rx::foundation)
   add_test(NAME path_material_test COMMAND path_material_test)
   set_tests_properties(path_material_test PROPERTIES FAIL_REGULAR_EXPRESSION "VUID|hazard detected")
 
@@ -1109,7 +1111,7 @@ if(RX_BUILD_TESTS AND (RX_RHI_VULKAN OR RX_RHI_D3D12))
   # visible geometry. Skips (exit 0) with no driver; the real path runs under
   # vkrun.
   add_executable(cull_bounds_test test/cull_bounds_test.cc)
-  target_link_libraries(cull_bounds_test PRIVATE rx::render rx::core)
+  target_link_libraries(cull_bounds_test PRIVATE rx::render rx::foundation)
   target_include_directories(cull_bounds_test PRIVATE ${CMAKE_BINARY_DIR}/generated)
   add_test(NAME cull_bounds_test COMMAND cull_bounds_test)
 
@@ -1117,7 +1119,7 @@ if(RX_BUILD_TESTS AND (RX_RHI_VULKAN OR RX_RHI_D3D12))
   # implicit flush via ImmediateSubmit, soft-budget auto-submit) verified by
   # readback. Skips (exit 0) with no driver; the real path runs under vkrun.
   add_executable(upload_batch_test test/upload_batch_test.cc)
-  target_link_libraries(upload_batch_test PRIVATE rx::render rx::core)
+  target_link_libraries(upload_batch_test PRIVATE rx::render rx::foundation)
   add_test(NAME upload_batch_test COMMAND upload_batch_test)
   # Validation on, and any VUID fails the test: the deferred-destroy case can
   # only report an early free as "destroyed while in use", not as a bad readback.
@@ -1131,7 +1133,7 @@ if(RX_BUILD_TESTS AND (RX_RHI_VULKAN OR RX_RHI_D3D12))
   # Vulkan-only (buffer-device-address reads, like the skinned path) and skips
   # without a driver.
   add_executable(morph_test test/morph_test.cc)
-  target_link_libraries(morph_test PRIVATE rx::gltf rx::render rx::anim rx::asset rx::core)
+  target_link_libraries(morph_test PRIVATE rx::gltf rx::render rx::anim rx::asset rx::foundation)
   set(RX_SHADER_INCLUDE_DIRS
     ${CMAKE_CURRENT_SOURCE_DIR}/engine/render/shaders
     ${CMAKE_CURRENT_SOURCE_DIR}/engine/render/shaders/pipeline)
@@ -1148,7 +1150,7 @@ if(RX_BUILD_TESTS AND (RX_RHI_VULKAN OR RX_RHI_D3D12))
   # window (and are absorbed by a closed-eyes pose) and a fixed seed replays
   # bit-identically. Pure CPU.
   add_executable(expression_test test/expression_test.cc)
-  target_link_libraries(expression_test PRIVATE rx::anim rx::asset rx::core)
+  target_link_libraries(expression_test PRIVATE rx::anim rx::asset rx::foundation)
   add_test(NAME expression_test COMMAND expression_test)
 
   # The same acceptance tests against the d3d12 backend (vkd3d on linux). The
@@ -1214,18 +1216,18 @@ endif()
 # deformation morph output. Pure CPU and independent of Jolt/the render backend.
 if(RX_BUILD_TESTS AND "anim" IN_LIST RX_MODULES)
   add_executable(walk_style_test test/walk_style_test.cc)
-  target_link_libraries(walk_style_test PRIVATE rx::anim rx::asset rx::core)
+  target_link_libraries(walk_style_test PRIVATE rx::anim rx::asset rx::foundation)
   add_test(NAME walk_style_test COMMAND walk_style_test)
 
   add_executable(body_dynamics_test test/body_dynamics_test.cc)
-  target_link_libraries(body_dynamics_test PRIVATE rx::anim rx::asset rx::core)
+  target_link_libraries(body_dynamics_test PRIVATE rx::anim rx::asset rx::foundation)
   add_test(NAME body_dynamics_test COMMAND body_dynamics_test)
 
   # Optional end-to-end authoring import test. The normal CTest invocation
   # checks error handling without requiring Blender; pass a .blend path to the
   # executable to convert it and verify its real skin + jiggle response.
   add_executable(blend_jiggle_test test/blend_jiggle_test.cc)
-  target_link_libraries(blend_jiggle_test PRIVATE rx::blend rx::gltf rx::anim rx::asset rx::core)
+  target_link_libraries(blend_jiggle_test PRIVATE rx::blend rx::gltf rx::anim rx::asset rx::foundation)
   target_compile_definitions(blend_jiggle_test PRIVATE
     RX_BLEND_CONVERTER_SCRIPT="${CMAKE_CURRENT_SOURCE_DIR}/tools/blend_to_glb.py")
   add_test(NAME blend_jiggle_api_test COMMAND blend_jiggle_test)
@@ -1236,11 +1238,11 @@ endif()
 # asserts pins, cross-strand binds and head collision hold. Headless, no GPU.
 if(RX_BUILD_TESTS AND RX_JOLT)
   add_executable(hair_sim_test test/hair_sim_test.cc)
-  target_link_libraries(hair_sim_test PRIVATE rx::render rx::physics rx::core)
+  target_link_libraries(hair_sim_test PRIVATE rx::render rx::physics rx::foundation)
   add_test(NAME hair_sim_test COMMAND hair_sim_test)
 
   add_executable(cloth_sim_test test/cloth_sim_test.cc)
-  target_link_libraries(cloth_sim_test PRIVATE rx::physics rx::core)
+  target_link_libraries(cloth_sim_test PRIVATE rx::physics rx::foundation)
   add_test(NAME cloth_sim_test COMMAND cloth_sim_test)
   add_test(NAME cloth_feature_off_test COMMAND cloth_sim_test --feature-off)
   set_tests_properties(cloth_feature_off_test PROPERTIES ENVIRONMENT "RX_FEATURES=-physics.cloth")
@@ -1252,7 +1254,7 @@ endif()
 if(RX_BUILD_TESTS AND RX_JOLT AND "inventory" IN_LIST RX_MODULES)
   add_executable(inventory_test test/inventory_test.cc)
   target_link_libraries(inventory_test PRIVATE
-    rx::inventory rx::inventory_world rx::physics rx::scene rx::ecs rx::core)
+    rx::inventory rx::inventory_world rx::physics rx::scene rx::ecs rx::foundation)
   add_test(NAME inventory_test COMMAND inventory_test)
 endif()
 
@@ -1262,7 +1264,7 @@ endif()
 # FP<->TP view-mode stack transition. Headless (no GPU), needs Jolt.
 if(RX_BUILD_TESTS AND RX_JOLT AND "character" IN_LIST RX_MODULES)
   add_executable(character_test test/character_test.cc)
-  target_link_libraries(character_test PRIVATE rx::character rx::physics rx::scene rx::ecs rx::core)
+  target_link_libraries(character_test PRIVATE rx::character rx::physics rx::scene rx::ecs rx::foundation)
   add_test(NAME character_test COMMAND character_test)
 endif()
 
@@ -1271,7 +1273,7 @@ endif()
 # ballistic projectiles, explosion falloff and line of sight. Headless.
 if(RX_BUILD_TESTS AND RX_JOLT AND "combat" IN_LIST RX_MODULES)
   add_executable(combat_test test/combat_test.cc)
-  target_link_libraries(combat_test PRIVATE rx::combat rx::physics rx::scene rx::ecs rx::core)
+  target_link_libraries(combat_test PRIVATE rx::combat rx::physics rx::scene rx::ecs rx::foundation)
   add_test(NAME combat_test COMMAND combat_test)
 endif()
 
@@ -1279,7 +1281,7 @@ endif()
 # trajectory, leg IK): no Jolt, no GPU, plain ctest everywhere.
 if(RX_BUILD_TESTS AND "locomotion" IN_LIST RX_MODULES)
   add_executable(locomotion_math_test test/locomotion_math_test.cc)
-  target_link_libraries(locomotion_math_test PRIVATE rx::locomotion rx::core)
+  target_link_libraries(locomotion_math_test PRIVATE rx::locomotion rx::foundation)
   add_test(NAME locomotion_math_test COMMAND locomotion_math_test)
 endif()
 
@@ -1288,7 +1290,7 @@ endif()
 # motor torque limits. Headless, needs Jolt.
 if(RX_BUILD_TESTS AND RX_JOLT)
   add_executable(physics_body_test test/physics_body_test.cc)
-  target_link_libraries(physics_body_test PRIVATE rx::physics rx::core)
+  target_link_libraries(physics_body_test PRIVATE rx::physics rx::foundation)
   add_test(NAME physics_body_test COMMAND physics_body_test)
 endif()
 
@@ -1297,7 +1299,7 @@ endif()
 # controlled falls; the acceptance suite of docs/LOCOMOTION.md. Headless.
 if(RX_BUILD_TESTS AND RX_JOLT AND "locomotion" IN_LIST RX_MODULES)
   add_executable(locomotion_test test/locomotion_test.cc)
-  target_link_libraries(locomotion_test PRIVATE rx::locomotion rx::physics rx::core)
+  target_link_libraries(locomotion_test PRIVATE rx::locomotion rx::physics rx::foundation)
   add_test(NAME locomotion_test COMMAND locomotion_test)
 endif()
 
@@ -1307,7 +1309,7 @@ endif()
 # Headless (no GPU), needs Jolt.
 if(RX_BUILD_TESTS AND RX_JOLT AND "character" IN_LIST RX_MODULES)
   add_executable(jetpack_test test/jetpack_test.cc)
-  target_link_libraries(jetpack_test PRIVATE rx::character rx::physics rx::scene rx::ecs rx::core)
+  target_link_libraries(jetpack_test PRIVATE rx::character rx::physics rx::scene rx::ecs rx::foundation)
   add_test(NAME jetpack_test COMMAND jetpack_test)
 endif()
 

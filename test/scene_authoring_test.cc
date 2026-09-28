@@ -16,15 +16,15 @@
 #include "asset/asset_database.h"
 #include "asset/vfs.h"
 #include "base/strings/xstring.h"
-#include "core/format.h"
-#include "core/math.h"
-#include "core/scalar.h"
 #include "ecs/world.h"
 #include "edit/hierarchy.h"
 #include "edit/scene_io.h"
+#include "foundation/files/file_system.h"
+#include "foundation/math/math.h"
+#include "foundation/math/scalar.h"
+#include "foundation/strings/format.h"
 #include "scene/components.h"
 #include "scene_authoring.h"
-#include "core/file_system.h"
 
 using namespace rx;
 

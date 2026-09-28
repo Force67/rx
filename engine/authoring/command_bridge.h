@@ -3,8 +3,8 @@
 
 
 #include "base/strings/xstring.h"
-#include "core/export.h"
-#include "core/types.h"
+#include "foundation/build_config/export.h"
+#include "foundation/build_config/types.h"
 #include "rpc/rpc_message.h"
 #include "rpc/rpc_registry.h"
 #include "rpc/rpc_value.h"

@@ -1,6 +1,6 @@
 #include "anim/morph.h"
 #include "base/algorithm.h"
-#include "core/scalar.h"
+#include "foundation/math/scalar.h"
 
 namespace rx::anim {
 

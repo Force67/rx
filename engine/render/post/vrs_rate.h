@@ -7,7 +7,7 @@
 // scene consumes last frame's rates - flat, dark or fast-moving regions
 // shade at 2x1/1x2/2x2 (4x4 where supported) with no visible loss under TAA.
 
-#include "core/math.h"
+#include "foundation/math/math.h"
 #include "render/core/render_graph.h"
 #include "render/rhi/device.h"
 

@@ -7,9 +7,9 @@
 #include "base/containers/vector.h"
 #include "base/memory/unique_pointer.h"
 #include "base/threading/mutex.h"
-#include "core/export.h"
-#include "core/math.h"
-#include "core/types.h"
+#include "foundation/build_config/export.h"
+#include "foundation/build_config/types.h"
+#include "foundation/math/math.h"
 
 namespace rx::audio {
 

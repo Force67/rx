@@ -1,7 +1,7 @@
 #include "editor_input.h"
 
-#include "core/input.h"
-#include "core/input_bindings.h"
+#include "ui/events/input.h"
+#include "ui/events/input_bindings.h"
 
 namespace rx {
 

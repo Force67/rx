@@ -59,9 +59,9 @@
 #include "base/threading/lock_guard.h"
 #include "base/threading/mutex.h"
 #include "base/threading/thread.h"
-#include "core/feature_registry.h"
-#include "core/log.h"
-#include "core/scalar.h"
+#include "foundation/features/feature_registry.h"
+#include "foundation/logging/log.h"
+#include "foundation/math/scalar.h"
 #include "physics/cloth_collision.h"
 
 static_assert(JPH_VERSION_MAJOR > 5 || (JPH_VERSION_MAJOR == 5 && JPH_VERSION_MINOR >= 6),

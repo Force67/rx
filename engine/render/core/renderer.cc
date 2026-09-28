@@ -22,9 +22,10 @@
 #include "base/optional.h"
 #include "base/strings/xstring.h"
 #include "base/time/time.h"
-#include "core/log.h"
-#include "core/memory/memory_tracker.h"
-#include "core/scalar.h"
+#include "foundation/algorithm/sort.h"
+#include "foundation/logging/log.h"
+#include "foundation/math/scalar.h"
+#include "foundation/memory/memory_tracker.h"
 #include "render/util/exr_write.h"
 #include "shaders/blit_ps_slang.h"
 #include "shaders/cloud_shadow_cs_hlsl.h"
@@ -39,7 +40,6 @@
 #include "shaders/pick_id_ps_hlsl.h"
 #include "shaders/pick_id_vs_hlsl.h"
 #include "shaders/sss_blur_cs_hlsl.h"
-#include "core/sort.h"
 
 namespace rx::render {
 namespace {

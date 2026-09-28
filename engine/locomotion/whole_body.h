@@ -13,9 +13,9 @@
 // facing yaw 0 looks down -Z, character-right = +X. Bind pose: legs straight
 // down (-Y), arms straight down. Metres, m/s, radians, N and N*m.
 
-#include "core/export.h"
-#include "core/math.h"
-#include "core/types.h"
+#include "foundation/build_config/export.h"
+#include "foundation/build_config/types.h"
+#include "foundation/math/math.h"
 #include "locomotion/gait.h"
 #include "locomotion/rig.h"
 #include "locomotion/types.h"

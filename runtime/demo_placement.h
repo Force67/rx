@@ -5,8 +5,8 @@
 
 #include "base/containers/span.h"
 #include "base/memory/unique_pointer.h"
-#include "core/math.h"
 #include "engine_context.h"
+#include "foundation/math/math.h"
 #include "placement/gpu_placement.h"
 #include "placement/placement.h"
 #include "placement/world_data.h"

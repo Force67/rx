@@ -8,7 +8,7 @@
 #include "base/memory/move.h"
 #include "base/strings/string_ref.h"
 #include "base/strings/xstring.h"
-#include "core/scalar.h"
+#include "foundation/math/scalar.h"
 
 namespace rx::anim {
 namespace {

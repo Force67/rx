@@ -6,8 +6,8 @@
 
 
 #include "base/atomic.h"
-#include "core/export.h"
-#include "core/types.h"
+#include "foundation/build_config/export.h"
+#include "foundation/build_config/types.h"
 #include "http/url.h"
 
 // A small HTTP/1.1 client: one request, one connection, one answer. It is here

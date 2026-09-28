@@ -6,8 +6,8 @@
 #include "base/containers/vector.h"
 #include "base/strings/string_ref.h"
 #include "base/strings/xstring.h"
-#include "core/types.h"
 #include "ecs/world.h"
+#include "foundation/build_config/types.h"
 #include "render/core/renderer.h"
 #include "render/core/settings.h"
 

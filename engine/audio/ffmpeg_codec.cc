@@ -7,7 +7,7 @@
 #include "base/memory/mem_ops.h"
 #include "base/memory/move.h"
 #include "base/memory/unique_pointer.h"
-#include "core/log.h"
+#include "foundation/logging/log.h"
 
 extern "C" {
 #include <libavcodec/avcodec.h>

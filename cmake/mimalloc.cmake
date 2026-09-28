@@ -1,9 +1,9 @@
 # mimalloc integration (RX_MIMALLOC, on by default). The engine routes
 # allocations through mimalloc for faster, lower-fragmentation heap use and
-# per-category memory tracking (engine/core/memory/).
+# per-category memory tracking (foundation/memory/).
 #
 # Two layers of coverage (see the design note in the perf discussion):
-#   Layer 1 - C++ operator new/delete: engine/core/memory/new_override.cc,
+#   Layer 1 - C++ operator new/delete: foundation/memory/new_override.cc,
 #             compiled into each executable on every platform. Routes to
 #             mimalloc and charges the memory tracker's thread-local category
 #             using mi_usable_size on both sides.
@@ -76,7 +76,7 @@ function(rx_enable_mimalloc target)
   # Layer 1: the tracked operator new/delete override, compiled into this
   # binary on every platform (global operators must be defined once per
   # binary; the exe's definitions preempt libstdc++'s process-wide on ELF).
-  target_sources(${target} PRIVATE ${PROJECT_SOURCE_DIR}/engine/core/memory/new_override.cc)
+  target_sources(${target} PRIVATE ${PROJECT_SOURCE_DIR}/foundation/memory/new_override.cc)
   target_include_directories(${target} PRIVATE ${PROJECT_SOURCE_DIR}/engine)
   if(WIN32)
     # Layer 2: dynamic override via the DLL, whose redirect patches the CRT.

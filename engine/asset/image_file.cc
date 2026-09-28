@@ -1,7 +1,7 @@
 #include "asset/image_file.h"
 #include "base/memory/mem_ops.h"
 #include "base/strings/xstring.h"
-#include "core/format.h"
+#include "foundation/strings/format.h"
 
 #include <string.h>
 

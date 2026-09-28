@@ -4,11 +4,11 @@
 
 #include "asset/pack.h"
 #include "base/memory/move.h"
-#include "core/app_identity.h"
-#include "core/file_system.h"
-#include "core/log.h"
-#include "core/paths.h"
-#include "core/sort.h"
+#include "foundation/algorithm/sort.h"
+#include "foundation/files/file_system.h"
+#include "foundation/files/paths.h"
+#include "foundation/logging/log.h"
+#include "foundation/system/app_identity.h"
 
 namespace rx::asset {
 namespace {

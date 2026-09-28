@@ -7,7 +7,7 @@
 
 #include "base/memory/mem_ops.h"
 #include "base/strings/xstring.h"
-#include "core/log.h"
+#include "foundation/logging/log.h"
 #include "shaders/reference_compare_cs_hlsl.h"
 
 namespace rx::render {

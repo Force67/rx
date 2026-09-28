@@ -6,14 +6,14 @@
 
 #include "base/memory/mem_ops.h"
 #include "base/memory/move.h"
-#include "core/log.h"
-#include "core/scalar.h"
+#include "foundation/algorithm/sort.h"
+#include "foundation/logging/log.h"
+#include "foundation/math/scalar.h"
 #include "render/gi/sdf_scene.h"
 #include "render/rhi/bindings.h"
 #include "shaders/sdf_clear_cs_hlsl.h"
 #include "shaders/sdf_compose_cs_hlsl.h"
 #include "shaders/sdf_debug_cs_hlsl.h"
-#include "core/sort.h"
 
 namespace rx::render {
 namespace {

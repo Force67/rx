@@ -3,8 +3,8 @@
 #include <string.h>
 
 #include "base/memory/mem_ops.h"
-#include "core/log.h"
-#include "core/scalar.h"
+#include "foundation/logging/log.h"
+#include "foundation/math/scalar.h"
 #include "shaders/particle_ps_hlsl.h"
 #include "shaders/particle_sim_cs_hlsl.h"
 #include "shaders/particle_tex_ps_hlsl.h"

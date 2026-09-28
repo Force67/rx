@@ -2,7 +2,7 @@
 #define RX_AUDIO_WAV_H_
 
 #include "audio/audio_clip.h"
-#include "core/types.h"
+#include "foundation/build_config/types.h"
 
 namespace rx::audio {
 

@@ -2,7 +2,7 @@
 
 #include "base/algorithm.h"
 #include "base/containers/span.h"
-#include "core/scalar.h"
+#include "foundation/math/scalar.h"
 #include "scene/world_streaming_ecs.h"
 
 #include <float.h>

@@ -12,4 +12,4 @@ rx_add_module(script
 # audio, ...) contributes its own handlers in its own module and calls itself
 # directly, so this stays a low-level dependency of them, not the reverse. Only
 # core + ecs (the shared component backbone the HandlerContext points at).
-target_link_libraries(rx_script PUBLIC rx::core rx::ecs)
+target_link_libraries(rx_script PUBLIC rx::foundation rx::ecs)

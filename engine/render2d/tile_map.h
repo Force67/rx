@@ -5,8 +5,8 @@
 
 #include <base/containers/vector.h>
 
-#include "core/export.h"
-#include "core/types.h"
+#include "foundation/build_config/export.h"
+#include "foundation/build_config/types.h"
 #include "render2d/types2d.h"
 
 namespace rx::render2d {

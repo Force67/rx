@@ -1,5 +1,5 @@
 #include "anim/foot_ik.h"
-#include "core/scalar.h"
+#include "foundation/math/scalar.h"
 
 #include <math.h>
 

@@ -21,7 +21,7 @@
 #include <stddef.h>
 
 #include "base/containers/vector.h"
-#include "core/export.h"
+#include "foundation/build_config/export.h"
 #include "render/rhi/device.h"
 #include "render/rhi/types.h"
 

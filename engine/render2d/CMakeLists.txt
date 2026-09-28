@@ -7,7 +7,7 @@ rx_add_module(render2d
   tile_map.cc
   sprite_renderer.cc
 )
-target_link_libraries(rx_render2d PUBLIC rx::core rx::render)
+target_link_libraries(rx_render2d PUBLIC rx::foundation rx::render)
 
 # HLSL -> SPIR-V (dxc, SM 6.6, entry `main`), embedded as C arrays the module
 # includes as shaders/<symbol>.h (see cmake/shaders.cmake).

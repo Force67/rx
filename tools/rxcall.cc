@@ -25,7 +25,7 @@
 #include "base/memory/mem_ops.h"
 #include "base/optional.h"
 #include "base/strings/xstring.h"
-#include "core/format.h"
+#include "foundation/strings/format.h"
 #include "rpc/rpc_message.h"
 #include "rpc/rpc_value.h"
 

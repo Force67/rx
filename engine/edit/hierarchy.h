@@ -1,11 +1,11 @@
 #ifndef RX_EDIT_HIERARCHY_H_
 #define RX_EDIT_HIERARCHY_H_
 
-#include "core/export.h"
-#include "core/math.h"
-#include "core/types.h"
 #include "ecs/entity.h"
 #include "ecs/world.h"
+#include "foundation/build_config/export.h"
+#include "foundation/build_config/types.h"
+#include "foundation/math/math.h"
 #include "scene/components.h"
 
 // Identity and parent-chain helpers shared by the scene serializer, the undo

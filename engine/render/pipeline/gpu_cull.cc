@@ -4,7 +4,7 @@
 #include <string.h>
 
 #include "base/memory/mem_ops.h"
-#include "core/log.h"
+#include "foundation/logging/log.h"
 #include "render/rhi/device.h"
 #include "shaders/bounds_ps_hlsl.h"
 #include "shaders/bounds_vs_hlsl.h"

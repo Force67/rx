@@ -7,8 +7,8 @@
 #include "base/memory/move.h"
 #include "base/memory/unique_pointer.h"
 #include "base/numeric_limits.h"
-#include "core/log.h"
-#include "core/scalar.h"
+#include "foundation/logging/log.h"
+#include "foundation/math/scalar.h"
 #include "render/rhi/device.h"
 
 namespace rx::render {

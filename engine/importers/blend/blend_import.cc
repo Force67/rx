@@ -17,9 +17,9 @@ extern char **environ;
 #include "asset/asset_id.h"
 #include "base/containers/vector.h"
 #include "base/strings/xstring.h"
-#include "core/file_system.h"
-#include "core/format.h"
-#include "core/log.h"
+#include "foundation/files/file_system.h"
+#include "foundation/logging/log.h"
+#include "foundation/strings/format.h"
 
 namespace rx::asset {
 namespace {

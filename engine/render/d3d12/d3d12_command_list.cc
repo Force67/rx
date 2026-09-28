@@ -11,8 +11,8 @@
 #include "base/algorithm.h"
 #include "base/containers/span.h"
 #include "base/memory/mem_ops.h"
-#include "core/log.h"
-#include "core/scalar.h"
+#include "foundation/logging/log.h"
+#include "foundation/math/scalar.h"
 
 namespace rx::render::d3d12 {
 namespace {

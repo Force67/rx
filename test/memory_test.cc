@@ -1,4 +1,4 @@
-// Acceptance test for engine/core/memory: category tracker, frame arena,
+// Acceptance test for foundation/memory: category tracker, frame arena,
 // chunk pool, small vector and the memory config. Pure CPU, no GPU needed.
 // The tracker assertions only run when the new/delete override is compiled in
 // (RX_MIMALLOC=ON); otherwise they are skipped so the test still passes.
@@ -12,11 +12,11 @@
 #include "base/memory/mem_ops.h"
 #include "base/memory/move.h"
 #include "base/strings/xstring.h"
-#include "core/memory/chunk_pool.h"
-#include "core/memory/frame_arena.h"
-#include "core/memory/memory_config.h"
-#include "core/memory/memory_tracker.h"
-#include "core/memory/small_vector.h"
+#include "foundation/memory/chunk_pool.h"
+#include "foundation/memory/frame_arena.h"
+#include "foundation/memory/memory_config.h"
+#include "foundation/memory/memory_tracker.h"
+#include "foundation/memory/small_vector.h"
 
 namespace {
 

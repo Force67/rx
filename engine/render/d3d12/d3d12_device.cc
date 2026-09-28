@@ -10,7 +10,7 @@
 
 #include <string.h>
 
-#include "core/log.h"
+#include "foundation/logging/log.h"
 
 // Internal blit shaders (BlitMip lowers to a fullscreen draw; D3D12 has no
 // filtered copy). Embedded by the build like every pass shader.
@@ -21,9 +21,9 @@
 #include "base/memory/move.h"
 #include "base/memory/unique_pointer.h"
 #include "base/strings/xstring.h"
-#include "core/scalar.h"
-#include "shaders/fullscreen_vs_slang.h"
+#include "foundation/math/scalar.h"
 #include "shaders/blit_ps_slang.h"
+#include "shaders/fullscreen_vs_slang.h"
 
 namespace rx::render::d3d12 {
 namespace {

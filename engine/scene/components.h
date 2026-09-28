@@ -4,8 +4,8 @@
 
 #include "asset/asset_id.h"
 #include "base/strings/xstring.h"
-#include "core/types.h"
 #include "ecs/entity.h"
+#include "foundation/build_config/types.h"
 
 namespace rx::scene {
 

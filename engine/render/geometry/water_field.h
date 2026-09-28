@@ -15,7 +15,7 @@
 // the origin to the texel grid: that makes any toroidal/scroll bookkeeping
 // unnecessary and stops the field swimming under the camera.
 
-#include "core/math.h"
+#include "foundation/math/math.h"
 #include "render/core/render_graph.h"
 #include "render/rhi/device.h"
 

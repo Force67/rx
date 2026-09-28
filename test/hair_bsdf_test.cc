@@ -1,4 +1,4 @@
-#include "core/scalar.h"
+#include "foundation/math/scalar.h"
 #include "render/pipeline/hair_material.h"
 
 #include <math.h>

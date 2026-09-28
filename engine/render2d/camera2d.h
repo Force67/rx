@@ -3,7 +3,7 @@
 
 #include <math.h>
 
-#include "core/math.h"
+#include "foundation/math/math.h"
 #include "render2d/types2d.h"
 
 namespace rx::render2d {

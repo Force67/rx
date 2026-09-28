@@ -19,8 +19,8 @@
 #include "base/memory/move.h"
 #include "base/optional.h"
 #include "base/strings/xstring.h"
-#include "core/file_system.h"
-#include "core/format.h"
+#include "foundation/files/file_system.h"
+#include "foundation/strings/format.h"
 
 namespace fs = rx::fs;
 namespace asset = rx::asset;

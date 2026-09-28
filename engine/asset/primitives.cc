@@ -4,8 +4,8 @@
 
 #include "base/containers/unordered_map.h"
 #include "base/memory/move.h"
-#include "core/math.h"
-#include "core/scalar.h"
+#include "foundation/math/math.h"
+#include "foundation/math/scalar.h"
 
 namespace rx::asset {
 namespace {

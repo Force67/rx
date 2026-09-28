@@ -1,7 +1,7 @@
 #include "audio/audio_device.h"
 
 #include "audio/mixer.h"
-#include "core/log.h"
+#include "foundation/logging/log.h"
 
 #if defined(RX_HAS_SDL3_AUDIO)
 #include <SDL3/SDL.h>

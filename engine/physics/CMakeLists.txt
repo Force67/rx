@@ -4,7 +4,7 @@ if(RX_JOLT)
     physics_world.cc
     kinema_jolt.cc
   )
-  target_link_libraries(rx_physics PUBLIC rx::core rx::asset)
+  target_link_libraries(rx_physics PUBLIC rx::foundation rx::asset)
   # PRIVATE static archives, needed at final link. Wrapped in BUILD_INTERFACE so
   # they stay out of the installed export; rxConfig.cmake re-adds bundled
   # imported equivalents for find_package consumers.
@@ -18,5 +18,5 @@ else()
     physics_world_stub.cc
     cloth_collision.cc
   )
-  target_link_libraries(rx_physics PUBLIC rx::core rx::asset)
+  target_link_libraries(rx_physics PUBLIC rx::foundation rx::asset)
 endif()

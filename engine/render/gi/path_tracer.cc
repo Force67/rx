@@ -4,7 +4,7 @@
 
 #include "base/memory/mem_ops.h"
 #include "base/numeric_limits.h"
-#include "core/log.h"
+#include "foundation/logging/log.h"
 #include "render/gi/raytracing.h"
 #include "render/rhi/device.h"
 #include "shaders/pathtrace_cs_hlsl.h"

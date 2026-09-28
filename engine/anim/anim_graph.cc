@@ -6,8 +6,8 @@
 #include "base/memory/move.h"
 #include "base/memory/unique_pointer.h"
 #include "base/strings/string_ref.h"
-#include "core/math.h"
-#include "core/scalar.h"
+#include "foundation/math/math.h"
+#include "foundation/math/scalar.h"
 
 namespace rx::anim {
 

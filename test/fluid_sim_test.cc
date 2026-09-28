@@ -17,7 +17,7 @@
 
 #include "base/containers/vector.h"
 #include "base/memory/unique_pointer.h"
-#include "core/scalar.h"
+#include "foundation/math/scalar.h"
 #include "render/core/render_graph.h"
 #include "render/geometry/fluid_sim.h"
 #include "render/rhi/device.h"

@@ -11,7 +11,7 @@
 
 
 #include "base/functional/function.h"
-#include "core/math.h"
+#include "foundation/math/math.h"
 #include "render/pipeline/mesh_pipeline.h"
 #include "render/rhi/device.h"
 

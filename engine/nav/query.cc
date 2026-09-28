@@ -1,6 +1,6 @@
 #include "base/algorithm.h"
 #include "base/containers/span.h"
-#include "core/scalar.h"
+#include "foundation/math/scalar.h"
 #include "nav/query.h"
 
 #include <math.h>

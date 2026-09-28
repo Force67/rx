@@ -11,8 +11,9 @@
 #include "base/containers/vector.h"
 #include "base/memory/mem_ops.h"
 #include "base/memory/move.h"
-#include "core/log.h"
-#include "core/scalar.h"
+#include "foundation/algorithm/sort.h"
+#include "foundation/logging/log.h"
+#include "foundation/math/scalar.h"
 #include "render/pipeline/meshlet.h"
 #include "shaders/fullscreen_vs_slang.h"
 #include "shaders/meshlet_ps_hlsl.h"
@@ -25,7 +26,6 @@
 #include "shaders/vgeo_sw_cs_hlsl.h"
 #include "shaders/vgeo_vis_ms_hlsl.h"
 #include "shaders/vgeo_vis_ps_hlsl.h"
-#include "core/sort.h"
 
 namespace rx::render {
 namespace {

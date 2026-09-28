@@ -3,8 +3,8 @@
 #include <math.h>
 #include <stdlib.h>
 
-#include "core/math.h"
-#include "core/scalar.h"
+#include "foundation/math/math.h"
+#include "foundation/math/scalar.h"
 
 namespace rx {
 namespace {

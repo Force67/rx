@@ -4,7 +4,7 @@
 
 #include "base/memory/unique_pointer.h"
 #include "base/strings/string_ref.h"
-#include "core/types.h"
+#include "foundation/build_config/types.h"
 
 #if defined(__ANDROID__)
 struct AAssetManager;

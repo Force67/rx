@@ -1,7 +1,7 @@
 #include "audio/ffmpeg_codec.h"
 
 #include "base/memory/unique_pointer.h"
-#include "core/log.h"
+#include "foundation/logging/log.h"
 
 // Compiled when the FFmpeg backend is off (the default, and the whole CI matrix):
 // compressed audio that has no native decoder is skipped with a single, clear

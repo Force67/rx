@@ -3,16 +3,16 @@
 
 #include <base/containers/vector.h>
 
+#include "app/world_clock.h"
 #include "asset/vfs.h"
 #include "audio/audio_system.h"
-#include "core/input_bindings.h"
-#include "core/job_system.h"
-#include "core/window.h"
-#include "core/world_clock.h"
 #include "ecs/scheduler.h"
 #include "ecs/world.h"
+#include "foundation/tasks/job_system.h"
 #include "physics/physics_world.h"
 #include "render/core/renderer.h"
+#include "ui/events/input_bindings.h"
+#include "ui/window/window.h"
 
 namespace rx::app {
 

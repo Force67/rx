@@ -5,7 +5,7 @@
 #include <ugui/render/vertex.h>
 
 #include "base/memory/mem_ops.h"
-#include "core/scalar.h"
+#include "foundation/math/scalar.h"
 #include "render/util/shader_util.h"
 #include "shaders/ugui_frost_ps_hlsl.h"
 #include "shaders/ugui_frost_vs_hlsl.h"

@@ -5,9 +5,9 @@
 #include "audio/audio_clip.h"
 #include "base/atomic.h"
 #include "base/memory/unique_pointer.h"
-#include "core/export.h"
-#include "core/shared.h"
-#include "core/types.h"
+#include "foundation/build_config/export.h"
+#include "foundation/build_config/types.h"
+#include "foundation/memory/shared.h"
 
 namespace rx::audio {
 

@@ -3,8 +3,8 @@
 #include <string.h>
 
 #include "base/memory/mem_ops.h"
-#include "core/log.h"
-#include "core/scalar.h"
+#include "foundation/logging/log.h"
+#include "foundation/math/scalar.h"
 #include "render/gi/raytracing.h"
 #include "render/rhi/device.h"
 #include "shaders/recon_atrous_cs_hlsl.h"
@@ -14,8 +14,8 @@
 #include "shaders/recon_restir_di_spatial_cs_hlsl.h"
 #include "shaders/recon_restir_di_temporal_cs_hlsl.h"
 #include "shaders/recon_restir_spatial_cs_hlsl.h"
-#include "shaders/recon_sky_cdf_cs_hlsl.h"
 #include "shaders/recon_restir_temporal_cs_hlsl.h"
+#include "shaders/recon_sky_cdf_cs_hlsl.h"
 #include "shaders/recon_temporal_cs_hlsl.h"
 
 namespace rx::render {

@@ -7,7 +7,7 @@
 #include "asset/asset_id.h"
 #include "base/algorithm.h"
 #include "base/strings/xstring.h"
-#include "core/scalar.h"
+#include "foundation/math/scalar.h"
 #include "importers/blend/blend_import.h"
 #include "importers/gltf/gltf_loader.h"
 

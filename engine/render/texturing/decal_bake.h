@@ -27,8 +27,8 @@
 #include <base/containers/vector.h>
 
 #include "base/containers/span.h"
-#include "core/export.h"
-#include "core/math.h"
+#include "foundation/build_config/export.h"
+#include "foundation/math/math.h"
 #include "render/core/render_graph.h"
 #include "render/pipeline/mesh_pipeline.h"
 #include "render/rhi/device.h"

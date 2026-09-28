@@ -5,9 +5,9 @@
 #include "asset/asset_id.h"
 #include "asset/primitives.h"
 #include "base/containers/span.h"
-#include "core/format.h"
-#include "core/log.h"
-#include "core/scalar.h"
+#include "foundation/logging/log.h"
+#include "foundation/math/scalar.h"
+#include "foundation/strings/format.h"
 #include "scene/components.h"
 
 namespace rx {

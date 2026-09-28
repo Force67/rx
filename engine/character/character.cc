@@ -3,8 +3,8 @@
 #include <math.h>
 #include <stdlib.h>
 
-#include "core/scalar.h"
 #include "ecs/world.h"
+#include "foundation/math/scalar.h"
 #include "scene/camera_rig.h"
 #include "scene/components.h"
 

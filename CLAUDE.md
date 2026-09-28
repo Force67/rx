@@ -53,11 +53,12 @@ should not move the picture can be **proven** not to:
 - Namespace `rx::`; env knobs are `RX_*`. Grep for `base::Option`.
 - The C++ standard library is banned, and so are exceptions (rx builds with
   `-fno-exceptions`). Use `base::` (third_party/equilibrium/base) and the rx
-  helpers in `engine/core/`: `scalar.h` (`rx::Min/Max/Clamp`, std semantics;
-  never `base::Min/Max/Clamp`, which differ on NaN), `format.h`
-  (`rx::StrFormat`/`ToString`, exact `std::format`/`to_string` text),
-  `file_system.h` (`rx::fs`), `text_reader.h`/`text_writer.h` (getline, `>>`,
-  ostream), `sort.h` (`rx::StableSort`, `rx::NthElement`), `shared.h`. Allowed
+  helpers in `foundation/`: `math/scalar.h` (`rx::Min/Max/Clamp`, std
+  semantics; never `base::Min/Max/Clamp`, which differ on NaN),
+  `strings/format.h` (`rx::StrFormat`/`ToString`, exact `std::format`/
+  `to_string` text), `files/file_system.h` (`rx::fs`),
+  `strings/text_reader.h`/`text_writer.h` (getline, `>>`, ostream),
+  `algorithm/sort.h` (`rx::StableSort`, `rx::NthElement`), `memory/shared.h`. Allowed
   std: `std::initializer_list`, placement new, `std::align_val_t`/`nothrow_t`
   in operator new/delete, and third-party signatures that demand std types
   (tinyusdz in `usd_loader.cc`, libultragui's `ugui::String`).

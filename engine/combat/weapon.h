@@ -5,7 +5,7 @@
 #include "combat/damage.h"
 #include "combat/events.h"
 #include "combat/weapon_def.h"
-#include "core/export.h"
+#include "foundation/build_config/export.h"
 #include "physics/physics_world.h"
 
 namespace rx::ecs {

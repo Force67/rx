@@ -1,6 +1,6 @@
 #include "render/atmosphere/aerial_perspective.h"
 
-#include "core/log.h"
+#include "foundation/logging/log.h"
 #include "render/rhi/device.h"
 #include "shaders/aerial_perspective_cs_hlsl.h"
 

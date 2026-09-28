@@ -6,7 +6,7 @@
 #include "base/atomic.h"
 #include "base/memory/unique_pointer.h"
 #include "base/time/time.h"
-#include "core/types.h"
+#include "foundation/build_config/types.h"
 
 namespace rx::http {
 

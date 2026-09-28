@@ -16,7 +16,7 @@
 #include <base/containers/vector.h>
 
 #include "base/containers/span.h"
-#include "core/export.h"
+#include "foundation/build_config/export.h"
 #include "nav/navmesh.h"
 #include "nav/path.h"
 

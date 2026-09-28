@@ -1,8 +1,8 @@
 #include "render/post/ui_blur.h"
 
 #include "base/memory/unique_pointer.h"
-#include "core/log.h"
-#include "core/scalar.h"
+#include "foundation/logging/log.h"
+#include "foundation/math/scalar.h"
 #include "shaders/fullscreen_vs_slang.h"
 #include "shaders/ui_blur_ps_hlsl.h"
 

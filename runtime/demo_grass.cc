@@ -5,8 +5,8 @@
 #include <base/option.h>
 
 #include "asset/primitives.h"
-#include "core/log.h"
-#include "core/scalar.h"
+#include "foundation/logging/log.h"
+#include "foundation/math/scalar.h"
 #include "scene/components.h"
 
 namespace rx {

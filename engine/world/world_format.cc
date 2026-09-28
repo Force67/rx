@@ -4,10 +4,10 @@
 #include "base/memory/move.h"
 #include "base/strings/string_ref.h"
 #include "base/strings/xstring.h"
-#include "core/format.h"
-#include "core/scalar.h"
+#include "foundation/algorithm/sort.h"
+#include "foundation/math/scalar.h"
+#include "foundation/strings/format.h"
 #include "world/world_format.h"
-#include "core/sort.h"
 
 #include <math.h>
 #include <string.h>

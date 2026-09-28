@@ -3,7 +3,7 @@
 #include <math.h>
 
 #include "base/memory/move.h"
-#include "core/scalar.h"
+#include "foundation/math/scalar.h"
 #include "placement/density_program.h"
 #include "placement/placement_math.h"
 #include "placement/placement_pattern.h"

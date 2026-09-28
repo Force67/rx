@@ -10,15 +10,15 @@
 #include "base/memory/move.h"
 #include "base/strings/string_ref.h"
 #include "base/strings/xstring.h"
-#include "core/format.h"
-#include "core/file_system.h"
-#include "core/log.h"
-#include "core/text_reader.h"
-#include "core/text_writer.h"
 #include "edit/hierarchy.h"
 #include "edit/reflect.h"
+#include "foundation/algorithm/sort.h"
+#include "foundation/files/file_system.h"
+#include "foundation/logging/log.h"
+#include "foundation/strings/format.h"
+#include "foundation/strings/text_reader.h"
+#include "foundation/strings/text_writer.h"
 #include "scene/components.h"
-#include "core/sort.h"
 
 namespace rx::edit {
 namespace {

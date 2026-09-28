@@ -11,7 +11,7 @@ endfunction()
 
 function(rx_add_module name)
   # STATIC by default; SHARED under -DRX_SHARED=ON (RX_LIB_TYPE set in the top
-  # CMakeLists). See engine/core/export.h for the annotation scheme.
+  # CMakeLists). See foundation/build_config/export.h for the annotation scheme.
   add_library(rx_${name} ${RX_LIB_TYPE} ${ARGN})
   add_library(rx::${name} ALIAS rx_${name})
   # BUILD_INTERFACE keeps in-tree (add_subdirectory) consumers seeing the source

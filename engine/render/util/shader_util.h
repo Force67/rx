@@ -9,7 +9,7 @@
 
 #include <stddef.h>
 
-#include "core/export.h"
+#include "foundation/build_config/export.h"
 
 namespace rx::render {
 

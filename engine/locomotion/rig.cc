@@ -19,7 +19,7 @@
 
 #include <math.h>
 
-#include "core/math.h"
+#include "foundation/math/math.h"
 
 namespace rx::locomotion {
 namespace {

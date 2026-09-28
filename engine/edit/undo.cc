@@ -7,9 +7,9 @@
 #include "base/memory/unique_pointer.h"
 #include "base/random/random.h"
 #include "base/strings/xstring.h"
-#include "core/format.h"
-#include "core/math.h"
 #include "edit/hierarchy.h"
+#include "foundation/math/math.h"
+#include "foundation/strings/format.h"
 #include "scene/components.h"
 
 namespace rx::edit {

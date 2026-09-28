@@ -6,7 +6,7 @@
 #include <imgui.h>
 
 #include "base/algorithm.h"
-#include "core/log.h"
+#include "foundation/logging/log.h"
 #include "render/rhi/bindings.h"
 #include "render/rhi/command_list.h"
 #include "render/rhi/pipeline.h"
@@ -14,9 +14,9 @@
 // Build-embedded imgui shaders (engine/render/shaders/util/imgui.{vs,ps}.hlsl).
 #include "base/memory/mem_ops.h"
 #include "base/memory/move.h"
-#include "core/scalar.h"
-#include "shaders/imgui_vs_hlsl.h"
+#include "foundation/math/scalar.h"
 #include "shaders/imgui_ps_hlsl.h"
+#include "shaders/imgui_vs_hlsl.h"
 
 namespace rx::render {
 namespace {

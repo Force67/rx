@@ -2,9 +2,9 @@
 #define RX_CHARACTER_JETPACK_H_
 
 #include "character/character.h"
-#include "core/export.h"
-#include "core/math.h"
-#include "core/types.h"
+#include "foundation/build_config/export.h"
+#include "foundation/build_config/types.h"
+#include "foundation/math/math.h"
 
 namespace rx::ecs {
 class World;

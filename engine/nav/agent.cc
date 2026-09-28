@@ -2,7 +2,7 @@
 
 #include <math.h>
 
-#include "core/scalar.h"
+#include "foundation/math/scalar.h"
 #include "scene/components.h"
 
 namespace rx::nav {

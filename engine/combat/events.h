@@ -4,8 +4,8 @@
 #include <base/containers/vector.h>
 
 #include "combat/components.h"
-#include "core/math.h"
 #include "ecs/entity.h"
+#include "foundation/math/math.h"
 
 // What the combat systems produce besides mutated components. Presentation is
 // not the engine's business: tracers, muzzle flashes, impact decals, hit

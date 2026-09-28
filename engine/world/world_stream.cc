@@ -11,9 +11,9 @@
 #include "base/memory/move.h"
 #include "base/strings/string_ref.h"
 #include "base/strings/xstring.h"
-#include "core/format.h"
-#include "core/scalar.h"
 #include "edit/reflect.h"
+#include "foundation/math/scalar.h"
+#include "foundation/strings/format.h"
 #include "scene/components.h"
 
 namespace rx::world {

@@ -6,8 +6,8 @@
 
 #include "base/memory/mem_ops.h"
 #include "base/memory/move.h"
-#include "core/log.h"
-#include "core/scalar.h"
+#include "foundation/logging/log.h"
+#include "foundation/math/scalar.h"
 #include "shaders/hair_dom_ps_hlsl.h"
 #include "shaders/hair_ps_hlsl.h"
 #include "shaders/hair_vs_hlsl.h"

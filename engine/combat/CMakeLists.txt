@@ -11,4 +11,4 @@ rx_add_module(combat
   weapon.cc
   projectile.cc
 )
-target_link_libraries(rx_combat PUBLIC rx::core rx::ecs rx::scene rx::physics)
+target_link_libraries(rx_combat PUBLIC rx::foundation rx::ecs rx::scene rx::physics)

@@ -3,9 +3,9 @@
 
 
 #include "base/memory/unique_pointer.h"
-#include "core/math.h"
-#include "render/core/bindless.h"
+#include "foundation/math/math.h"
 #include "render/atmosphere/environment.h"
+#include "render/core/bindless.h"
 #include "render/core/render_graph.h"
 #include "render/rhi/device.h"
 

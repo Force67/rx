@@ -4,7 +4,7 @@
 #include <base/containers/unordered_map.h>
 #include <base/containers/vector.h>
 
-#include "core/types.h"
+#include "foundation/build_config/types.h"
 #include "render/rhi/command_list.h"
 #include "render/rhi/resources.h"
 

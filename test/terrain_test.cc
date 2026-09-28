@@ -1,12 +1,12 @@
 #include "base/containers/array.h"
 #include "base/numeric_limits.h"
 #include "base/optional.h"
-#include "base/strings/xstring.h"
-#include "core/format.h"
-#include "terrain/terrain.h"
 #include "base/random/random.h"
-#include "core/file_system.h"
-#include "core/scalar.h"
+#include "base/strings/xstring.h"
+#include "foundation/files/file_system.h"
+#include "foundation/math/scalar.h"
+#include "foundation/strings/format.h"
+#include "terrain/terrain.h"
 
 #include <float.h>
 #include <math.h>

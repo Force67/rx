@@ -3,7 +3,7 @@
 #include "base/containers/unordered_map.h"
 #include "base/containers/unordered_set.h"
 #include "base/containers/vector.h"
-#include "core/scalar.h"
+#include "foundation/math/scalar.h"
 
 #include <math.h>
 

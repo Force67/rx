@@ -2,8 +2,8 @@
 
 #include <math.h>
 
-#include "core/scalar.h"
 #include "ecs/world.h"
+#include "foundation/math/scalar.h"
 
 namespace rx::character {
 namespace {

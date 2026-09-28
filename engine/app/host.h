@@ -9,8 +9,8 @@
 #include "app/services.h"
 #include "base/atomic.h"
 #include "base/memory/unique_pointer.h"
-#include "core/export.h"
-#include "core/frame_timer.h"
+#include "foundation/build_config/export.h"
+#include "foundation/time/frame_timer.h"
 #include "ui/splash.h"
 
 namespace rx::app {

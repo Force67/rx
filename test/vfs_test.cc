@@ -14,7 +14,7 @@
 #include "base/optional.h"
 #include "base/strings/string_ref.h"
 #include "base/strings/xstring.h"
-#include "core/file_system.h"
+#include "foundation/files/file_system.h"
 
 namespace fs = rx::fs;
 namespace asset = rx::asset;

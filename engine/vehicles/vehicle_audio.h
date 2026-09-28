@@ -4,9 +4,9 @@
 #include <limits.h>
 
 #include "audio/synth_voice.h"
-#include "core/export.h"
-#include "core/math.h"
-#include "core/types.h"
+#include "foundation/build_config/export.h"
+#include "foundation/build_config/types.h"
+#include "foundation/math/math.h"
 #include "vehicles/engine_synth.h"
 
 namespace rx::audio {

@@ -5,7 +5,7 @@
 
 #include "asset/mesh.h"
 #include "asset/texture.h"
-#include "core/math.h"
+#include "foundation/math/math.h"
 
 namespace rx::render {
 

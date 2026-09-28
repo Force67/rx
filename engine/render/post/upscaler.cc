@@ -1,7 +1,7 @@
 #include "render/post/upscaler.h"
 
 #include "base/memory/unique_pointer.h"
-#include "core/log.h"
+#include "foundation/logging/log.h"
 #include "render/rhi/device.h"
 
 namespace rx::render {

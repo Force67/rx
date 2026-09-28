@@ -9,7 +9,7 @@
 #include "asset/vfs.h"
 #include "base/memory/move.h"
 #include "base/strings/xstring.h"
-#include "core/file_system.h"
+#include "foundation/files/file_system.h"
 
 namespace {
 

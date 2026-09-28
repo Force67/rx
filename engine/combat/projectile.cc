@@ -4,8 +4,8 @@
 
 #include <base/containers/vector.h>
 
-#include "core/scalar.h"
 #include "ecs/world.h"
+#include "foundation/math/scalar.h"
 #include "scene/components.h"
 
 namespace rx::combat {

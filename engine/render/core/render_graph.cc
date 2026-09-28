@@ -2,7 +2,7 @@
 
 #include "base/memory/move.h"
 #include "base/strings/xstring.h"
-#include "core/log.h"
+#include "foundation/logging/log.h"
 #include "render/rhi/device.h"
 
 namespace rx::render {

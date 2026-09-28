@@ -16,7 +16,7 @@ startup stops on a bad one.
 | `title` | `anyvoxel` | any text | what people read: the window title, the application name drivers and compositors see |
 
 rx's own tools carry one too (the viewer is `rx`, the editor `rx-editor`).
-Code that needs it reads `GetAppIdentity()` (`core/app_identity.h`).
+Code that needs it reads `GetAppIdentity()` (`foundation/system/app_identity.h`).
 
 Per-user folders, created on first use:
 

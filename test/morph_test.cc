@@ -26,8 +26,8 @@
 #include "base/memory/mem_ops.h"
 #include "base/memory/unique_pointer.h"
 #include "base/strings/xstring.h"
-#include "core/file_system.h"
-#include "core/scalar.h"
+#include "foundation/files/file_system.h"
+#include "foundation/math/scalar.h"
 #include "shaders/morph_apply_cs_hlsl.h"
 
 using namespace rx;

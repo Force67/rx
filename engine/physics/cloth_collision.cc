@@ -1,8 +1,8 @@
 #include "base/algorithm.h"
 #include "base/memory/move.h"
-#include "core/scalar.h"
+#include "foundation/algorithm/sort.h"
+#include "foundation/math/scalar.h"
 #include "physics/cloth_collision.h"
-#include "core/sort.h"
 
 #include <assert.h>
 #include <float.h>

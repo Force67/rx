@@ -14,8 +14,8 @@
 #include "base/memory/mem_ops.h"
 #include "base/memory/move.h"
 #include "base/optional.h"
-#include "core/file_system.h"
-#include "core/log.h"
+#include "foundation/files/file_system.h"
+#include "foundation/logging/log.h"
 #include "render/rhi/vulkan_interop.h"
 #include "ui/brand/rx_engine_svg.h"
 

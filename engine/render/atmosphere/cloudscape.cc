@@ -5,8 +5,8 @@
 #include <string.h>
 
 #include "base/memory/mem_ops.h"
-#include "core/log.h"
-#include "core/scalar.h"
+#include "foundation/logging/log.h"
+#include "foundation/math/scalar.h"
 #include "render/rhi/device.h"
 #include "shaders/cloudscape_apply_cs_hlsl.h"
 #include "shaders/cloudscape_funnel_cs_hlsl.h"
