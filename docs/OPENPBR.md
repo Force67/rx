@@ -71,7 +71,7 @@ and the separate `geometry_coat_normal` / `geometry_coat_tangent`.
 
 ## Shading
 
-In `engine/render/shaders/openpbr.hlsli`, used by `mesh.ps.hlsl` and
+In `rxe/render/shaders/openpbr.hlsli`, used by `mesh.ps.hlsl` and
 `mesh_rt.ps.hlsl`:
 
 - **EON diffuse.** The Fujii form of Oren-Nayar plus the analytic reciprocal

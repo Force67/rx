@@ -28,7 +28,7 @@ Two ergonomic differences from the hlsl flow:
 - **Automatic include tracking.** slangc writes a depfile, so `#include` /
   `import` edits rebuild dependents without the manual
   `RX_SHADER_DEPS_<symbol>` bookkeeping hlsl wrapper shaders need (53 such
-  lines in engine/render alone).
+  lines in rxe/render alone).
 - **slangc is optional until used.** `RX_SLANGC` is probed at configure;
   the build only fails if a `.slang` shader is actually registered.
 
@@ -71,9 +71,9 @@ toolchain):
 
 - `test/shaders/offscreen_tri.{vs,ps}.slang`: spirv + dxil sidecar, covered
   by offscreen_test on vulkan and d3d12.
-- `engine/render/shaders/util/fullscreen.vs.slang`: shared by every
+- `rxe/render/shaders/util/fullscreen.vs.slang`: shared by every
   fullscreen pass (tonemap, wboit composite, vgeo resolve, ui blur, blits).
-- `engine/render/shaders/util/blit.ps.slang`: the d3d12 BlitMip lowering;
+- `rxe/render/shaders/util/blit.ps.slang`: the d3d12 BlitMip lowering;
   first user of the combined `Sampler2D` form.
 
 Validated on NVIDIA (vulkan, validation layers clean) and vkd3d (d3d12).

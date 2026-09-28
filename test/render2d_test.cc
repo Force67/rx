@@ -1,7 +1,7 @@
-#include "render2d/camera2d.h"
-#include "render2d/iso.h"
-#include "render2d/sprite_renderer.h"
-#include "render2d/tile_map.h"
+#include "rxe/render2d/camera2d.h"
+#include "rxe/render2d/iso.h"
+#include "rxe/render2d/sprite_renderer.h"
+#include "rxe/render2d/tile_map.h"
 
 #include <math.h>
 #include <stdio.h>

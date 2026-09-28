@@ -2,16 +2,16 @@
 
 #include <math.h>
 
-#include "asset/asset_id.h"
-#include "asset/material.h"
-#include "asset/mesh.h"
-#include "asset/primitives.h"
 #include "base/algorithm.h"
 #include "base/memory/move.h"
 #include "foundation/logging/log.h"
 #include "foundation/math/scalar.h"
-#include "render/geometry/water_field.h"
-#include "scene/components.h"
+#include "rxe/asset/asset_id.h"
+#include "rxe/asset/material.h"
+#include "rxe/asset/mesh.h"
+#include "rxe/asset/primitives.h"
+#include "rxe/render/geometry/water_field.h"
+#include "rxe/scene/components.h"
 
 namespace rx {
 

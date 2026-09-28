@@ -5,7 +5,7 @@
 
 #include "base/containers/vector.h"
 #include "foundation/math/math.h"
-#include "render/rhi/device.h"
+#include "rxe/render/rhi/device.h"
 #include "shaders/recon_temporal_cs_hlsl.h"
 
 using namespace rx;

@@ -6,9 +6,9 @@
 
 #include <stdio.h>
 
-#include "ui/events/input.h"
-#include "ui/events/input_actions.h"
-#include "ui/events/input_bindings.h"
+#include "rxe/ui/events/input.h"
+#include "rxe/ui/events/input_actions.h"
+#include "rxe/ui/events/input_bindings.h"
 
 namespace {
 

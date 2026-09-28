@@ -5,8 +5,8 @@
 
 #include "base/containers/vector.h"
 #include "foundation/math/scalar.h"
-#include "render/post/depth_of_field.h"
-#include "render/post/motion_blur.h"
+#include "rxe/render/post/depth_of_field.h"
+#include "rxe/render/post/motion_blur.h"
 #include "shaders/motion_tilemax_cs_hlsl.h"
 
 using namespace rx;

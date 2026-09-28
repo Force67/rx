@@ -2,7 +2,7 @@
 
 How an rx app says who it is, how it finds its files, and how the engine, the
 game and the player decide how it runs on a given machine. Every file goes
-through the vfs (`engine/asset/vfs.h`); nothing is compiled into the binary.
+through the vfs (`rxe/asset/vfs.h`); nothing is compiled into the binary.
 
 ## Identity
 

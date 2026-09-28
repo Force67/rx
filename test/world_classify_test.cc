@@ -5,13 +5,13 @@
 // archive - and getting that split wrong has already shipped one bug in this
 // module. A label that lies is worse than no label, so the predicate behind it
 // is pinned here rather than left to be checked by baking things and looking.
-#include "world/world_bake.h"
+#include "rxe/world/world_bake.h"
 
 #include <stdio.h>
 
 #include "base/strings/xstring.h"
-#include "ecs/world.h"
-#include "scene/components.h"
+#include "rxe/ecs/world.h"
+#include "rxe/scene/components.h"
 
 namespace {
 

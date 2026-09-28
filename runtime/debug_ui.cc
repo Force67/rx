@@ -1,6 +1,6 @@
 #include "debug_ui.h"
 
-#include "scene/fly_camera.h"
+#include "rxe/scene/fly_camera.h"
 
 #if defined(RX_HAS_IMGUI)
 
@@ -16,13 +16,10 @@
 #include <imgui.h>
 #include <imgui_impl_sdl3.h>
 
-#include "app/platform_config.h"
-#include "asset/vfs.h"
 #include "base/algorithm.h"
 #include "base/containers/vector.h"
 #include "base/optional.h"
 #include "base/strings/xstring.h"
-#include "ecs/world.h"
 #include "foundation/files/file_system.h"
 #include "foundation/logging/log.h"
 #include "foundation/math/scalar.h"
@@ -30,9 +27,12 @@
 #include "foundation/memory/frame_arena.h"
 #include "foundation/memory/memory_tracker.h"
 #include "foundation/system/app_identity.h"
-#include "render/core/presets.h"
-#include "render/core/settings_ini.h"
-#include "render/util/imgui_theme.h"
+#include "rxe/app/platform_config.h"
+#include "rxe/asset/vfs.h"
+#include "rxe/ecs/world.h"
+#include "rxe/render/core/presets.h"
+#include "rxe/render/core/settings_ini.h"
+#include "rxe/render/util/imgui_theme.h"
 
 #ifndef RX_BUILD_ID
 #define RX_BUILD_ID "unknown"

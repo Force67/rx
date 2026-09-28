@@ -1,15 +1,15 @@
-#include "character/character.h"
+#include "plugins/character/character.h"
 
 #include <math.h>
 #include <stdio.h>
 #include <stdlib.h>
 
-#include "ecs/world.h"
 #include "foundation/math/scalar.h"
-#include "physics/physics_world.h"
-#include "scene/camera.h"
-#include "scene/camera_rig.h"
-#include "scene/components.h"
+#include "rxe/ecs/world.h"
+#include "rxe/physics/physics_world.h"
+#include "rxe/scene/camera.h"
+#include "rxe/scene/camera_rig.h"
+#include "rxe/scene/components.h"
 
 using namespace rx;
 using namespace rx::character;

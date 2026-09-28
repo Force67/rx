@@ -1,8 +1,8 @@
 #ifndef RX_RUNTIME_VIEWER_INPUT_H_
 #define RX_RUNTIME_VIEWER_INPUT_H_
 
-#include "scene/fly_camera.h"
-#include "ui/events/input_actions.h"
+#include "rxe/scene/fly_camera.h"
+#include "rxe/ui/events/input_actions.h"
 
 namespace rx {
 

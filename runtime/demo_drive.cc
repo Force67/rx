@@ -6,21 +6,21 @@
 
 #include <base/option.h>
 
-#include "asset/asset_id.h"
-#include "asset/material.h"
-#include "asset/mesh.h"
-#include "asset/primitives.h"
 #include "base/containers/vector.h"
 #include "base/memory/move.h"
 #include "base/memory/unique_pointer.h"
 #include "base/strings/xstring.h"
-#include "ecs/world.h"
 #include "foundation/logging/log.h"
 #include "foundation/math/scalar.h"
-#include "importers/gltf/gltf_loader.h"
-#include "scene/components.h"
-#include "vehicles/boat_profiles.h"
-#include "vehicles/vehicle_profiles.h"
+#include "plugins/vehicles/boat_profiles.h"
+#include "plugins/vehicles/vehicle_profiles.h"
+#include "rxe/asset/asset_id.h"
+#include "rxe/asset/material.h"
+#include "rxe/asset/mesh.h"
+#include "rxe/asset/primitives.h"
+#include "rxe/ecs/world.h"
+#include "rxe/importers/gltf/gltf_loader.h"
+#include "rxe/scene/components.h"
 
 #if defined(RX_HAS_IMGUI)
 #include <imgui.h>
@@ -28,7 +28,7 @@
 
 // The driving gym: a material heightfield with a road loop, a runway, an ice
 // patch and a lake; a car (CesiumMilkTruck), a boat (procedural hull) and a
-// plane (Cesium_Air) driven through engine/physics; procedural VehicleAudio on
+// plane (Cesium_Air) driven through rxe/physics; procedural VehicleAudio on
 // each; and ToyCar/CarConcept/GroundVehicle parked as PBR showcase pieces. The
 // demo owns its camera + input like the gym and steps the vehicles on the
 // scheduler's kPreSim stage, before the physics world advances.
@@ -52,7 +52,7 @@ base::Option<const char*> StartProfile{"drive.profile", nullptr, "RX_DRIVE_PROFI
 base::Option<const char*> StartBoat{"drive.boat", nullptr, "RX_DRIVE_BOAT"};
 base::Option<float> StartCargo{"drive.cargo", 0.0f, "RX_DRIVE_CARGO"};
 
-// The six handling profiles (engine/physics/vehicle_profiles.h), keyed 1-6.
+// The six handling profiles (rxe/physics/vehicle_profiles.h), keyed 1-6.
 constexpr u32 kProfileCount = 6;
 const char* ProfileName(u32 i) {
   static const char* kNames[kProfileCount] = {"SPORTS",  "MUSCLE", "HATCHBACK",
@@ -85,7 +85,7 @@ u32 ProfileFromName(const char* s, u32 fallback) {
   return fallback;
 }
 
-// The five boat-type profiles (engine/physics/boat_profiles.h), keyed 1-5 while
+// The five boat-type profiles (rxe/physics/boat_profiles.h), keyed 1-5 while
 // the boat is the active vehicle.
 constexpr u32 kBoatProfileCount = 5;
 const char* BoatProfileName(u32 i) {

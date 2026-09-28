@@ -3,12 +3,12 @@
 
 #include <base/containers/vector.h>
 
-#include "ecs/entity.h"
 #include "engine_context.h"
 #include "foundation/math/math.h"
-#include "nav/agent.h"
-#include "nav/navmesh.h"
-#include "render/core/renderer.h"
+#include "plugins/nav/agent.h"
+#include "plugins/nav/navmesh.h"
+#include "rxe/ecs/entity.h"
+#include "rxe/render/core/renderer.h"
 
 namespace rx {
 

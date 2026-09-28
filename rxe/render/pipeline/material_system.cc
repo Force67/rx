@@ -1,0 +1,1313 @@
+#include "rxe/render/pipeline/material_system.h"
+
+#include "rxe/render/pipeline/human_material.h"
+
+#include <math.h>
+#include <string.h>
+
+#include "base/memory/mem_ops.h"
+#include "base/memory/move.h"
+#include "base/memory/unique_pointer.h"
+#include "base/numeric_limits.h"
+#include "foundation/logging/log.h"
+#include "foundation/math/scalar.h"
+#include "foundation/memory/small_vector.h"
+#include "rxe/asset/bc_encode.h"
+
+namespace rx::render {
+namespace {
+
+// Physical skin scattering coefficients derived from artist-authored SkinParams.
+// Shared by the raster uniform Params and the RT MaterialRecord so both paths
+// shade skin identically. See render/shaders/sss_profile.hlsli.
+struct SkinCoeffs {
+  f32 sigma_t[3];
+  f32 sigma_s[3];
+  f32 scatter_color[3];
+  f32 g;
+  f32 ior;
+  f32 perfusion;
+};
+
+SkinCoeffs ComputeSkinCoeffs(const asset::Material::SkinParams& p) {
+  SkinCoeffs c;
+  c.g = p.anisotropy_g;
+  c.ior = p.ior;
+  c.perfusion = rx::Clamp(p.perfusion, 0.0f, 1.0f);
+  const f32 scale = rx::Max(p.scatter_scale, 1e-4f);
+  for (int i = 0; i < 3; ++i) {
+    const f32 col = rx::Clamp(p.scatter_color[i], 0.0f, 1.0f);
+    c.scatter_color[i] = col;
+    // Kulla-Conty 2017: invert the multiple-scattering albedo so the authored
+    // colour is what's seen. Per channel; s is the surface-albedo scale factor.
+    const f32 s = 4.09712f + 4.20863f * col -
+                  ::sqrtf(rx::Max(0.0f, 9.59217f + 41.6808f * col +
+                                              17.7126f * col * col));
+    const f32 s2 = s * s;
+    const f32 alpha = rx::Clamp((1.0f - s2) / (1.0f - c.g * s2), 0.0f, 0.999f);
+    // mfp authored in mm; the renderer's world unit is metres (1 mm = 0.001 m).
+    const f32 mfp_world = rx::Max(p.mfp[i] * scale * 0.001f, 1e-6f);
+    c.sigma_t[i] = 1.0f / mfp_world;
+    c.sigma_s[i] = alpha * c.sigma_t[i];
+  }
+  return c;
+}
+
+struct FormatInfo {
+  Format format = Format::kUnknown;
+  u32 block_bytes = 0;
+  u32 block_dim = 1;  // 1 for uncompressed, 4 for BCn
+};
+
+FormatInfo FormatFor(asset::TextureFormat format, bool srgb) {
+  switch (format) {
+    case asset::TextureFormat::kRgba8:
+      return {srgb ? Format::kRGBA8Srgb : Format::kRGBA8Unorm, 4, 1};
+    case asset::TextureFormat::kBc1:
+      return {srgb ? Format::kBC1RgbSrgb : Format::kBC1RgbUnorm, 8, 4};
+    case asset::TextureFormat::kBc2:
+      return {srgb ? Format::kBC2Srgb : Format::kBC2Unorm, 16, 4};
+    case asset::TextureFormat::kBc3:
+      return {srgb ? Format::kBC3Srgb : Format::kBC3Unorm, 16, 4};
+    case asset::TextureFormat::kBc4:
+      return {Format::kBC4Unorm, 8, 4};
+    case asset::TextureFormat::kBc5:
+      return {Format::kBC5Unorm, 16, 4};
+    case asset::TextureFormat::kBc7:
+      return {srgb ? Format::kBC7Srgb : Format::kBC7Unorm, 16, 4};
+    case asset::TextureFormat::kUnknown:
+      return {};
+  }
+  return {};
+}
+
+u64 MipSizeBytes(const FormatInfo& info, u32 width, u32 height) {
+  u64 blocks_x = (static_cast<u64>(width) + info.block_dim - 1) / info.block_dim;
+  u64 blocks_y = (static_cast<u64>(height) + info.block_dim - 1) / info.block_dim;
+  return blocks_x * blocks_y * info.block_bytes;
+}
+
+u32 FullMipChainLength(u32 width, u32 height) {
+  u32 levels = 1;
+  while (width > 1 || height > 1) {
+    width = rx::Max(1u, width / 2);
+    height = rx::Max(1u, height / 2);
+    ++levels;
+  }
+  return levels;
+}
+
+// Average-opacity bake (AC Shadows vegetation opaque approximation)
+//
+// The bake reads the mip-0 alpha channel of a color texture and reduces it to a
+// small per-cell mean-opacity grid plus a whole-texture mean. It decodes alpha
+// for the formats masked (cutout) content ships in (RGBA8, BC1/BC2/BC3, and
+// the mode-6 BC7 the import-time compressor writes. Anything else (BC4/BC5, a
+// BC7 block in a mode rx does not emit) is treated as opaque: the mesh-side
+// bake then leaves the vegetation stand-in at full size, which is what it did
+// before rather than a guess.
+constexpr u32 kAlphaGridDim = 64;
+// A texture whose mean opacity is at (or above) this needs no per-cell grid:
+// masking it would not shrink the stand-in, so we keep only the scalar mean.
+constexpr f32 kOpaqueMeanThreshold = 0.995f;
+
+// BC4-style 8-entry interpolated alpha palette from two endpoints.
+void Bc4AlphaPalette(u8 a0, u8 a1, u32 out[8]) {
+  out[0] = a0;
+  out[1] = a1;
+  if (a0 > a1) {
+    for (u32 i = 2; i < 8; ++i) out[i] = ((8 - i) * a0 + (i - 1) * a1) / 7;
+  } else {
+    for (u32 i = 2; i < 6; ++i) out[i] = ((6 - i) * a0 + (i - 1) * a1) / 5;
+    out[6] = 0;
+    out[7] = 255;
+  }
+}
+
+// Decodes the mip-0 alpha into an AlphaCoverage grid. Returns false (leaving
+// `out` at its opaque default) for formats without a CPU alpha decoder.
+bool DecodeAlphaGrid(const asset::Texture& tex, MaterialSystem::AlphaCoverage& out) {
+  using asset::TextureFormat;
+  const u32 w = tex.width, h = tex.height;
+  if (w == 0 || h == 0 || tex.data.empty()) return false;
+  const u8* src = tex.data.data();
+  const u32 gw = rx::Min(w, kAlphaGridDim);
+  const u32 gh = rx::Min(h, kAlphaGridDim);
+  base::Vector<u64> sum(static_cast<size_t>(gw) * gh);  // value-initialized to 0
+  base::Vector<u32> cnt(static_cast<size_t>(gw) * gh);
+  auto add = [&](u32 x, u32 y, u32 a) {
+    u32 cx = rx::Min(gw - 1, x * gw / w);
+    u32 cy = rx::Min(gh - 1, y * gh / h);
+    size_t c = static_cast<size_t>(cy) * gw + cx;
+    sum[c] += a;
+    ++cnt[c];
+  };
+
+  // The callback fills a whole block's 16 alphas, rather than answering one
+  // texel at a time. Per texel is the obvious shape and it is a trap for BC7,
+  // whose only way to answer for one texel is to decode all sixteen: the block
+  // then gets decoded sixteen times and fifteen of the results thrown away.
+  // Measured at 2048x2048, that is 0.70 s against 0.046 s, and it is paid on
+  // every load of every colour texture whether the compressor's disk cache hit
+  // or not. The bit-twiddling formats do not care which shape this is.
+  auto decode_blocks = [&](u32 block_bytes, auto block_alpha) -> bool {
+    const u32 bx_count = (w + 3) / 4, by_count = (h + 3) / 4;
+    if (static_cast<u64>(bx_count) * by_count * block_bytes > tex.data.size()) return false;
+    u32 alpha[16];
+    for (u32 by = 0; by < by_count; ++by) {
+      for (u32 bx = 0; bx < bx_count; ++bx) {
+        const u8* blk = src + (static_cast<u64>(by) * bx_count + bx) * block_bytes;
+        block_alpha(blk, alpha);
+        for (u32 ty = 0; ty < 4; ++ty) {
+          for (u32 tx = 0; tx < 4; ++tx) {
+            u32 px = bx * 4 + tx, py = by * 4 + ty;
+            if (px >= w || py >= h) continue;
+            add(px, py, alpha[ty * 4 + tx]);
+          }
+        }
+      }
+    }
+    return true;
+  };
+
+  bool decoded = false;
+  switch (tex.format) {
+    case TextureFormat::kRgba8: {
+      if (static_cast<u64>(w) * h * 4 > tex.data.size()) return false;
+      for (u32 y = 0; y < h; ++y)
+        for (u32 x = 0; x < w; ++x) add(x, y, src[(static_cast<u64>(y) * w + x) * 4 + 3]);
+      decoded = true;
+      break;
+    }
+    case TextureFormat::kBc1: {
+      decoded = decode_blocks(8, [](const u8* blk, u32* alpha) {
+        u32 c0 = blk[0] | (blk[1] << 8), c1 = blk[2] | (blk[3] << 8);
+        u32 idx = blk[4] | (blk[5] << 8) | (blk[6] << 16) | (blk[7] << 24);
+        for (u32 t = 0; t < 16; ++t) {
+          // 1-bit punch-through, and only in the c0 <= c1 encoding.
+          alpha[t] = (c0 > c1 || ((idx >> (t * 2)) & 0x3u) != 0x3u) ? 255u : 0u;
+        }
+      });
+      break;
+    }
+    case TextureFormat::kBc2: {
+      decoded = decode_blocks(16, [](const u8* blk, u32* alpha) {
+        for (u32 t = 0; t < 16; ++t) {
+          u32 nib = (blk[t / 2] >> ((t & 1u) * 4)) & 0xfu;
+          alpha[t] = nib * 17u;  // 4-bit explicit alpha
+        }
+      });
+      break;
+    }
+    case TextureFormat::kBc3: {
+      decoded = decode_blocks(16, [](const u8* blk, u32* alpha) {
+        u32 pal[8];
+        Bc4AlphaPalette(blk[0], blk[1], pal);
+        u64 bits = 0;
+        for (u32 i = 0; i < 6; ++i) bits |= static_cast<u64>(blk[2 + i]) << (i * 8);
+        for (u32 t = 0; t < 16; ++t) alpha[t] = pal[(bits >> (t * 3)) & 0x7u];
+      });
+      break;
+    }
+    case TextureFormat::kBc7: {
+      decoded = decode_blocks(16, [](const u8* blk, u32* alpha) {
+        // Only the mode rx's own encoder emits decodes here; a third-party BC7
+        // texture in another mode falls through to the opaque stand-in, which
+        // is what this bake did for every BC7 texture before.
+        u8 texels[64];
+        if (!asset::DecodeBc7Block(blk, texels)) {
+          for (u32 t = 0; t < 16; ++t) alpha[t] = 255u;
+          return;
+        }
+        for (u32 t = 0; t < 16; ++t) alpha[t] = texels[t * 4 + 3];
+      });
+      break;
+    }
+    default:
+      return false;  // BC4 / BC5 / unknown: no alpha channel to read
+  }
+  if (!decoded) return false;
+
+  out.width = gw;
+  out.height = gh;
+  out.alpha.resize(static_cast<size_t>(gw) * gh);
+  u64 total = 0, total_cnt = 0;
+  for (size_t c = 0; c < out.alpha.size(); ++c) {
+    u32 mean = cnt[c] ? static_cast<u32>(sum[c] / cnt[c]) : 255;
+    out.alpha[c] = static_cast<u8>(mean);
+    total += sum[c];
+    total_cnt += cnt[c];
+  }
+  out.mean = total_cnt ? static_cast<f32>(total) / (static_cast<f32>(total_cnt) * 255.0f) : 1.0f;
+  return true;
+}
+
+}  // namespace
+
+base::UniquePointer<MaterialSystem> MaterialSystem::Create(Device& device,
+                                                       BindlessRegistry* registry) {
+  auto system = base::UniquePointer<MaterialSystem>(new MaterialSystem(device));
+  system->registry_ = registry;
+
+  // Trilinear repeat sampler, anisotropic when the device supports it. Cached
+  // by the device, never destroyed here.
+  SamplerDesc sampler_desc{};
+  if (device.caps().max_anisotropy > 1.0f) {
+    sampler_desc.max_anisotropy = rx::Min(16.0f, device.caps().max_anisotropy);
+  }
+  system->sampler_ = device.GetSampler(sampler_desc);
+
+  system->set_layout_ = device.CreateBindingLayout({
+      // Vertex too: the wind sway in mesh.vs reads the material flags.
+      .stages = kShaderStageVertex | kShaderStageFragment,
+      .slots = {{0, BindingType::kUniformBuffer},
+                {1, BindingType::kCombinedTextureSampler},
+                {2, BindingType::kCombinedTextureSampler},
+                {3, BindingType::kCombinedTextureSampler},
+                {4, BindingType::kCombinedTextureSampler},
+                {5, BindingType::kCombinedTextureSampler},
+                {6, BindingType::kCombinedTextureSampler},   // metallic (separate)
+                {7, BindingType::kCombinedTextureSampler},    // occlusion
+                {8, BindingType::kCombinedTextureSampler},    // env mask
+                {9, BindingType::kCombinedTextureSampler},    // specular normal (Ns)
+                {10, BindingType::kCombinedTextureSampler},   // local thickness
+                {11, BindingType::kCombinedTextureSampler},   // residual ambient
+                {12, BindingType::kCombinedTextureSampler}},  // residual directional
+  });
+  if (!system->set_layout_) return nullptr;
+
+  if (!system->CreateDefaults()) return nullptr;
+  return system;
+}
+
+bool MaterialSystem::CreateDefaults() {
+  auto make_pixel = [&](u8 r, u8 g, u8 b, u8 a, bool srgb) {
+    asset::Texture texture;
+    texture.format = asset::TextureFormat::kRgba8;
+    texture.width = 1;
+    texture.height = 1;
+    texture.is_srgb = srgb;
+    texture.data.resize(4);
+    texture.data[0] = r;
+    texture.data[1] = g;
+    texture.data[2] = b;
+    texture.data[3] = a;
+    return texture;
+  };
+
+  // Direct uploads, bypassing the hash map: id 0 would collide.
+  asset::Texture white = make_pixel(255, 255, 255, 255, true);
+  asset::Texture normal = make_pixel(128, 128, 255, 255, false);
+  // Zero residual: rgb 0 with validity 0, so an unfitted character material
+  // adds nothing rather than a constant bias.
+  asset::Texture black = make_pixel(0, 0, 0, 0, false);
+  white_ = UploadTextureImage(white);
+  flat_normal_ = UploadTextureImage(normal);
+  black_ = UploadTextureImage(black);
+  if (!white_ || !flat_normal_ || !black_) return false;
+
+  asset::Material default_material;
+  default_material.base_color_factor[0] = 0.6f;
+  default_material.base_color_factor[1] = 0.6f;
+  default_material.base_color_factor[2] = 0.65f;
+  default_material.roughness_factor = 0.8f;
+  if (registry_) {
+    BindlessRegistry::MaterialRecord record;
+    base::MemCopy(record.base_color_factor, default_material.base_color_factor, sizeof(f32) * 4);
+    registry_->RegisterMaterial(record);  // index 0, the fallback
+  }
+  default_set_ = AllocateSet();
+  if (!default_set_) return false;
+  u64 map_keys[12];
+  return WriteSet(default_set_, static_cast<u32>(param_buffers_.size()) - 1,
+                  sets_in_last_pool_ - 1, default_material, 0, map_keys);
+}
+
+GpuImage MaterialSystem::UploadTextureImage(const asset::Texture& texture, u32 first_mip) {
+  FormatInfo info = FormatFor(texture.format, texture.is_srgb);
+  if (info.format == Format::kUnknown || texture.width == 0 || texture.height == 0) {
+    RX_WARN("texture upload skipped, unsupported format");
+    return {};
+  }
+  if (texture.array_layers != 1 || texture.is_cubemap) {
+    RX_WARN("array/cubemap textures not supported yet");
+    return {};
+  }
+  if (first_mip >= texture.mip_count) return {};
+
+  // Uncompressed single-mip sources get a generated chain; BCn ships its
+  // mips in the asset and cannot be blitted. Partial (streamed) uploads only
+  // happen on baked chains, never through the generate path.
+  bool generate_mips = texture.mip_count == 1 && info.block_dim == 1;
+  u32 top_width = rx::Max(1u, texture.width >> first_mip);
+  u32 top_height = rx::Max(1u, texture.height >> first_mip);
+  u32 mip_count = generate_mips ? FullMipChainLength(texture.width, texture.height)
+                                : texture.mip_count - first_mip;
+  u32 upload_mips = generate_mips ? 1 : mip_count;
+
+  // Skip past the source mips above the resident range.
+  u64 skip = 0;
+  {
+    u32 width = texture.width;
+    u32 height = texture.height;
+    for (u32 mip = 0; mip < first_mip; ++mip) {
+      skip += MipSizeBytes(info, width, height);
+      width = rx::Max(1u, width / 2);
+      height = rx::Max(1u, height / 2);
+    }
+  }
+  u64 upload_bytes = 0;
+  {
+    u32 width = top_width;
+    u32 height = top_height;
+    for (u32 mip = 0; mip < upload_mips; ++mip) {
+      upload_bytes += MipSizeBytes(info, width, height);
+      width = rx::Max(1u, width / 2);
+      height = rx::Max(1u, height / 2);
+    }
+  }
+  // upload_bytes is always positive here: every mip is at least one block of a
+  // known format, and upload_mips is at least 1.
+  if (skip > texture.data.size() || upload_bytes > texture.data.size() - skip) {
+    RX_WARN("texture upload skipped, mip data is truncated ({} mips from {} need {} bytes, "
+            "{} available)",
+            upload_mips, first_mip, upload_bytes, texture.data.size());
+    return {};
+  }
+
+  TextureUsageFlags usage = kTextureUsageSampled | kTextureUsageTransferDst;
+  if (generate_mips) usage |= kTextureUsageTransferSrc;
+  GpuImage image =
+      device_.CreateImage2D(info.format, {top_width, top_height}, usage, mip_count);
+  if (!image) return {};
+  // Inside an upload batch the copy is deferred to the flush, so the shared
+  // staging pool would be overwritten by the next texture before it runs; use a
+  // fresh buffer parked with the batch instead. Outside a batch the pooled
+  // staging is fine (ImmediateSubmit completes before the next call reuses it).
+  const bool batched = device_.UploadBatchActive();
+  GpuBuffer fresh{};
+  GpuBuffer* staging;
+  if (batched) {
+    fresh = device_.CreateBuffer(upload_bytes, kBufferUsageTransferSrc, true);
+    if (!fresh.mapped) {
+      if (fresh) device_.DestroyBuffer(fresh);
+      device_.DestroyImage(image);
+      return {};
+    }
+    staging = &fresh;
+  } else {
+    staging = AcquireStaging(upload_bytes);
+    if (!staging) {
+      device_.DestroyImage(image);
+      return {};
+    }
+  }
+  base::MemCopy(staging->mapped, texture.data.data() + skip, upload_bytes);
+  device_.FlushBuffer(*staging, 0, upload_bytes);
+
+  device_.RecordUpload([&](CommandList& cmd) {
+    cmd.Barrier(Transition(image, ResourceState::kUndefined, ResourceState::kCopyDst));
+
+    mem::SmallVector<BufferTextureCopy, 16> regions;  // one per mip
+    u64 offset = 0;
+    u32 width = top_width;
+    u32 height = top_height;
+    for (u32 mip = 0; mip < upload_mips; ++mip) {
+      regions.push_back({.buffer_offset = offset, .mip = mip, .extent = {width, height}});
+      offset += MipSizeBytes(info, width, height);
+      width = rx::Max(1u, width / 2);
+      height = rx::Max(1u, height / 2);
+    }
+    cmd.CopyBufferToTexture(*staging, image, base::Span(regions.data(), regions.size()));
+
+    if (generate_mips && mip_count > 1) {
+      u32 src_width = texture.width;
+      u32 src_height = texture.height;
+      for (u32 mip = 1; mip < mip_count; ++mip) {
+        cmd.Barrier({.texture = image.handle,
+                     .before = ResourceState::kCopyDst,
+                     .after = ResourceState::kCopySrc,
+                     .base_mip = mip - 1,
+                     .mip_count = 1});
+        u32 dst_width = rx::Max(1u, src_width / 2);
+        u32 dst_height = rx::Max(1u, src_height / 2);
+        cmd.BlitMip(image, mip - 1, {src_width, src_height}, mip, {dst_width, dst_height});
+        src_width = dst_width;
+        src_height = dst_height;
+      }
+      // Mips 0..n-2 sit in kCopySrc after feeding the next level, the last one
+      // still in kCopyDst.
+      TextureBarrier finals[2] = {
+          {.texture = image.handle,
+           .before = ResourceState::kCopySrc,
+           .after = ResourceState::kShaderReadAll,
+           .base_mip = 0,
+           .mip_count = mip_count - 1},
+          {.texture = image.handle,
+           .before = ResourceState::kCopyDst,
+           .after = ResourceState::kShaderReadAll,
+           .base_mip = mip_count - 1,
+           .mip_count = 1}};
+      cmd.TextureBarriers(base::Span(finals, 2));
+    } else {
+      cmd.Barrier({.texture = image.handle,
+                   .before = ResourceState::kCopyDst,
+                   .after = ResourceState::kShaderReadAll});
+    }
+  });
+  // The batch reads this staging at flush, so hand it over to free then; the
+  // pooled path already completed synchronously and keeps its buffer.
+  if (batched) device_.ParkBatchStaging(fresh);
+  return image;
+}
+
+GpuBuffer* MaterialSystem::AcquireStaging(u64 bytes) {
+  if (bytes == 0) return nullptr;
+  if (bytes > staging_bytes_) {
+    // Round up so a stream of slightly-growing textures re-creates the buffer
+    // a handful of times instead of once per texture.
+    constexpr u64 kGranule = 4u << 20;
+    if (bytes > base::MinMax<u64>::max() - (kGranule - 1)) return nullptr;
+    const u64 grown_bytes = (bytes + kGranule - 1) / kGranule * kGranule;
+    GpuBuffer grown = device_.CreateBuffer(grown_bytes, kBufferUsageTransferSrc, true);
+    if (!grown.mapped) {
+      if (grown) device_.DestroyBuffer(grown);
+      return nullptr;
+    }
+    if (staging_bytes_) device_.DestroyBuffer(staging_);
+    staging_ = grown;
+    staging_bytes_ = grown_bytes;
+  }
+  return staging_.mapped ? &staging_ : nullptr;
+}
+
+u64 MaterialSystem::BytesForMips(const asset::Texture& texture, u32 first_mip) const {
+  FormatInfo info = FormatFor(texture.format, texture.is_srgb);
+  u64 bytes = 0;
+  u32 width = texture.width;
+  u32 height = texture.height;
+  for (u32 mip = 0; mip < texture.mip_count; ++mip) {
+    if (mip >= first_mip) bytes += MipSizeBytes(info, width, height);
+    width = rx::Max(1u, width / 2);
+    height = rx::Max(1u, height / 2);
+  }
+  return bytes;
+}
+
+bool MaterialSystem::UploadTexture(const asset::Texture& texture, u64 id_salt) {
+  u64 key = texture.id.hash ^ id_salt;
+  if (textures_.find(key)) return true;
+  GpuImage image = UploadTextureImage(texture);
+  if (!image) return false;
+
+  auto record = base::MakeUnique<TextureRecord>();
+  record->key = key;
+  record->image = image;
+  record->format = texture.format;
+  record->total_mips = texture.mip_count;
+  FormatInfo info = FormatFor(texture.format, texture.is_srgb);
+  bool baked = info.block_dim == 4 && texture.mip_count > 1;
+  // Generated chains add ~1/3 on top of the source mip 0.
+  record->full_bytes = baked ? texture.data.size() : texture.data.size() * 4 / 3;
+  record->resident_bytes = record->full_bytes;
+  if (baked) {
+    u32 dim = rx::Max(texture.width, texture.height);
+    u32 tail = 0;
+    while (tail + 1 < texture.mip_count && (dim >> tail) > kTailMaxDim) ++tail;
+    record->tail_first_mip = tail;
+    record->streamable = tail > 0;
+    if (record->streamable) record->source = texture;  // retained for re-promotes
+  }
+  // Fresh uploads count as hot so an over-budget load burst can't demote a
+  // texture before the material/mesh referencing it even arrives.
+  record->last_used = current_frame_;
+  if (registry_ && texture.is_srgb) {
+    // Only color textures matter for ray hit shading.
+    record->bindless = registry_->RegisterTexture(image.view);
+    // Bake the average-opacity map for the vegetation opaque approximation.
+    // Only color textures carry a meaningful cutout alpha, and only actually
+    // transparent ones are worth a map: a masked mesh with no entry falls back
+    // to a full-size (opacity 1) stand-in, i.e. today's behavior.
+    AlphaCoverage cov;
+    if (DecodeAlphaGrid(texture, cov) && cov.mean < kOpaqueMeanThreshold) {
+      texture_alpha_.insert(key, base::move(cov));
+    }
+  }
+  resident_bytes_ += record->resident_bytes;
+  u32 index = static_cast<u32>(texture_records_.size());
+  texture_records_.push_back(base::move(record));
+  textures_.insert(key, index);
+  return true;
+}
+
+bool MaterialSystem::AddPool() {
+  GpuBuffer params = device_.CreateBuffer(static_cast<u64>(kParamStride) * kMaterialsPerPool,
+                                          kBufferUsageUniform, true);
+  if (!params.mapped) return false;
+  param_buffers_.push_back(params);
+  sets_in_last_pool_ = 0;
+  return true;
+}
+
+BindingSetHandle MaterialSystem::AllocateSet() {
+  if (param_buffers_.empty() || sets_in_last_pool_ == kMaterialsPerPool) {
+    if (!AddPool()) return {};
+  }
+  BindingSetHandle set = device_.CreateBindingSet(set_layout_);
+  if (!set) return {};
+  ++sets_in_last_pool_;
+  return set;
+}
+
+MaterialSystem::TextureRecord* MaterialSystem::record_for(u64 hash) {
+  if (hash == 0) return nullptr;
+  const u32* index = textures_.find(hash);
+  return index ? texture_records_[*index].Get_UseOnlyIfYouKnowWhatYouareDoing() : nullptr;
+}
+
+const GpuImage* MaterialSystem::texture_or(u64 hash, const GpuImage& fallback) const {
+  if (hash != 0) {
+    if (const u32* index = textures_.find(hash)) return &texture_records_[*index]->image;
+  }
+  return &fallback;
+}
+
+u32 MaterialSystem::EnsureBindless(u64 key) {
+  TextureRecord* record = record_for(key);
+  if (!record || !registry_) return BindlessRegistry::kInvalidIndex;
+  if (record->bindless == BindlessRegistry::kInvalidIndex) {
+    record->bindless = registry_->RegisterTexture(record->image.view);
+  }
+  return record->bindless;
+}
+
+void MaterialSystem::WriteSetBindings(BindingSetHandle set, const MaterialRuntime& runtime) {
+  const GpuImage* maps[12] = {
+      texture_or(runtime.map_keys[0], white_),
+      texture_or(runtime.map_keys[1], flat_normal_),
+      texture_or(runtime.map_keys[2], white_),
+      texture_or(runtime.map_keys[3], white_),
+      texture_or(runtime.map_keys[4], white_),  // white = surface level
+      texture_or(runtime.map_keys[5], white_),  // white metallic = mr map alone
+      texture_or(runtime.map_keys[6], white_),  // white occlusion = no AO
+      texture_or(runtime.map_keys[7], white_),  // white env mask = reflect everywhere
+      texture_or(runtime.map_keys[8], flat_normal_),  // Ns absent = Ns == Nd
+      texture_or(runtime.map_keys[9], white_),        // white thickness = the material scale
+      texture_or(runtime.map_keys[10], black_),       // black residual = analytic only
+      texture_or(runtime.map_keys[11], black_),
+  };
+  GpuBuffer& buffer = param_buffers_[runtime.pool];
+  u64 offset = static_cast<u64>(runtime.param_index) * kParamStride;
+  device_.UpdateBindingSet(set, {Bind::Uniform(0, buffer, offset, sizeof(Params)),
+                                 Bind::Combined(1, maps[0]->view, sampler_),
+                                 Bind::Combined(2, maps[1]->view, sampler_),
+                                 Bind::Combined(3, maps[2]->view, sampler_),
+                                 Bind::Combined(4, maps[3]->view, sampler_),
+                                 Bind::Combined(5, maps[4]->view, sampler_),
+                                 Bind::Combined(6, maps[5]->view, sampler_),
+                                 Bind::Combined(7, maps[6]->view, sampler_),
+                                 Bind::Combined(8, maps[7]->view, sampler_),
+                                 Bind::Combined(9, maps[8]->view, sampler_),
+                                 Bind::Combined(10, maps[9]->view, sampler_),
+                                 Bind::Combined(11, maps[10]->view, sampler_),
+                                 Bind::Combined(12, maps[11]->view, sampler_)});
+}
+
+// The uniform block + the texture keys a material resolves to. Split out of
+// WriteSet so the live-tuning path can rewrite the numbers without touching a
+// binding set that may be pending on the GPU. Resolving cannot fail - every
+// input is already in memory - so this returns void rather than a status
+// nobody could act on.
+void MaterialSystem::BuildParams(const asset::Material& material, u64 id_salt, Params& params,
+                                 u64 out_map_keys[12]) {
+  base::MemCopy(params.base_color_factor, material.base_color_factor, sizeof(f32) * 4);
+  base::MemCopy(params.emissive_factor, material.emissive_factor, sizeof(f32) * 3);
+  params.metallic_factor = material.metallic_factor;
+  params.roughness_factor = material.roughness_factor;
+  params.ao_strength = material.ao_strength;
+  params.alpha_cutoff = material.alpha_cutoff;
+  params.clearcoat = material.clearcoat;
+  params.clearcoat_roughness = material.clearcoat_roughness;
+  params.anisotropy = material.anisotropy;
+  params.ior = material.ior;
+  base::MemCopy(params.sheen_color, material.sheen_color, sizeof(f32) * 3);
+  params.sheen_roughness = material.sheen_roughness;
+  base::MemCopy(params.subsurface_color, material.subsurface_color, sizeof(f32) * 3);
+  params.subsurface = material.subsurface;
+  params.iridescence = material.iridescence;
+  params.iridescence_thickness = material.iridescence_thickness;
+  params.transmission = material.transmission;
+  base::MemCopy(params.openpbr_specular_color, material.openpbr_specular_color, sizeof(f32) * 3);
+  params.specular_weight = material.specular_weight;
+  base::MemCopy(params.coat_color, material.coat_color, sizeof(f32) * 3);
+  params.coat_ior = material.coat_ior;
+  params.base_diffuse_roughness = material.base_diffuse_roughness;
+  params.coat_darkening = material.coat_darkening;
+  params.thin_film_ior = material.thin_film_ior;
+  params.uv_scroll[0] = material.uv_scroll_u;
+  params.uv_scroll[1] = material.uv_scroll_v;
+  params.emissive_pulse[0] = material.emissive_pulse[0];
+  params.emissive_pulse[1] = material.emissive_pulse[1];
+  base::MemCopy(params.specular_color, material.specular_color, sizeof(f32) * 3);
+  params.specular_strength = material.specular_strength;
+  params.env_reflect = material.env_reflect;
+  params.soft_lighting = material.soft_lighting;
+  params.rim_lighting = material.rim_lighting;
+  params.back_lighting = material.back_lighting;
+  // Effect-shader (unlit vfx) geometry: torch/campfire flames, glow planes,
+  // mist. base_color is the source texture, base_color_factor the emissive
+  // colour * multiple, and the unlit shader branch reads these flags/params.
+  if (material.effect) {
+    params.flags |= kFlagEffect;
+    if (material.effect_additive) params.flags |= kFlagEffectAdditive;
+    if (material.effect_grayscale_color) params.flags |= kFlagEffectGrayColor;
+    if (material.effect_grayscale_alpha) params.flags |= kFlagEffectGrayAlpha;
+    if (material.effect_falloff) params.flags |= kFlagEffectFalloff;
+    for (int k = 0; k < 4; ++k) params.effect_falloff[k] = material.effect_falloff_params[k];
+  }
+  // Blend materials draw without the cutout test; mask materials cut.
+  if (material.alpha_mode == asset::AlphaMode::kMask) params.flags |= kFlagAlphaMask;
+  if (material.wind) params.flags |= kFlagWind;
+  if (material.is_water) params.flags |= kFlagWater;
+  if (material.skin) {
+    params.flags |= kFlagSkin;
+    const SkinCoeffs c = ComputeSkinCoeffs(material.skin_params);
+    base::MemCopy(params.sss_sigma_t, c.sigma_t, sizeof(f32) * 3);
+    base::MemCopy(params.sss_sigma_s, c.sigma_s, sizeof(f32) * 3);
+    base::MemCopy(params.sss_scatter_color, c.scatter_color, sizeof(f32) * 3);
+    params.sss_anisotropy_g = c.g;
+    params.sss_perfusion = c.perfusion;
+    params.sss_ior = c.ior;
+  }
+  // Character surface model. Resolving through HumanResolve keeps ONE mapping
+  // from authored asset params to the GPU block, shared with the look-dev tool
+  // and the CPU BRDF mirror, so a knob cannot mean two things.
+  if (material.human) {
+    params.flags |= kFlagHuman;
+    const HumanSurfaceParameters h = HumanResolve(material.human_params);
+    params.human_diffuse_fresnel[0] = h.diffuse_fresnel_peak;
+    params.human_diffuse_fresnel[1] = h.diffuse_fresnel_falloff;
+    params.human_diffuse_fresnel[2] = h.diffuse_fresnel_tangent_falloff;
+    params.human_diffuse_fresnel[3] = h.retroreflection_peak;
+    params.human_retro[0] = h.retroreflection_falloff;
+    params.human_retro[1] = h.retroreflection_tangent_falloff;
+    params.human_retro[2] = h.smooth_terminator_amount;
+    params.human_retro[3] = h.smooth_terminator_length;
+    params.human_spec[0] = h.specular_fresnel_falloff;
+    params.human_spec[1] = h.secondary_roughness_scale;
+    params.human_spec[2] = h.secondary_specular_weight;
+    params.human_spec[3] = h.mean_free_path;
+    params.human_transport[0] = h.subsurface_scale;
+    params.human_transport[1] = h.transmission;
+    params.human_transport[2] = h.extinction_scale;
+    params.human_transport[3] = h.corneal_wetness;
+    base::MemCopy(params.human_tint, h.transmission_tint, sizeof(f32) * 3);
+    params.human_tint[3] = h.residual_weight;
+    params.human_layer[0] = h.cavity_occlusion;
+    params.human_layer[1] = h.specular_normal_strength;
+    params.human_layer[2] = h.thickness_scale;
+    params.human_layer[3] = static_cast<f32>(static_cast<u32>(h.region));
+    params.human_eye0[0] = h.iris_depth;
+    params.human_eye0[1] = h.iris_radius;
+    params.human_eye0[2] = h.pupil_scale;
+    params.human_eye0[3] = h.limbal_ring_size;
+    params.human_eye1[0] = h.limbal_ring_power;
+    params.human_eye1[1] = h.cornea_ior;
+    params.human_eye1[2] = h.iris_shadow_depth;
+    params.human_eye1[3] = h.light_shape_response;
+    // The eye branch costs a refraction and two derivative fetches and is
+    // meaningless on a cheek, so only the eye regions reach it.
+    if (h.region == asset::Material::HumanRegion::kCornea ||
+        h.region == asset::Material::HumanRegion::kIris ||
+        h.region == asset::Material::HumanRegion::kSclera) {
+      params.flags |= kFlagEye;
+    }
+    // Every optional map only flags when it actually uploaded, so a missing one
+    // falls back to the neutral default instead of sampling a wrong texture.
+    if (material.human_params.specular_normal &&
+        textures_.find(material.human_params.specular_normal.hash ^ id_salt)) {
+      params.flags |= kFlagSpecularNormal;
+    }
+    if (material.human_params.thickness_map &&
+        textures_.find(material.human_params.thickness_map.hash ^ id_salt)) {
+      params.flags |= kFlagThicknessMap;
+    }
+    if (h.residual_weight > 0.0f && material.human_params.residual_ambient &&
+        textures_.find(material.human_params.residual_ambient.hash ^ id_salt) &&
+        material.human_params.residual_directional &&
+        textures_.find(material.human_params.residual_directional.hash ^ id_salt)) {
+      params.flags |= kFlagResidual;
+    }
+  }
+  if (material.hair) {
+    params.flags |= kFlagHair;
+    const asset::Material::HairParams& h = material.hair_params;
+    base::MemCopy(params.hair0, h.sigma_a, sizeof(f32) * 3);
+    params.hair0[3] = h.beta_m;
+    params.hair1[0] = h.beta_n;
+    params.hair1[1] = h.alpha;
+    params.hair1[2] = h.eta;
+    params.hair1[3] = h.scatter_scale;
+    params.hair2[0] = h.color_reference_depth;
+    params.hair2[1] = h.assumed_depth;
+    params.hair2[2] = h.color_from_albedo ? 1.0f : 0.0f;
+  }
+  if (material.virtual_albedo) params.flags |= kFlagVirtualAlbedo;
+  // Terrain reuses the normal slot as a land layer, so the normal-map path must
+  // stay off; the shader branches on kFlagTerrain instead.
+  if (material.is_terrain) {
+    params.flags |= kFlagTerrain;
+  } else if (const u32* normal_index =
+                 material.normal ? textures_.find(material.normal.hash ^ id_salt) : nullptr) {
+    params.flags |= kFlagHasNormalMap;
+    if (material.normal_model_space) params.flags |= kFlagNormalModelSpace;
+    // The mask lives in the normal map's alpha, so it only exists with one.
+    if (material.specular_mask_in_normal_alpha) params.flags |= kFlagSpecularMask;
+    if (texture_records_[*normal_index]->format == asset::TextureFormat::kBc5) {
+      // BC5 dropped z and alpha. Reconstructing z is exact for a tangent-space
+      // normal and wrong for an object-space one (whose z is signed), and the
+      // alpha is simply gone. The importer only ever assigns
+      // TextureRole::kNormalTangent, so reaching either of these means a
+      // caller compressed a map that needed more than two channels.
+      if (material.normal_model_space || material.specular_mask_in_normal_alpha) {
+        RX_WARN("material {:x}: normal map is BC5 but the material needs its {} channel; "
+                "compress that map as data, not as a tangent-space normal",
+                material.id.hash, material.normal_model_space ? "signed z" : "alpha");
+      }
+      if (!material.normal_model_space) params.flags |= kFlagNormalReconstructZ;
+    }
+  }
+  // Env mask: only flagged when its map uploaded, so the reflection falls back
+  // to the specular mask instead of the white default reflecting everywhere.
+  if (material.env_mask && textures_.find(material.env_mask.hash ^ id_salt)) {
+    params.flags |= kFlagEnvMask;
+  }
+  if (material.height && textures_.find(material.height.hash ^ id_salt)) {
+    params.flags |= kFlagHasHeightMap;
+    params.height_scale = material.height_scale;
+    // Silhouette-aware march carves the object outline; only meaningful with a
+    // height map, so it nests under the same guard.
+    if (material.silhouette_pom) {
+      params.flags |= kFlagSilhouettePom;
+      params.silhouette_curvature = material.silhouette_curvature;
+    }
+  }
+  // Separate metallic / occlusion maps (engines that don't ship packed ORM,
+  // e.g. Starfield). kFlagSeparateMetallic tells the shader the mr slot is a
+  // roughness-only map (read .g, never .b for metallic); metallic then comes
+  // from metallic_map.r when it uploaded, else the scalar metallic_factor. The
+  // separate flag is set on request even without the map so a missing metallic
+  // texture reads as a plain dielectric (factor 0) instead of the roughness
+  // map's blue channel. Occlusion only flags when its map is actually present
+  // (white default would wrongly darken nothing / everything otherwise).
+  if (material.separate_metallic) params.flags |= kFlagSeparateMetallic;
+  if (material.occlusion_map && textures_.find(material.occlusion_map.hash ^ id_salt)) {
+    params.flags |= kFlagHasOcclusion;
+  }
+  // Terrain splat v2: resolve the palette to bindless indices. The indices
+  // live in this uniform, so the layers are pinned - a streamed slot move
+  // would leave the params stale. Any unresolvable layer keeps the whole
+  // material on the legacy 3-layer path (flag unset).
+  if (material.is_terrain && material.terrain_layer_count > 0 && registry_) {
+    u32 count = rx::Min(material.terrain_layer_count, 8u);
+    bool complete = true;
+    for (u32 s = 0; s < count && complete; ++s) {
+      u64 albedo_key = material.terrain_layers[s].hash ^ id_salt;
+      Pin(albedo_key);
+      u32 albedo = EnsureBindless(albedo_key);
+      if (albedo == BindlessRegistry::kInvalidIndex) {
+        complete = false;
+        break;
+      }
+      params.terrain_albedo[s] = albedo;
+      if (material.terrain_layer_normals[s]) {
+        u64 normal_key = material.terrain_layer_normals[s].hash ^ id_salt;
+        Pin(normal_key);
+        params.terrain_normal[s] = EnsureBindless(normal_key);
+      }
+    }
+    if (complete) {
+      params.flags |= kFlagTerrainV2;
+    } else {
+      RX_WARN("terrain v2 material {:x}: palette layer missing from bindless, using 3-layer path",
+               material.id.hash);
+    }
+  }
+
+  out_map_keys[0] = material.base_color.hash ^ id_salt;
+  out_map_keys[1] = material.normal.hash ^ id_salt;
+  out_map_keys[2] = material.metallic_roughness.hash ^ id_salt;
+  out_map_keys[3] = material.emissive.hash ^ id_salt;
+  out_map_keys[4] = material.height.hash ^ id_salt;
+  out_map_keys[5] = material.metallic_map.hash ^ id_salt;
+  out_map_keys[6] = material.occlusion_map.hash ^ id_salt;
+  out_map_keys[7] = material.env_mask.hash ^ id_salt;
+  out_map_keys[8] = material.human_params.specular_normal.hash ^ id_salt;
+  out_map_keys[9] = material.human_params.thickness_map.hash ^ id_salt;
+  out_map_keys[10] = material.human_params.residual_ambient.hash ^ id_salt;
+  out_map_keys[11] = material.human_params.residual_directional.hash ^ id_salt;
+}
+
+bool MaterialSystem::WriteSet(BindingSetHandle set, u32 pool, u32 param_index,
+                              const asset::Material& material, u64 id_salt,
+                              u64 out_map_keys[12]) {
+  Params params;
+  BuildParams(material, id_salt, params, out_map_keys);
+
+  GpuBuffer& buffer = param_buffers_[pool];
+  u64 offset = static_cast<u64>(param_index) * kParamStride;
+  base::MemCopy(static_cast<u8*>(buffer.mapped) + offset, &params, sizeof(params));
+
+  MaterialRuntime runtime;
+  runtime.set = set;
+  runtime.pool = pool;
+  runtime.param_index = param_index;
+  base::MemCopy(runtime.map_keys, out_map_keys, sizeof(runtime.map_keys));
+  WriteSetBindings(set, runtime);
+  return true;
+}
+
+const GpuImage* MaterialSystem::find_texture(u64 hash) const {
+  if (const u32* index = textures_.find(hash)) return &texture_records_[*index]->image;
+  return nullptr;
+}
+
+BindlessRegistry::MaterialRecord MaterialSystem::BuildBindlessRecord(
+    const asset::Material& material, u64 id_salt, asset::AlphaMode mode) {
+  BindlessRegistry::MaterialRecord record;
+  base::MemCopy(record.base_color_factor, material.base_color_factor, sizeof(f32) * 4);
+  base::MemCopy(record.emissive, material.emissive_factor, sizeof(f32) * 3);
+  record.roughness = material.roughness_factor;
+  record.metallic = material.metallic_factor;
+  if (TextureRecord* base = record_for(material.base_color.hash ^ id_salt)) {
+    record.base_color_texture = base->bindless;
+  }
+  // The metallic-roughness map is linear, so UploadTexture skipped the bindless
+  // table (it only registers sRGB color maps). Register it on demand here so the
+  // path tracer can read per-texel gloss for its specular lobe.
+  record.metallic_roughness_texture = EnsureBindless(material.metallic_roughness.hash ^ id_salt);
+  if (mode == asset::AlphaMode::kMask) {
+    record.flags |= BindlessRegistry::kMaterialAlphaMask;
+    record.alpha_cutoff = material.alpha_cutoff;
+  }
+  if (material.skin) {
+    record.flags |= BindlessRegistry::kMaterialSkin;
+    const SkinCoeffs c = ComputeSkinCoeffs(material.skin_params);
+    base::MemCopy(record.sss_sigma_t, c.sigma_t, sizeof(f32) * 3);
+    base::MemCopy(record.sss_sigma_s, c.sigma_s, sizeof(f32) * 3);
+    base::MemCopy(record.sss_scatter_color, c.scatter_color, sizeof(f32) * 3);
+    record.sss_anisotropy_g = c.g;
+    record.sss_perfusion = c.perfusion;
+    record.sss_ior = c.ior;
+  }
+  // The ray paths shade a character from this record. They carry the SHAPING
+  // controls (not the eye or layer blocks, which are raster-only) so a traced
+  // face and a rastered face cannot be two different materials.
+  if (material.human) {
+    record.flags |= BindlessRegistry::kMaterialHuman;
+    const HumanSurfaceParameters h = HumanResolve(material.human_params);
+    record.human_diffuse_fresnel[0] = h.diffuse_fresnel_peak;
+    record.human_diffuse_fresnel[1] = h.diffuse_fresnel_falloff;
+    record.human_diffuse_fresnel[2] = h.diffuse_fresnel_tangent_falloff;
+    record.human_diffuse_fresnel[3] = h.retroreflection_peak;
+    record.human_retro[0] = h.retroreflection_falloff;
+    record.human_retro[1] = h.retroreflection_tangent_falloff;
+    record.human_retro[2] = h.smooth_terminator_amount;
+    record.human_retro[3] = h.smooth_terminator_length;
+    record.human_spec[0] = h.specular_fresnel_falloff;
+    record.human_spec[1] = h.secondary_roughness_scale;
+    record.human_spec[2] = h.secondary_specular_weight;
+    record.human_spec[3] = h.mean_free_path;
+    record.human_transmission[0] = h.transmission;
+    base::MemCopy(record.human_transmission + 1, h.transmission_tint, sizeof(f32) * 3);
+    record.human_extra[0] = h.light_shape_response;
+    record.human_extra[1] = h.thickness_scale;
+    record.human_extra[2] = h.subsurface_scale;
+    record.human_extra[3] = h.extinction_scale;
+  }
+  // Terrain splat: the rasterizer reuses the normal/emissive slots as land
+  // layer 1 and the per-cell weight map. Mirror that into the bindless record
+  // so the path tracer can reproduce the blend (base_color = layer 0,
+  // metallic_roughness = layer 2 are already registered above).
+  if (material.is_terrain) {
+    record.flags |= BindlessRegistry::kMaterialTerrain;
+    if (TextureRecord* layer1 = record_for(material.normal.hash ^ id_salt)) {
+      record.terrain_layer1_texture = layer1->bindless;
+    }
+    // The weight map is linear, so UploadTexture skipped the bindless table;
+    // register it on demand like the metallic-roughness map above.
+    record.terrain_weight_texture = EnsureBindless(material.emissive.hash ^ id_salt);
+  }
+  return record;
+}
+
+bool MaterialSystem::UpdateMaterialParams(const asset::Material& material, u64 id_salt) {
+  u64 key = material.id.hash ^ id_salt;
+  const u32* index = sets_.find(key);
+  if (!index) return false;
+  MaterialRuntime& runtime = material_records_[*index];
+  // The ray paths read the bindless record, the raster path reads the uniform.
+  // Refreshing only one would let a look-dev slider move the rastered face
+  // while the traced face stayed put - the exact disagreement the shared
+  // material model exists to rule out.
+  if (registry_ && runtime.bindless_material != BindlessRegistry::kInvalidIndex) {
+    const asset::AlphaMode mode =
+        material.transmission > 0.0f ? asset::AlphaMode::kBlend : material.alpha_mode;
+    registry_->UpdateMaterialShading(runtime.bindless_material,
+                                     BuildBindlessRecord(material, id_salt, mode));
+  }
+  // Only the uniform block. The binding SET is deliberately left alone: a live
+  // set may be pending on the GPU, and Vulkan forbids updating one that is
+  // (the streaming path allocates a fresh set for exactly this reason). A
+  // material whose TEXTURES changed therefore still goes through UploadMaterial
+  // under a new id - this path is for moving numbers, which is what a look-dev
+  // slider does.
+  Params params;
+  u64 keys[12];
+  BuildParams(material, id_salt, params, keys);
+  GpuBuffer& buffer = param_buffers_[runtime.pool];
+  const u64 offset = static_cast<u64>(runtime.param_index) * kParamStride;
+  base::MemCopy(static_cast<u8*>(buffer.mapped) + offset, &params, sizeof(params));
+  return true;
+}
+
+bool MaterialSystem::UploadMaterial(const asset::Material& material, u64 id_salt) {
+  u64 key = material.id.hash ^ id_salt;
+  if (sets_.find(key)) return true;
+  BindingSetHandle set = AllocateSet();
+  if (!set) return false;
+  MaterialRuntime runtime;
+  runtime.set = set;
+  runtime.pool = static_cast<u32>(param_buffers_.size()) - 1;
+  runtime.param_index = sets_in_last_pool_ - 1;
+  if (!WriteSet(set, runtime.pool, runtime.param_index, material, id_salt, runtime.map_keys)) {
+    return false;
+  }
+  // Transmissive (glass) materials route to the transparent pass so they can
+  // sample the opaque scene behind them, regardless of their declared alpha.
+  asset::AlphaMode mode =
+      material.transmission > 0.0f ? asset::AlphaMode::kBlend : material.alpha_mode;
+  blend_modes_.insert(key, static_cast<u8>(mode));
+  if (mode == asset::AlphaMode::kMask) runtime.alpha_cutoff = material.alpha_cutoff;
+  MaterialColor color;
+  base::MemCopy(color.albedo, material.base_color_factor, sizeof(f32) * 3);
+  base::MemCopy(color.emissive, material.emissive_factor, sizeof(f32) * 3);
+  colors_.insert(key, color);
+  if (material.is_water) water_.insert(key, 1);
+  if (material.effect) effects_.insert(key, material.effect_additive ? 2 : 1);
+  if (material.normal_model_space) normal_model_space_.insert(key, 1);
+  if (registry_) {
+    BindlessRegistry::MaterialRecord record = BuildBindlessRecord(material, id_salt, mode);
+    u32 index = registry_->RegisterMaterial(record);
+    if (index != BindlessRegistry::kInvalidIndex) {
+      bindless_materials_.insert(key, index);
+      runtime.bindless_material = index;
+    }
+  }
+  u32 material_index = static_cast<u32>(material_records_.size());
+  material_records_.push_back(runtime);
+  sets_.insert(key, material_index);
+  // Reverse map for streaming: a texture swap rebuilds these materials' sets.
+  for (u64 map_key : runtime.map_keys) {
+    if (TextureRecord* record = record_for(map_key)) {
+      // The same texture can fill several slots of one material; one rebuild
+      // rewrites every slot, so record the material once.
+      if (record->material_indices.empty() || record->material_indices.back() != material_index) {
+        record->material_indices.push_back(material_index);
+      }
+    }
+  }
+  return true;
+}
+
+// texture streaming
+
+void MaterialSystem::Pin(u64 texture_hash) {
+  TextureRecord* record = record_for(texture_hash);
+  if (!record) return;
+  record->pinned = true;
+  // Pinned consumers cache the view/bindless index, so a demoted texture must
+  // come back to full residency (and then never move again).
+  if (record->streamable && record->resident_first_mip != 0) {
+    if (SwapResident(*record, 0, current_frame_)) ++promotes_;
+  }
+}
+
+void MaterialSystem::Touch(u64 material_hash, u32 frame_index) {
+  if (material_hash == 0 || budget_bytes_ == 0) return;
+  const u32* index = sets_.find(material_hash);
+  if (!index) return;
+  MaterialRuntime& runtime = material_records_[*index];
+  if (runtime.last_used == frame_index) return;
+  runtime.last_used = frame_index;
+  for (u64 map_key : runtime.map_keys) {
+    if (TextureRecord* record = record_for(map_key)) record->last_used = frame_index;
+  }
+}
+
+void MaterialSystem::BeginFrame(u32 frame_index) {
+  current_frame_ = frame_index;
+  // Device::BeginFrame just waited the frame ring's fence, so anything retired
+  // kMaxFramesInFlight frames ago is no longer referenced by the GPU.
+  size_t kept = 0;
+  for (size_t i = 0; i < retired_.size(); ++i) {
+    Retired& retired = retired_[i];
+    if (retired.frame + Device::kMaxFramesInFlight <= frame_index) {
+      if (retired.image) device_.DestroyImage(retired.image);
+      if (retired.set) device_.DestroyBindingSet(retired.set);
+      if (registry_ && retired.bindless_slot != BindlessRegistry::kInvalidIndex) {
+        registry_->ReleaseTexture(retired.bindless_slot);
+      }
+    } else {
+      retired_[kept++] = retired;
+    }
+  }
+  retired_.resize(kept);
+}
+
+bool MaterialSystem::SwapResident(TextureRecord& record, u32 first_mip, u32 frame_index) {
+  GpuImage next = UploadTextureImage(record.source, first_mip);
+  if (!next) return false;
+  // Deferred, not immediate: inside an upload batch the copy into `next` is
+  // still pending, and SwapResident runs mid-frame (streaming), where a device
+  // drain would also free the current frame's graveyard under its own command
+  // list. The next BeginFrame(slot) fence proves the batch landed.
+  auto destroy_next = [&] { device_.DestroyImageDeferred(next); };
+
+  u32 old_slot = record.bindless;
+  u32 new_slot = BindlessRegistry::kInvalidIndex;
+  if (registry_ && old_slot != BindlessRegistry::kInvalidIndex) {
+    // A fresh slot: pending frames may still read the old descriptor, which
+    // update-after-bind only allows us to leave alone, not rewrite.
+    new_slot = registry_->RegisterTexture(next.view);
+    if (new_slot == BindlessRegistry::kInvalidIndex) {
+      destroy_next();
+      return false;
+    }
+  }
+
+  // Pre-create every replacement set before committing: the live sets may be
+  // pending on the GPU, so a half-swapped state (image retired, set rebuild
+  // failed) would leave a dangling descriptor.
+  base::Vector<BindingSetHandle> fresh_sets;
+  for (size_t i = 0; i < record.material_indices.size(); ++i) {
+    BindingSetHandle fresh = device_.CreateBindingSet(set_layout_);
+    if (!fresh) {
+      for (BindingSetHandle set : fresh_sets) device_.DestroyBindingSet(set);
+      if (registry_ && new_slot != BindlessRegistry::kInvalidIndex) {
+        registry_->ReleaseTexture(new_slot);
+      }
+      destroy_next();
+      return false;
+    }
+    fresh_sets.push_back(fresh);
+  }
+
+  retired_.push_back({record.image, {}, old_slot, frame_index});
+  resident_bytes_ -= record.resident_bytes;
+  record.image = next;
+  record.resident_first_mip = first_mip;
+  record.resident_bytes = BytesForMips(record.source, first_mip);
+  record.bindless = new_slot;
+  resident_bytes_ += record.resident_bytes;
+
+  for (size_t i = 0; i < record.material_indices.size(); ++i) {
+    MaterialRuntime& runtime = material_records_[record.material_indices[i]];
+    WriteSetBindings(fresh_sets[i], runtime);
+    retired_.push_back({{}, runtime.set, BindlessRegistry::kInvalidIndex, frame_index});
+    runtime.set = fresh_sets[i];
+    if (registry_ && runtime.bindless_material != BindlessRegistry::kInvalidIndex &&
+        old_slot != BindlessRegistry::kInvalidIndex) {
+      registry_->RewriteTextureIndex(runtime.bindless_material, old_slot, new_slot);
+    }
+  }
+  return true;
+}
+
+void MaterialSystem::UpdateStreaming(u32 frame_index) {
+  if (budget_bytes_ == 0 || texture_records_.empty()) return;
+
+  // Coldest fully-resident streamable texture idle for at least min_idle
+  // frames; nullptr when everything is warmer than that.
+  auto coldest = [&](u32 min_idle) -> TextureRecord* {
+    TextureRecord* best = nullptr;
+    for (auto& entry : texture_records_) {
+      TextureRecord& record = *entry;
+      if (!record.streamable || record.pinned || record.resident_first_mip != 0) continue;
+      if (record.last_used + min_idle > frame_index) continue;
+      if (!best || record.last_used < best->last_used) best = &record;
+    }
+    return best;
+  };
+
+  // Promote textures whose materials drew recently, evicting cold ones first.
+  u32 promotes = 0;
+  for (auto& entry : texture_records_) {
+    if (promotes >= kMaxPromotesPerFrame) break;
+    TextureRecord& record = *entry;
+    if (!record.streamable || record.resident_first_mip == 0) continue;
+    if (record.last_used + kHotWindow < frame_index) continue;
+    u64 needed = record.full_bytes - record.resident_bytes;
+    while (resident_bytes_ + needed > budget_bytes_) {
+      TextureRecord* victim = coldest(kColdWindow);
+      if (!victim) break;
+      if (!SwapResident(*victim, victim->tail_first_mip, frame_index)) break;
+      ++demotes_;
+    }
+    if (resident_bytes_ + needed > budget_bytes_) continue;  // no room; stay at the tail
+    if (SwapResident(record, 0, frame_index)) {
+      ++promotes_;
+      ++promotes;
+    }
+  }
+
+  // Pressure: demote the coldest textures while over budget. Never demote a
+  // texture drawn within the hot window - a working set larger than the
+  // budget stays over it (warned once) instead of thrashing.
+  u32 demotes = 0;
+  while (resident_bytes_ > budget_bytes_ && demotes < kMaxDemotesPerFrame) {
+    TextureRecord* victim = coldest(kHotWindow + 1);
+    if (!victim) {
+      if (!over_budget_warned_) {
+        RX_WARN("texture streaming: resident {} MB over the {} MB budget with every "
+                 "streamable texture hot; raise RX_TEX_BUDGET_MB",
+                 resident_bytes_ >> 20, budget_bytes_ >> 20);
+        over_budget_warned_ = true;
+      }
+      break;
+    }
+    if (!SwapResident(*victim, victim->tail_first_mip, frame_index)) break;
+    ++demotes_;
+    ++demotes;
+  }
+  if (resident_bytes_ <= budget_bytes_) over_budget_warned_ = false;
+
+  // Headless-debuggable activity trace, throttled to every ~10s at 60fps.
+  if ((promotes_ + demotes_) != logged_ops_ && frame_index >= logged_frame_ + 600) {
+    StreamingStats stats = streaming_stats();
+    RX_INFO("texture streaming: {}/{} MB resident, {}/{} textures demoted, {} promotes {} demotes",
+             resident_bytes_ >> 20, budget_bytes_ >> 20, stats.demoted_count,
+             stats.streamable_count, promotes_, demotes_);
+    logged_ops_ = promotes_ + demotes_;
+    logged_frame_ = frame_index;
+  }
+}
+
+MaterialSystem::StreamingStats MaterialSystem::streaming_stats() const {
+  StreamingStats stats;
+  stats.resident_bytes = resident_bytes_;
+  stats.budget_bytes = budget_bytes_;
+  stats.promotes = promotes_;
+  stats.demotes = demotes_;
+  for (const auto& entry : texture_records_) {
+    if (!entry->streamable) continue;
+    ++stats.streamable_count;
+    if (entry->resident_first_mip != 0) ++stats.demoted_count;
+  }
+  return stats;
+}
+
+bool MaterialSystem::is_water(u64 material_hash) const {
+  return water_.find(material_hash) != nullptr;
+}
+
+u32 MaterialSystem::bindless_material(u64 material_hash) const {
+  if (const u32* index = bindless_materials_.find(material_hash)) return *index;
+  return 0;
+}
+
+MaterialSystem::MaterialColor MaterialSystem::material_color(u64 material_hash) const {
+  if (const MaterialColor* color = colors_.find(material_hash)) return *color;
+  return {};
+}
+
+f32 MaterialSystem::AlphaCoverage::Sample(f32 u, f32 v) const {
+  if (alpha.empty() || width == 0 || height == 0) return mean;
+  u -= ::floorf(u);  // wrap into [0,1)
+  v -= ::floorf(v);
+  f32 fx = u * static_cast<f32>(width) - 0.5f;
+  f32 fy = v * static_cast<f32>(height) - 0.5f;
+  i32 x0 = static_cast<i32>(::floorf(fx)), y0 = static_cast<i32>(::floorf(fy));
+  f32 tx = fx - static_cast<f32>(x0), ty = fy - static_cast<f32>(y0);
+  auto at = [&](i32 x, i32 y) -> f32 {
+    x = ((x % static_cast<i32>(width)) + static_cast<i32>(width)) % static_cast<i32>(width);
+    y = ((y % static_cast<i32>(height)) + static_cast<i32>(height)) % static_cast<i32>(height);
+    return static_cast<f32>(alpha[static_cast<size_t>(y) * width + x]) / 255.0f;
+  };
+  f32 top = at(x0, y0) * (1.0f - tx) + at(x0 + 1, y0) * tx;
+  f32 bot = at(x0, y0 + 1) * (1.0f - tx) + at(x0 + 1, y0 + 1) * tx;
+  return top * (1.0f - ty) + bot * ty;
+}
+
+const MaterialSystem::AlphaCoverage* MaterialSystem::material_base_alpha(u64 material_hash) const {
+  const u32* idx = sets_.find(material_hash);
+  if (!idx) return nullptr;
+  return texture_alpha_.find(material_records_[*idx].map_keys[0]);
+}
+
+MaterialSystem::BaseColor MaterialSystem::material_base_color(u64 material_hash) const {
+  const u32* idx = sets_.find(material_hash);
+  if (!idx) return {};
+  const MaterialRuntime& runtime = material_records_[*idx];
+  return {find_texture(runtime.map_keys[0]), runtime.alpha_cutoff};
+}
+
+u32 MaterialSystem::bindless_texture(u64 texture_hash) const {
+  if (const u32* index = textures_.find(texture_hash)) {
+    return texture_records_[*index]->bindless;
+  }
+  return BindlessRegistry::kInvalidIndex;
+}
+
+bool MaterialSystem::is_blend(u64 material_hash) const {
+  if (const u8* mode = blend_modes_.find(material_hash)) {
+    return static_cast<asset::AlphaMode>(*mode) == asset::AlphaMode::kBlend;
+  }
+  return false;
+}
+
+bool MaterialSystem::is_mask(u64 material_hash) const {
+  if (const u8* mode = blend_modes_.find(material_hash)) {
+    return static_cast<asset::AlphaMode>(*mode) == asset::AlphaMode::kMask;
+  }
+  return false;
+}
+
+bool MaterialSystem::is_effect(u64 material_hash) const {
+  return effects_.find(material_hash) != nullptr;
+}
+
+bool MaterialSystem::is_effect_additive(u64 material_hash) const {
+  const u8* kind = effects_.find(material_hash);
+  return kind && *kind == 2;
+}
+
+bool MaterialSystem::is_normal_model_space(u64 material_hash) const {
+  return normal_model_space_.find(material_hash) != nullptr;
+}
+
+BindingSetHandle MaterialSystem::set(u64 material_hash) const {
+  if (material_hash != 0) {
+    if (const u32* index = sets_.find(material_hash)) return material_records_[*index].set;
+  }
+  return default_set_;
+}
+
+MaterialSystem::~MaterialSystem() {
+  for (auto& record : texture_records_) device_.DestroyImage(record->image);
+  texture_records_.clear();
+  for (Retired& retired : retired_) {
+    if (retired.image) device_.DestroyImage(retired.image);
+    if (retired.set) device_.DestroyBindingSet(retired.set);
+  }
+  device_.DestroyImage(white_);
+  device_.DestroyImage(flat_normal_);
+  device_.DestroyImage(black_);
+  if (staging_bytes_) device_.DestroyBuffer(staging_);
+  for (GpuBuffer& buffer : param_buffers_) device_.DestroyBuffer(buffer);
+  for (MaterialRuntime& runtime : material_records_) device_.DestroyBindingSet(runtime.set);
+  if (default_set_) device_.DestroyBindingSet(default_set_);
+  if (set_layout_) device_.DestroyBindingLayout(set_layout_);
+}
+
+}  // namespace rx::render

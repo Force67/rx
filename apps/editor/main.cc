@@ -4,9 +4,9 @@
 
 #include <base/option.h>
 
-#include "app/host.h"
 #include "base/strings/xstring.h"
 #include "editor_app.h"
+#include "rxe/app/host.h"
 
 int main(int argc, char** argv) {
   base::String open_path;

@@ -7,14 +7,14 @@
 #include "base/strings/xstring.h"
 #include "engine_context.h"
 #include "foundation/math/math.h"
-#include "physics/physics_world.h"
-#include "render/core/renderer.h"
-#include "ui/events/input.h"
-#include "ui/events/input_actions.h"
-#include "vehicles/aircraft.h"
-#include "vehicles/boat.h"
-#include "vehicles/kite.h"
-#include "vehicles/vehicle_audio.h"
+#include "plugins/vehicles/aircraft.h"
+#include "plugins/vehicles/boat.h"
+#include "plugins/vehicles/kite.h"
+#include "plugins/vehicles/vehicle_audio.h"
+#include "rxe/physics/physics_world.h"
+#include "rxe/render/core/renderer.h"
+#include "rxe/ui/events/input.h"
+#include "rxe/ui/events/input_actions.h"
 
 namespace rx {
 
@@ -22,9 +22,9 @@ namespace rx {
 // ~400x400 m heightfield with mixed surfaces (asphalt road loop + runway, an
 // ice patch, dirt and sand) and a lake in one quadrant. Tab cycles the active
 // vehicle; the camera + input follow it and the inactive vehicles idle (the car
-// holds its brakes). It exercises engine/physics' wheeled-vehicle, boat and
+// holds its brakes). It exercises rxe/physics' wheeled-vehicle, boat and
 // aircraft simulators, the per-surface tire grip of the material heightfield,
-// and engine/audio's procedural VehicleAudio, and shows the vendor test models
+// and rxe/audio's procedural VehicleAudio, and shows the vendor test models
 // (CesiumMilkTruck as the car, Cesium_Air as the plane, ToyCar/CarConcept/
 // GroundVehicle as parked material showcase pieces) through the PBR pipeline.
 //

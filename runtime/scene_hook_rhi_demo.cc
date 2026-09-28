@@ -4,7 +4,7 @@
 #include <string.h>
 
 #include "foundation/logging/log.h"
-#include "render/rhi/bindings.h"
+#include "rxe/render/rhi/bindings.h"
 
 #include "base/memory/mem_ops.h"
 #include "shaders/scenehook_rhi_cull_cs_hlsl.h"

@@ -4,11 +4,6 @@
 
 #include <base/containers/vector.h>
 
-#include "anim/anim_graph.h"
-#include "anim/foot_placement.h"
-#include "anim/pose.h"
-#include "anim/rig_player.h"
-#include "asset/skeleton.h"
 #include "base/containers/vector.h"
 #include "base/memory/unique_pointer.h"
 #include "demo_drive.h"
@@ -23,12 +18,17 @@
 #include "engine_context.h"
 #include "feature_gym/feature_gym.h"
 #include "foundation/math/math.h"
-#include "net/bubble.h"
-#include "net/bubble_debug.h"
-#include "render/core/renderer.h"
+#include "plugins/replication/bubble.h"
+#include "plugins/replication/bubble_debug.h"
+#include "plugins/weather/weather.h"
+#include "rxe/anim/anim_graph.h"
+#include "rxe/anim/foot_placement.h"
+#include "rxe/anim/pose.h"
+#include "rxe/anim/rig_player.h"
+#include "rxe/asset/skeleton.h"
+#include "rxe/render/core/renderer.h"
 #include "scene_hook_demo.h"
 #include "scene_hook_rhi_demo.h"
-#include "weather/weather.h"
 
 namespace rx {
 
@@ -292,7 +292,7 @@ class DemoScenes {
   // The character reference lab (--demo lookdev).
   base::UniquePointer<LookdevDemo> lookdev_;
 
-  // --demo shooter: the FPS range over engine/combat (weapons, targets, HUD).
+  // --demo shooter: the FPS range over plugins/combat (weapons, targets, HUD).
   // Non-null only for that demo; the Viewer drives its Update from OnUpdate.
   base::UniquePointer<ShooterDemo> shooter_;
 

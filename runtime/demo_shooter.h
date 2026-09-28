@@ -5,19 +5,19 @@
 #include <base/containers/vector.h>
 
 #include "base/strings/xstring.h"
-#include "combat/damage.h"
-#include "combat/events.h"
-#include "combat/weapon.h"
 #include "engine_context.h"
 #include "foundation/math/math.h"
-#include "render/core/renderer.h"
-#include "ui/events/input.h"
-#include "ui/events/input_actions.h"
+#include "plugins/combat/damage.h"
+#include "plugins/combat/events.h"
+#include "plugins/combat/weapon.h"
+#include "rxe/render/core/renderer.h"
+#include "rxe/ui/events/input.h"
+#include "rxe/ui/events/input_actions.h"
 
 namespace rx {
 
 // The FPS range (--demo shooter): a first-person shooting gallery that drives
-// engine/combat end to end. A player walks the range on the character
+// plugins/combat end to end. A player walks the range on the character
 // controller, carries four weapons cut from the same WeaponDef data (an
 // automatic rifle that punches through thin cover, a pellet shotgun that
 // reloads shell by shell, a semi-auto marksman rifle with real aim-down-sights,

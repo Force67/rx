@@ -8,16 +8,16 @@
 #include <stdio.h>
 #include <stdlib.h>
 
-#include "asset/pack.h"
-#include "asset/vfs.h"
 #include "base/containers/span.h"
 #include "base/memory/move.h"
 #include "base/strings/xstring.h"
-#include "ecs/world.h"
 #include "foundation/files/file_system.h"
-#include "scene/components.h"
-#include "world/world_map.h"
-#include "world/world_stream.h"
+#include "rxe/asset/pack.h"
+#include "rxe/asset/vfs.h"
+#include "rxe/ecs/world.h"
+#include "rxe/scene/components.h"
+#include "rxe/world/world_map.h"
+#include "rxe/world/world_stream.h"
 
 namespace {
 

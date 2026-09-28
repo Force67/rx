@@ -5,18 +5,18 @@
 
 #include <base/containers/vector.h>
 
-#include "anim/expression.h"
-#include "app/application.h"
-#include "app/host.h"
-#include "asset/mesh.h"
-#include "authoring/command_bridge.h"
-#include "authoring/command_endpoint.h"
-#include "importers/gltf/gltf_loader.h"
-#include "importers/usd/usd_loader.h"
-#include "script/handler_context.h"
-#include "script/handler_registry.h"
-#include "script/script_arena.h"
-#include "script/script_symbols.h"
+#include "rxe/anim/expression.h"
+#include "rxe/app/application.h"
+#include "rxe/app/host.h"
+#include "rxe/asset/mesh.h"
+#include "rxe/authoring/command_bridge.h"
+#include "rxe/authoring/command_endpoint.h"
+#include "rxe/importers/gltf/gltf_loader.h"
+#include "rxe/importers/usd/usd_loader.h"
+#include "rxe/script/handler_context.h"
+#include "rxe/script/handler_registry.h"
+#include "rxe/script/script_arena.h"
+#include "rxe/script/script_symbols.h"
 
 #include "base/containers/pair.h"
 #include "base/containers/span.h"
@@ -25,9 +25,9 @@
 #include "debug_ui.h"
 #include "demo_world.h"
 #include "engine_context.h"
-#include "scene/fly_camera.h"
-#include "viewer_input.h"
+#include "rxe/scene/fly_camera.h"
 #include "showcase_camera.h"
+#include "viewer_input.h"
 
 namespace rx {
 

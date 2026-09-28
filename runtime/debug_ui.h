@@ -4,16 +4,16 @@
 // The overlay records through the engine's RHI imgui render backend
 // (render/util/imgui_renderer.h) - no raw Vulkan, no volk here.
 
-#include "app/world_clock.h"
 #include "foundation/build_config/types.h"
-#include "render/core/renderer.h"
-#include "ui/window/window.h"
+#include "rxe/app/world_clock.h"
+#include "rxe/render/core/renderer.h"
+#include "rxe/ui/window/window.h"
 
 #if defined(RX_HAS_IMGUI)
 #include "base/containers/vector.h"
 #include "base/memory/move.h"
 #include "base/strings/xstring.h"
-#include "render/util/imgui_renderer.h"
+#include "rxe/render/util/imgui_renderer.h"
 #endif
 
 namespace rx {

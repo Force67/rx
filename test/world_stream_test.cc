@@ -3,21 +3,21 @@
 // unload, static instances and their promotion, and the two ways this goes
 // wrong quietly if nobody checks - a payload that arrives after its generation
 // was cancelled, and a cook whose component layout no longer matches the build.
-#include "world/world_stream.h"
+#include "rxe/world/world_stream.h"
 
 #include <stdio.h>
 #include <string.h>
 
-#include "asset/pack.h"
-#include "asset/vfs.h"
 #include "base/containers/span.h"
 #include "base/memory/move.h"
 #include "base/strings/xstring.h"
-#include "ecs/world.h"
 #include "foundation/files/file_system.h"
-#include "scene/components.h"
-#include "world/world_map.h"
-#include "world/world_overlay.h"
+#include "rxe/asset/pack.h"
+#include "rxe/asset/vfs.h"
+#include "rxe/ecs/world.h"
+#include "rxe/scene/components.h"
+#include "rxe/world/world_map.h"
+#include "rxe/world/world_overlay.h"
 
 namespace {
 

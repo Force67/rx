@@ -1,4 +1,4 @@
-#include "render/geometry/instance_store.h"
+#include "rxe/render/geometry/instance_store.h"
 
 #include <math.h>
 #include <stdio.h>
@@ -9,7 +9,7 @@
 #include "base/functional/function.h"
 #include "base/memory/mem_ops.h"
 #include "base/memory/unique_pointer.h"
-#include "render/rhi/swapchain.h"
+#include "rxe/render/rhi/swapchain.h"
 
 namespace {
 

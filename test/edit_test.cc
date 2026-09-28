@@ -1,4 +1,4 @@
-// Headless tests for the engine/edit foundations: reflection, scene
+// Headless tests for the rxe/edit foundations: reflection, scene
 // serialization round-trip, undo/redo (including across entity recreation) and
 // world-transform composition. No GPU, no game assets. Exits non-zero on the
 // first failure so it slots into ctest.
@@ -7,21 +7,21 @@
 #include <stdio.h>
 #include <stdlib.h>
 
-#include "asset/asset_database.h"
-#include "asset/asset_id.h"
-#include "asset/vfs.h"
 #include "base/algorithm.h"
 #include "base/strings/string_ref.h"
 #include "base/strings/xstring.h"
-#include "ecs/world.h"
-#include "edit/hierarchy.h"
-#include "edit/reflect.h"
-#include "edit/scene_io.h"
-#include "edit/selection.h"
-#include "edit/undo.h"
 #include "foundation/files/file_system.h"
 #include "foundation/math/math.h"
-#include "scene/components.h"
+#include "rxe/asset/asset_database.h"
+#include "rxe/asset/asset_id.h"
+#include "rxe/asset/vfs.h"
+#include "rxe/ecs/world.h"
+#include "rxe/edit/hierarchy.h"
+#include "rxe/edit/reflect.h"
+#include "rxe/edit/scene_io.h"
+#include "rxe/edit/selection.h"
+#include "rxe/edit/undo.h"
+#include "rxe/scene/components.h"
 
 using namespace rx;
 using namespace rx::edit;

@@ -1,10 +1,10 @@
-#include "scene/camera_rig.h"
+#include "rxe/scene/camera_rig.h"
 
 #include <math.h>
 #include <stdio.h>
 #include <stdlib.h>
 
-#include "ecs/world.h"
+#include "rxe/ecs/world.h"
 
 namespace {
 

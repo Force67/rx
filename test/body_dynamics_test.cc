@@ -1,10 +1,10 @@
 #include <math.h>
 #include <stdio.h>
 
-#include "anim/body_dynamics.h"
-#include "asset/asset_id.h"
 #include "base/memory/move.h"
 #include "foundation/math/scalar.h"
+#include "rxe/anim/body_dynamics.h"
+#include "rxe/asset/asset_id.h"
 
 namespace {
 

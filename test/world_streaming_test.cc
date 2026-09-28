@@ -1,6 +1,6 @@
 #include "base/containers/span.h"
-#include "scene/world_streaming.h"
-#include "scene/world_streaming_ecs.h"
+#include "rxe/scene/world_streaming.h"
+#include "rxe/scene/world_streaming_ecs.h"
 
 #include <float.h>
 #include <math.h>

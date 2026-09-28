@@ -13,17 +13,17 @@
 #include <stdio.h>
 #include <stdlib.h>
 
-#include "asset/asset_database.h"
-#include "asset/vfs.h"
 #include "base/strings/xstring.h"
-#include "ecs/world.h"
-#include "edit/hierarchy.h"
-#include "edit/scene_io.h"
 #include "foundation/files/file_system.h"
 #include "foundation/math/math.h"
 #include "foundation/math/scalar.h"
 #include "foundation/strings/format.h"
-#include "scene/components.h"
+#include "rxe/asset/asset_database.h"
+#include "rxe/asset/vfs.h"
+#include "rxe/ecs/world.h"
+#include "rxe/edit/hierarchy.h"
+#include "rxe/edit/scene_io.h"
+#include "rxe/scene/components.h"
 #include "scene_authoring.h"
 
 using namespace rx;

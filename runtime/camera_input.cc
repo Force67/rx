@@ -13,7 +13,7 @@
 #include "foundation/logging/log.h"
 #include "foundation/math/math.h"
 #include "foundation/math/scalar.h"
-#include "scene/components.h"
+#include "rxe/scene/components.h"
 #include <string.h>
 #include <errno.h>
 

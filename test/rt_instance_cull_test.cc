@@ -1,7 +1,7 @@
 // Pure-logic unit test for the solid-angle TLAS instance culler (no GPU): the
 // distance/solid-angle predicate, the time-sliced group sweep, teleport
 // accept-all fallback and generation invalidation.
-#include "render/gi/rt_instance_cull.h"
+#include "rxe/render/gi/rt_instance_cull.h"
 
 #include <stdio.h>
 

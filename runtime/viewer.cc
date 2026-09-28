@@ -8,17 +8,17 @@
 
 #include <base/option.h>
 
-#include "anim/morph.h"
-#include "asset/asset_database.h"
-#include "asset/primitives.h"
-#include "edit/scene_io.h"
 #include "foundation/logging/log.h"
-#include "importers/gltf/gltf_loader.h"
-#include "scene/scene_handlers.h"
+#include "rxe/anim/morph.h"
+#include "rxe/asset/asset_database.h"
+#include "rxe/asset/primitives.h"
+#include "rxe/edit/scene_io.h"
+#include "rxe/importers/gltf/gltf_loader.h"
+#include "rxe/scene/scene_handlers.h"
 
 // Radiance .hdr decode for imported dome environment maps.
 #include <stb_image.h>
-#include "scene/components.h"
+#include "rxe/scene/components.h"
 
 #include "base/algorithm.h"
 #include "base/containers/pair.h"

@@ -1,4 +1,4 @@
-#include "scene/camera.h"
+#include "rxe/scene/camera.h"
 
 #include <base/containers/vector.h>
 #include <stdlib.h>
@@ -7,8 +7,8 @@
 #include <stdint.h>
 #include <stdio.h>
 
-#include "ecs/world.h"
 #include "foundation/math/scalar.h"
+#include "rxe/ecs/world.h"
 
 namespace {
 

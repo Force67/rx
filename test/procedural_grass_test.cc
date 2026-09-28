@@ -1,5 +1,5 @@
 #include "base/numeric_limits.h"
-#include "render/geometry/procedural_grass.h"
+#include "rxe/render/geometry/procedural_grass.h"
 
 #include <math.h>
 #include <stdio.h>

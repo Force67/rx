@@ -4,8 +4,8 @@
 #include <stdio.h>
 #include <stdlib.h>
 
-#include "asset/primitives.h"
-#include "asset/procedural_texture.h"
+#include "rxe/asset/primitives.h"
+#include "rxe/asset/procedural_texture.h"
 
 namespace asset = rx::asset;
 using rx::f32;

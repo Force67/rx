@@ -1,4 +1,4 @@
-// Headless proof of the player jetpack (engine/character/jetpack.{h,cc}) over the
+// Headless proof of the player jetpack (plugins/character/jetpack.{h,cc}) over the
 // real Jolt character controller. Needs the Jolt-enabled physics + character
 // build (like character_test). Each lettered scenario prints its measured
 // numbers to stderr and returns Fail(...) on the first bad assert.
@@ -13,13 +13,13 @@
 #include <math.h>
 #include <stdio.h>
 
-#include "character/character.h"
-#include "character/jetpack.h"
-#include "ecs/world.h"
 #include "foundation/math/math.h"
 #include "foundation/math/scalar.h"
-#include "physics/physics_world.h"
-#include "scene/components.h"
+#include "plugins/character/character.h"
+#include "plugins/character/jetpack.h"
+#include "rxe/ecs/world.h"
+#include "rxe/physics/physics_world.h"
+#include "rxe/scene/components.h"
 
 using namespace rx;
 using namespace rx::character;

@@ -5,8 +5,8 @@
 # build is bit-identical to before.
 #
 # Package layout produced under <prefix>:
-#   include/                    rx public headers, module-qualified
-#                               (core/log.h, render/core/renderer.h, ...)
+#   include/                    rx public headers, spelled as in the source tree
+#                               (foundation/logging/log.h, rxe/render/core/renderer.h, ...)
 #   include/rx-deps/            bundled third-party public headers
 #     equilibrium/base/...        equilibrium::base
 #     vulkan/{vulkan,vk_video}    Vulkan-Headers (for volk / VMA / interop)
@@ -64,14 +64,14 @@ install(EXPORT rxTargets
   NAMESPACE rx::
   DESTINATION ${RX_INSTALL_CMAKEDIR})
 
-# rx public headers (module-qualified layout preserved)
-install(DIRECTORY ${PROJECT_SOURCE_DIR}/engine/
+# rx public headers (the source tree layout: rxe/, plugins/, foundation/)
+install(DIRECTORY ${PROJECT_SOURCE_DIR}/rxe ${PROJECT_SOURCE_DIR}/plugins
   DESTINATION ${CMAKE_INSTALL_INCLUDEDIR}
   FILES_MATCHING
     PATTERN "*.h"
     PATTERN "*.hpp"
     PATTERN "*.inl"
-    # *_internal.h are kinema-visible glue (e.g. engine/anim/anim_internal.h),
+    # *_internal.h are kinema-visible glue (e.g. rxe/anim/anim_internal.h),
     # not part of the public package: kinema headers are not bundled, so a public
     # header may never include <kinema/kinema.h>.
     PATTERN "*_internal.h" EXCLUDE)

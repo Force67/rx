@@ -2,10 +2,10 @@
 #include <stdlib.h>
 #include <string.h>
 
-#include "asset/mesh.h"
-#include "render/core/bindless.h"
-#include "shaders/path_alpha_recon_cs_hlsl.h"
+#include "rxe/asset/mesh.h"
+#include "rxe/render/core/bindless.h"
 #include "shaders/path_alpha_di_cs_hlsl.h"
+#include "shaders/path_alpha_recon_cs_hlsl.h"
 #ifdef RX_HAS_NRD
 #include "base/memory/mem_ops.h"
 #include "shaders/path_alpha_nrd_cs_hlsl.h"

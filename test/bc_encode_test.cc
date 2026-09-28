@@ -12,12 +12,12 @@
 #include <stdio.h>
 #include <string.h>
 
-#include "asset/bc_encode.h"
-#include "asset/texture_compress.h"
 #include "base/containers/vector.h"
 #include "base/memory/mem_ops.h"
 #include "base/strings/xstring.h"
 #include "foundation/files/file_system.h"
+#include "rxe/asset/bc_encode.h"
+#include "rxe/asset/texture_compress.h"
 
 namespace {
 

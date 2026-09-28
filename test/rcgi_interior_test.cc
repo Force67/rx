@@ -3,7 +3,7 @@
 // round trip. These mirror the GPU shader helpers (rcgi_common.hlsli) exactly,
 // so the CPU test guards the classification predicate and the +-0.45-cell offset
 // quantization the shaders rely on.
-#include "render/gi/rcgi_interior.h"
+#include "rxe/render/gi/rcgi_interior.h"
 
 #include <math.h>
 #include <stdio.h>

@@ -2,15 +2,15 @@
 
 #include <math.h>
 
-#include "asset/pack.h"
-#include "asset/primitives.h"
 #include "base/containers/span.h"
 #include "base/memory/move.h"
 #include "base/strings/xstring.h"
 #include "foundation/logging/log.h"
 #include "foundation/strings/format.h"
-#include "scene/components.h"
-#include "world/world_bake.h"
+#include "rxe/asset/pack.h"
+#include "rxe/asset/primitives.h"
+#include "rxe/scene/components.h"
+#include "rxe/world/world_bake.h"
 
 namespace rx {
 namespace {

@@ -1,6 +1,6 @@
 # rx editor: an app::Application on app::Host with its entire UI in rx::ui
 # (libultragui in draw-data mode). The ugui backend, platform shim and pipeline
-# shaders live in engine/ui now, because the engine splash needs them too.
+# shaders live in rxe/ui now, because the engine splash needs them too.
 
 add_executable(rx_editor
   main.cc

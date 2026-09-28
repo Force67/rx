@@ -4,7 +4,12 @@
 # once after bumping; lines are idempotent, so running it twice is harmless.
 #
 #   include <old> <new>   an #include "<old>" becomes #include "<new>"
+#   prefix  <old> <new>   an include starting with <old> gets <new> instead, if
+#                         the result exists in this rx checkout
 #   symbol  <old> <new>   a qualified name, matched as a whole word
+#
+# Includes are resolved through the whole table, so a header renamed twice
+# lands on its latest path.
 
 # Phase 2
 include physics/shape_desc.h asset/shape_desc.h
@@ -55,3 +60,36 @@ include core/wayland_kde_hdr.h ui/window/wayland_kde_hdr.h
 include core/window.h ui/window/window.h
 include core/world_clock.h app/world_clock.h
 include core/features.def foundation/features/features.def
+
+# Phase 4a: engine/ becomes rxe/ and plugins/, includes spelled from the root
+include net/bubble.h plugins/replication/bubble.h
+include net/replication.h plugins/replication/replication.h
+include net/session.h plugins/replication/session.h
+include net/bubble_debug.h plugins/replication/bubble_debug.h
+prefix  anim/ rxe/anim/
+prefix  app/ rxe/app/
+prefix  asset/ rxe/asset/
+prefix  audio/ rxe/audio/
+prefix  authoring/ rxe/authoring/
+prefix  ecs/ rxe/ecs/
+prefix  edit/ rxe/edit/
+prefix  http/ rxe/http/
+prefix  importers/ rxe/importers/
+prefix  net/ rxe/net/
+prefix  physics/ rxe/physics/
+prefix  render/ rxe/render/
+prefix  render2d/ rxe/render2d/
+prefix  rpc/ rxe/rpc/
+prefix  scene/ rxe/scene/
+prefix  script/ rxe/script/
+prefix  ui/ rxe/ui/
+prefix  world/ rxe/world/
+prefix  character/ plugins/character/
+prefix  combat/ plugins/combat/
+prefix  inventory/ plugins/inventory/
+prefix  locomotion/ plugins/locomotion/
+prefix  placement/ plugins/placement/
+prefix  terrain/ plugins/terrain/
+prefix  nav/ plugins/nav/
+prefix  weather/ plugins/weather/
+prefix  vehicles/ plugins/vehicles/

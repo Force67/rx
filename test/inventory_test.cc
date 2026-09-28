@@ -7,13 +7,13 @@
 #include <stdlib.h>
 
 #include "base/containers/vector.h"
-#include "ecs/world.h"
-#include "inventory/inventory.h"
-#include "inventory/item_catalog.h"
-#include "inventory/serialize.h"
-#include "inventory/world_item.h"
-#include "physics/physics_world.h"
-#include "scene/components.h"
+#include "plugins/inventory/inventory.h"
+#include "plugins/inventory/item_catalog.h"
+#include "plugins/inventory/serialize.h"
+#include "plugins/inventory/world_item.h"
+#include "rxe/ecs/world.h"
+#include "rxe/physics/physics_world.h"
+#include "rxe/scene/components.h"
 
 namespace {
 

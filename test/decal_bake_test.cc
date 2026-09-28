@@ -13,14 +13,14 @@
 #include <stdlib.h>
 #include <string.h>
 
-#include "asset/mesh.h"
 #include "base/containers/vector.h"
 #include "base/memory/mem_ops.h"
 #include "base/memory/unique_pointer.h"
-#include "render/core/render_graph.h"
-#include "render/rhi/command_list.h"
-#include "render/rhi/device.h"
-#include "render/texturing/decal_bake.h"
+#include "rxe/asset/mesh.h"
+#include "rxe/render/core/render_graph.h"
+#include "rxe/render/rhi/command_list.h"
+#include "rxe/render/rhi/device.h"
+#include "rxe/render/texturing/decal_bake.h"
 
 using namespace rx::render;
 using rx::asset::Vertex;

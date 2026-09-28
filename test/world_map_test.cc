@@ -1,15 +1,15 @@
 // The runtime side of the baked map: an index loaded out of a real .rxp,
 // payloads read back through the Vfs, per-domain streaming bubbles, and the
 // refusals that keep a stale or mismatched archive from being streamed.
-#include "world/world_map.h"
+#include "rxe/world/world_map.h"
 
 #include <stdio.h>
 
-#include "asset/pack.h"
-#include "asset/vfs.h"
 #include "base/memory/move.h"
 #include "base/strings/xstring.h"
 #include "foundation/files/file_system.h"
+#include "rxe/asset/pack.h"
+#include "rxe/asset/vfs.h"
 
 namespace {
 

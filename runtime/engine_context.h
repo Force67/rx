@@ -4,21 +4,21 @@
 
 #include <base/containers/vector.h>
 
-#include "app/services.h"
-#include "asset/asset_database.h"
-#include "asset/vfs.h"
-#include "audio/audio_system.h"
 #include "base/strings/xstring.h"
 #include "debug_ui.h"
-#include "ecs/scheduler.h"
-#include "ecs/world.h"
 #include "foundation/math/math.h"
-#include "importers/usd/usd_loader.h"
-#include "physics/physics_world.h"
-#include "render/core/presets.h"
-#include "render/core/renderer.h"
-#include "scene/fly_camera.h"
-#include "ui/events/input_actions.h"
+#include "rxe/app/services.h"
+#include "rxe/asset/asset_database.h"
+#include "rxe/asset/vfs.h"
+#include "rxe/audio/audio_system.h"
+#include "rxe/ecs/scheduler.h"
+#include "rxe/ecs/world.h"
+#include "rxe/importers/usd/usd_loader.h"
+#include "rxe/physics/physics_world.h"
+#include "rxe/render/core/presets.h"
+#include "rxe/render/core/renderer.h"
+#include "rxe/scene/fly_camera.h"
+#include "rxe/ui/events/input_actions.h"
 #include "viewer_input.h"
 
 namespace rx {

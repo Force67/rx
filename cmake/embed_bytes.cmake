@@ -1,6 +1,6 @@
 # Embeds any file as a C array, for content a binary must carry rather than
 # look up: the splash wordmark cannot fail to load on a machine that never
-# unpacked an archive. Run with -P; see rx_embed_bytes in engine/ui/CMakeLists.
+# unpacked an archive. Run with -P; see rx_embed_bytes in rxe/ui/CMakeLists.
 # The array is not NUL-terminated, so sizeof() is the byte count.
 file(READ ${SOURCE} hex HEX)
 string(REGEX REPLACE "(..)" "0x\\1," bytes "${hex}")

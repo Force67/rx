@@ -3,11 +3,11 @@
 #include <stdlib.h>
 #include <string.h>
 
-#include "asset/mesh.h"
-#include "render/core/bindless.h"
-#include "render/gi/path_scene_history.h"
-#include "render/gi/skinned_rt.h"
-#include "render/rhi/device.h"
+#include "rxe/asset/mesh.h"
+#include "rxe/render/core/bindless.h"
+#include "rxe/render/gi/path_scene_history.h"
+#include "rxe/render/gi/skinned_rt.h"
+#include "rxe/render/rhi/device.h"
 #include "shaders/path_motion_recon_cs_hlsl.h"
 #ifdef RX_HAS_NRD
 #include "base/algorithm.h"

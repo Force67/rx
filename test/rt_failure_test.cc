@@ -8,14 +8,14 @@
 #include "base/memory/mem_ops.h"
 #include "base/memory/unique_pointer.h"
 #include "base/strings/xstring.h"
-#include "render/gi/path_tracer.h"
-#include "render/gi/raytracing.h"
-#include "render/gi/recon_path_tracer.h"
-#include "render/gi/skinned_rt.h"
-#include "render/gi/restir_di.h"
-#include "render/screenspace/reflection_trace.h"
-#include "render/rhi/device.h"
-#include "render/rhi/swapchain.h"
+#include "rxe/render/gi/path_tracer.h"
+#include "rxe/render/gi/raytracing.h"
+#include "rxe/render/gi/recon_path_tracer.h"
+#include "rxe/render/gi/restir_di.h"
+#include "rxe/render/gi/skinned_rt.h"
+#include "rxe/render/rhi/device.h"
+#include "rxe/render/rhi/swapchain.h"
+#include "rxe/render/screenspace/reflection_trace.h"
 
 using namespace rx;
 using namespace rx::render;

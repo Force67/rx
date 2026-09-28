@@ -12,12 +12,12 @@
 
 #include "base/memory/mem_ops.h"
 #include "base/memory/unique_pointer.h"
-#include "placement/ecotope.h"
-#include "placement/gpu_placement.h"
-#include "placement/placement.h"
-#include "placement/world_data.h"
-#include "render/rhi/command_list.h"
-#include "render/rhi/device.h"
+#include "plugins/placement/ecotope.h"
+#include "plugins/placement/gpu_placement.h"
+#include "plugins/placement/placement.h"
+#include "plugins/placement/world_data.h"
+#include "rxe/render/rhi/command_list.h"
+#include "rxe/render/rhi/device.h"
 
 namespace {
 

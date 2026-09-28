@@ -7,10 +7,10 @@
 #include "base/memory/unique_pointer.h"
 #include "engine_context.h"
 #include "foundation/math/math.h"
-#include "placement/gpu_placement.h"
-#include "placement/placement.h"
-#include "placement/world_data.h"
-#include "render/core/renderer.h"
+#include "plugins/placement/gpu_placement.h"
+#include "plugins/placement/placement.h"
+#include "plugins/placement/world_data.h"
+#include "rxe/render/core/renderer.h"
 
 namespace rx {
 

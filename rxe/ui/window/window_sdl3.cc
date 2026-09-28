@@ -1,0 +1,494 @@
+#include <SDL3/SDL.h>
+#include <SDL3/SDL_vulkan.h>
+
+#include <string.h>
+
+#include "base/containers/vector.h"
+#include "base/memory/mem_ops.h"
+#include "base/memory/unique_pointer.h"
+#include "foundation/logging/log.h"
+#include "foundation/math/scalar.h"
+#include "foundation/system/platform.h"
+#include "rxe/ui/window/window.h"
+#if defined(RX_HAS_WAYLAND_KDE_HDR)
+#include "rxe/ui/window/wayland_kde_hdr.h"
+#endif
+
+namespace rx {
+namespace {
+
+Key TranslateKey(SDL_Scancode code) {
+  switch (code) {
+    case SDL_SCANCODE_W: return Key::kW;
+    case SDL_SCANCODE_A: return Key::kA;
+    case SDL_SCANCODE_S: return Key::kS;
+    case SDL_SCANCODE_D: return Key::kD;
+    case SDL_SCANCODE_Q: return Key::kQ;
+    case SDL_SCANCODE_E: return Key::kE;
+    case SDL_SCANCODE_F: return Key::kF;
+    case SDL_SCANCODE_T: return Key::kT;
+    case SDL_SCANCODE_C: return Key::kC;
+    case SDL_SCANCODE_R: return Key::kR;
+    case SDL_SCANCODE_G: return Key::kG;
+    case SDL_SCANCODE_X: return Key::kX;
+    case SDL_SCANCODE_Z: return Key::kZ;
+    case SDL_SCANCODE_B: return Key::kB;
+    case SDL_SCANCODE_V: return Key::kV;
+    case SDL_SCANCODE_M: return Key::kM;
+    case SDL_SCANCODE_SPACE: return Key::kSpace;
+    case SDL_SCANCODE_LSHIFT: return Key::kLeftShift;
+    case SDL_SCANCODE_LCTRL: return Key::kLeftCtrl;
+    case SDL_SCANCODE_ESCAPE: return Key::kEscape;
+    case SDL_SCANCODE_F1: return Key::kF1;
+    case SDL_SCANCODE_F2: return Key::kF2;
+    case SDL_SCANCODE_F3: return Key::kF3;
+    case SDL_SCANCODE_F4: return Key::kF4;
+    case SDL_SCANCODE_F5: return Key::kF5;
+    case SDL_SCANCODE_DELETE: return Key::kDelete;
+    case SDL_SCANCODE_BACKSPACE: return Key::kBackspace;
+    case SDL_SCANCODE_RETURN: return Key::kReturn;
+    case SDL_SCANCODE_KP_ENTER: return Key::kReturn;
+    case SDL_SCANCODE_1: return Key::k1;
+    case SDL_SCANCODE_2: return Key::k2;
+    case SDL_SCANCODE_3: return Key::k3;
+    case SDL_SCANCODE_4: return Key::k4;
+    case SDL_SCANCODE_5: return Key::k5;
+    case SDL_SCANCODE_6: return Key::k6;
+    case SDL_SCANCODE_J: return Key::kJ;
+    case SDL_SCANCODE_L: return Key::kL;
+    case SDL_SCANCODE_UP: return Key::kArrowUp;
+    case SDL_SCANCODE_DOWN: return Key::kArrowDown;
+    case SDL_SCANCODE_LEFT: return Key::kArrowLeft;
+    case SDL_SCANCODE_RIGHT: return Key::kArrowRight;
+    case SDL_SCANCODE_TAB: return Key::kTab;
+    default: return Key::kCount;
+  }
+}
+
+MouseButton TranslateButton(u8 button) {
+  switch (button) {
+    case SDL_BUTTON_LEFT: return MouseButton::kLeft;
+    case SDL_BUTTON_RIGHT: return MouseButton::kRight;
+    case SDL_BUTTON_MIDDLE: return MouseButton::kMiddle;
+    default: return MouseButton::kCount;
+  }
+}
+
+GamepadButton TranslateGamepadButton(u8 button) {
+  switch (button) {
+    case SDL_GAMEPAD_BUTTON_SOUTH: return GamepadButton::kSouth;
+    case SDL_GAMEPAD_BUTTON_EAST: return GamepadButton::kEast;
+    case SDL_GAMEPAD_BUTTON_WEST: return GamepadButton::kWest;
+    case SDL_GAMEPAD_BUTTON_NORTH: return GamepadButton::kNorth;
+    case SDL_GAMEPAD_BUTTON_BACK: return GamepadButton::kBack;
+    case SDL_GAMEPAD_BUTTON_GUIDE: return GamepadButton::kGuide;
+    case SDL_GAMEPAD_BUTTON_START: return GamepadButton::kStart;
+    case SDL_GAMEPAD_BUTTON_LEFT_STICK: return GamepadButton::kLeftStick;
+    case SDL_GAMEPAD_BUTTON_RIGHT_STICK: return GamepadButton::kRightStick;
+    case SDL_GAMEPAD_BUTTON_LEFT_SHOULDER: return GamepadButton::kLeftShoulder;
+    case SDL_GAMEPAD_BUTTON_RIGHT_SHOULDER: return GamepadButton::kRightShoulder;
+    case SDL_GAMEPAD_BUTTON_DPAD_UP: return GamepadButton::kDpadUp;
+    case SDL_GAMEPAD_BUTTON_DPAD_DOWN: return GamepadButton::kDpadDown;
+    case SDL_GAMEPAD_BUTTON_DPAD_LEFT: return GamepadButton::kDpadLeft;
+    case SDL_GAMEPAD_BUTTON_DPAD_RIGHT: return GamepadButton::kDpadRight;
+    case SDL_GAMEPAD_BUTTON_TOUCHPAD: return GamepadButton::kTouchpad;
+    default: return GamepadButton::kCount;
+  }
+}
+
+GamepadAxis TranslateGamepadAxis(u8 axis) {
+  switch (axis) {
+    case SDL_GAMEPAD_AXIS_LEFTX: return GamepadAxis::kLeftX;
+    case SDL_GAMEPAD_AXIS_LEFTY: return GamepadAxis::kLeftY;
+    case SDL_GAMEPAD_AXIS_RIGHTX: return GamepadAxis::kRightX;
+    case SDL_GAMEPAD_AXIS_RIGHTY: return GamepadAxis::kRightY;
+    case SDL_GAMEPAD_AXIS_LEFT_TRIGGER: return GamepadAxis::kLeftTrigger;
+    case SDL_GAMEPAD_AXIS_RIGHT_TRIGGER: return GamepadAxis::kRightTrigger;
+    default: return GamepadAxis::kCount;
+  }
+}
+
+GamepadState::Kind GamepadKind(SDL_Gamepad* pad) {
+  switch (SDL_GetGamepadType(pad)) {
+    case SDL_GAMEPAD_TYPE_PS3:
+    case SDL_GAMEPAD_TYPE_PS4:
+    case SDL_GAMEPAD_TYPE_PS5: return GamepadState::Kind::kDualSense;
+    case SDL_GAMEPAD_TYPE_XBOX360:
+    case SDL_GAMEPAD_TYPE_XBOXONE: return GamepadState::Kind::kXbox;
+    default: return GamepadState::Kind::kUnknown;
+  }
+}
+
+class Sdl3Window final : public Window {
+ public:
+  explicit Sdl3Window(SDL_Window* window) : window_(window) {}
+
+  ~Sdl3Window() override {
+    CloseGamepad();
+    SDL_DestroyWindow(window_);
+    SDL_QuitSubSystem(SDL_INIT_GAMEPAD);
+    SDL_QuitSubSystem(SDL_INIT_VIDEO);
+  }
+
+  bool PumpEvents() override {
+    input_.mouse_dx = 0;
+    input_.mouse_dy = 0;
+    input_.wheel = 0;
+    input_.text_len = 0;
+    input_.text[0] = '\0';
+    base::MemSet(input_.pressed, 0, sizeof(input_.pressed));
+    base::MemSet(input_.repeated, 0, sizeof(input_.repeated));
+    base::MemSet(input_.mouse_pressed, 0, sizeof(input_.mouse_pressed));
+    base::MemSet(input_.mouse_released, 0, sizeof(input_.mouse_released));
+    base::MemSet(gamepad_.pressed, 0, sizeof(gamepad_.pressed));
+    touch_.BeginPump();
+
+    // SDL reports pointers in the units the desktop lays the window out in,
+    // which are smaller than pixels once the window has a high pixel density
+    // backbuffer. Everything downstream (the swapchain, picking, the editor
+    // canvas, width()/height()) is pixels, so the conversion happens here, at
+    // the one place events enter, rather than at each consumer.
+    const f32 density = pixel_density();
+
+    SDL_Event event;
+    while (SDL_PollEvent(&event)) {
+      if (event_hook_) event_hook_(&event);
+      switch (event.type) {
+        case SDL_EVENT_QUIT:
+          return false;
+        case SDL_EVENT_KEY_DOWN:
+        case SDL_EVENT_KEY_UP: {
+          Key key = TranslateKey(event.key.scancode);
+          if (key == Key::kCount) break;
+          bool down = event.type == SDL_EVENT_KEY_DOWN;
+          if (down && !event.key.repeat && !input_.keys[static_cast<u8>(key)]) {
+            input_.pressed[static_cast<u8>(key)] = true;
+          }
+          if (down && event.key.repeat) {
+            input_.repeated[static_cast<u8>(key)] = true;
+          }
+          input_.keys[static_cast<u8>(key)] = down;
+          break;
+        }
+        case SDL_EVENT_MOUSE_BUTTON_DOWN:
+        case SDL_EVENT_MOUSE_BUTTON_UP: {
+          input_.mouse_x = event.button.x * density;
+          input_.mouse_y = event.button.y * density;
+          MouseButton button = TranslateButton(event.button.button);
+          if (button == MouseButton::kCount) break;
+          const bool down = event.type == SDL_EVENT_MOUSE_BUTTON_DOWN;
+          if (down)
+            input_.mouse_pressed[static_cast<u8>(button)] = true;
+          else
+            input_.mouse_released[static_cast<u8>(button)] = true;
+          input_.mouse[static_cast<u8>(button)] = down;
+          break;
+        }
+        case SDL_EVENT_MOUSE_MOTION:
+          input_.mouse_dx += event.motion.xrel * density;
+          input_.mouse_dy += event.motion.yrel * density;
+          input_.mouse_x = event.motion.x * density;
+          input_.mouse_y = event.motion.y * density;
+          break;
+        case SDL_EVENT_MOUSE_WHEEL:
+          input_.wheel += event.wheel.y;
+          break;
+        case SDL_EVENT_TEXT_INPUT: {
+          // Append the UTF-8 text to this pump's buffer (truncated to capacity).
+          const char* t = event.text.text;
+          while (*t && input_.text_len < sizeof(input_.text) - 1) {
+            input_.text[input_.text_len++] = *t++;
+          }
+          input_.text[input_.text_len] = '\0';
+          break;
+        }
+        case SDL_EVENT_FINGER_DOWN:
+        case SDL_EVENT_FINGER_MOTION:
+        case SDL_EVENT_FINGER_UP:
+        case SDL_EVENT_FINGER_CANCELED:
+          HandleFinger(event.tfinger);
+          break;
+        case SDL_EVENT_WINDOW_FOCUS_GAINED:
+          focused_ = true;
+          break;
+        case SDL_EVENT_WINDOW_FOCUS_LOST:
+          focused_ = false;
+          break;
+        case SDL_EVENT_GAMEPAD_ADDED:
+          OpenGamepad(event.gdevice.which);
+          break;
+        case SDL_EVENT_GAMEPAD_REMOVED:
+          if (pad_ && event.gdevice.which == pad_id_) CloseGamepad();
+          break;
+        case SDL_EVENT_GAMEPAD_BUTTON_DOWN:
+        case SDL_EVENT_GAMEPAD_BUTTON_UP: {
+          if (event.gbutton.which != pad_id_) break;
+          GamepadButton b = TranslateGamepadButton(event.gbutton.button);
+          if (b == GamepadButton::kCount) break;
+          bool down = event.type == SDL_EVENT_GAMEPAD_BUTTON_DOWN;
+          if (down && !gamepad_.buttons[static_cast<u8>(b)])
+            gamepad_.pressed[static_cast<u8>(b)] = true;
+          gamepad_.buttons[static_cast<u8>(b)] = down;
+          break;
+        }
+        case SDL_EVENT_GAMEPAD_SENSOR_UPDATE:
+          if (pad_ && event.gsensor.which == pad_id_ && event.gsensor.sensor == SDL_SENSOR_GYRO) {
+            gamepad_.gyro[0] = event.gsensor.data[0];
+            gamepad_.gyro[1] = event.gsensor.data[1];
+            gamepad_.gyro[2] = event.gsensor.data[2];
+          }
+          break;
+        case SDL_EVENT_GAMEPAD_AXIS_MOTION: {
+          if (event.gaxis.which != pad_id_) break;
+          GamepadAxis a = TranslateGamepadAxis(event.gaxis.axis);
+          if (a == GamepadAxis::kCount) break;
+          bool trigger = a == GamepadAxis::kLeftTrigger || a == GamepadAxis::kRightTrigger;
+          // Sticks span the full i16 range; triggers run 0..32767.
+          f32 v = trigger ? event.gaxis.value / 32767.0f : event.gaxis.value / 32768.0f;
+          gamepad_.axes[static_cast<u8>(a)] = rx::Clamp(v, -1.0f, 1.0f);
+          break;
+        }
+        default:
+          break;
+      }
+    }
+    return true;
+  }
+
+  void SetRelativeMouseMode(bool enabled) override {
+    SDL_SetWindowRelativeMouseMode(window_, enabled);
+  }
+
+  // Compared against SDL's OWN state, never a cached flag: imgui's backend
+  // starts and stops text input on this window behind our back, so a local
+  // "already on" latch would go stale the first time it did and we would never
+  // turn it back on. Asking SDL is the only answer that stays true.
+  void SetTextInputActive(bool active) override {
+    if (active == SDL_TextInputActive(window_))
+      return;
+    if (active)
+      SDL_StartTextInput(window_);
+    else
+      SDL_StopTextInput(window_);
+  }
+
+  void SetFullscreen(bool enabled) override { SDL_SetWindowFullscreen(window_, enabled); }
+
+  void SetIcon(const u8* rgba, u32 width, u32 height) override {
+    if (!rgba || width == 0 || height == 0) return;
+    // The surface only borrows the pixels; SDL_SetWindowIcon copies them into
+    // the icon it keeps, so both can go back before this returns.
+    SDL_Surface* surface =
+        SDL_CreateSurfaceFrom(static_cast<int>(width), static_cast<int>(height),
+                              SDL_PIXELFORMAT_RGBA32, const_cast<u8*>(rgba),
+                              static_cast<int>(width * 4));
+    if (!surface) {
+      RX_WARN("sdl: icon surface failed: {}", SDL_GetError());
+      return;
+    }
+    if (!SDL_SetWindowIcon(window_, surface))
+      RX_WARN("sdl: window icon rejected: {}", SDL_GetError());
+    SDL_DestroySurface(surface);
+  }
+
+  bool fullscreen() const override {
+    return (SDL_GetWindowFlags(window_) & SDL_WINDOW_FULLSCREEN) != 0;
+  }
+
+  bool focused() const override { return focused_; }
+
+  bool relative_mouse_mode() const override {
+    return SDL_GetWindowRelativeMouseMode(window_);
+  }
+
+  void SetRumble(f32 low_freq, f32 high_freq, u32 duration_ms) override {
+    if (!pad_) return;
+    auto scale = [](f32 v) { return static_cast<Uint16>(rx::Clamp(v, 0.0f, 1.0f) * 65535.0f); };
+    SDL_RumbleGamepad(pad_, scale(low_freq), scale(high_freq), duration_ms);
+  }
+
+  void SetLedColor(u8 r, u8 g, u8 b) override {
+    if (pad_) SDL_SetGamepadLED(pad_, r, g, b);
+  }
+
+  void SetTriggerEffect(bool left, bool right, const TriggerEffect& effect) override {
+    // DualSense-only. Builds a minimal DS5 output-report effect block and sends
+    // it through SDL's HIDAPI driver; a no-op on other pads (kind guard) and a
+    // best-effort on unsupported firmware (SDL just rejects the report).
+    if (!pad_ || gamepad_.kind != GamepadState::Kind::kDualSense) return;
+    SendDualSenseTriggers(left, right, effect);
+  }
+
+  NativeWindowHandles native_handles() const override {
+    // The renderer goes through SDL_Vulkan_CreateSurface, which takes the
+    // SDL_Window itself rather than platform handles. D3D12 is the exception:
+    // CreateSwapChainForHwnd wants the real HWND.
+    void* platform_window = nullptr;
+#if defined(_WIN32)
+    platform_window = SDL_GetPointerProperty(SDL_GetWindowProperties(window_),
+                                             SDL_PROP_WINDOW_WIN32_HWND_POINTER, nullptr);
+#endif
+    return {window_, nullptr, platform_window};
+  }
+
+  bool hdr_enabled() const override {
+#if defined(RX_HAS_WAYLAND_KDE_HDR)
+    // On KWin the authoritative signal is the kde_output_device_v2 HDR toggle:
+    // SDL's property is luminance-headroom-derived, and KWin reports headroom
+    // > 1 even for SDR outputs (brightness-dimmed panels), so it reads true
+    // with system HDR off. Lazy: only probed once, null off-KDE.
+    if (!kde_hdr_checked_) {
+      kde_hdr_checked_ = true;
+      kde_hdr_ = KdeOutputHdrMonitor::Create();
+    }
+    if (kde_hdr_) return kde_hdr_->AnyHdrEnabled();
+#endif
+    // Elsewhere SDL's per-window state is trustworthy (DXGI advanced color on
+    // Windows, EDR on macOS; false on X11), updated on
+    // SDL_EVENT_WINDOW_HDR_STATE_CHANGED.
+    return SDL_GetBooleanProperty(SDL_GetWindowProperties(window_),
+                                  SDL_PROP_WINDOW_HDR_ENABLED_BOOLEAN, false);
+  }
+
+  u32 width() const override {
+    int w = 0, h = 0;
+    SDL_GetWindowSizeInPixels(window_, &w, &h);
+    return static_cast<u32>(w);
+  }
+
+  u32 height() const override {
+    int w = 0, h = 0;
+    SDL_GetWindowSizeInPixels(window_, &w, &h);
+    return static_cast<u32>(h);
+  }
+
+  f32 pixel_density() const override { return SDL_GetWindowPixelDensity(window_); }
+
+  base::Vector<const char*> vulkan_instance_extensions() const override {
+    Uint32 count = 0;
+    const char* const* extensions = SDL_Vulkan_GetInstanceExtensions(&count);
+    if (!extensions) return {};
+    return {extensions, extensions + count};
+  }
+
+  bool CreateVulkanSurface(void* vk_instance, void* out_vk_surface) override {
+    return SDL_Vulkan_CreateSurface(window_, static_cast<VkInstance>(vk_instance), nullptr,
+                                    static_cast<VkSurfaceKHR*>(out_vk_surface));
+  }
+
+ private:
+  // SDL reports fingers normalized to the window, so the pixel size is the
+  // scale that lands them in the same space as the mouse. TouchState owns the
+  // lifecycle, this only translates.
+  void HandleFinger(const SDL_TouchFingerEvent& f) {
+    TouchState::Phase phase = TouchState::Phase::kMove;
+    if (f.type == SDL_EVENT_FINGER_DOWN)
+      phase = TouchState::Phase::kDown;
+    else if (f.type == SDL_EVENT_FINGER_UP || f.type == SDL_EVENT_FINGER_CANCELED)
+      phase = TouchState::Phase::kUp;
+
+    touch_.Apply(static_cast<i64>(f.fingerID), f.x * static_cast<f32>(width()),
+                 f.y * static_cast<f32>(height()), f.pressure, phase);
+  }
+
+  void OpenGamepad(SDL_JoystickID id) {
+    if (pad_) return;  // first pad wins; ignore additional controllers
+    SDL_Gamepad* pad = SDL_OpenGamepad(id);
+    if (!pad) return;
+    pad_ = pad;
+    pad_id_ = id;
+    gamepad_ = {};
+    gamepad_.connected = true;
+    gamepad_.kind = GamepadKind(pad);
+    gamepad_.has_gyro = SDL_GamepadHasSensor(pad, SDL_SENSOR_GYRO) &&
+                        SDL_SetGamepadSensorEnabled(pad, SDL_SENSOR_GYRO, true);
+    RX_INFO("gamepad connected: {} ({}{})", SDL_GetGamepadName(pad),
+             gamepad_.kind == GamepadState::Kind::kDualSense ? "DualSense"
+             : gamepad_.kind == GamepadState::Kind::kXbox    ? "Xbox"
+                                                             : "generic",
+             gamepad_.has_gyro ? ", gyro" : "");
+  }
+
+  void CloseGamepad() {
+    if (!pad_) return;
+    SDL_CloseGamepad(pad_);
+    pad_ = nullptr;
+    pad_id_ = 0;
+    gamepad_ = {};
+    RX_INFO("gamepad disconnected");
+  }
+
+  // Sends a DualSense adaptive-trigger effect. The output report's effect block
+  // is: [0] mode, [1] start position, [2] force; modes follow the community DS5
+  // spec (0x01 resistance, 0x02 weapon/trigger, 0x26 vibration).
+  void SendDualSenseTriggers(bool left, bool right, const TriggerEffect& fx) {
+    Uint8 mode = 0x05;  // 0x05 = effect off / release
+    switch (fx.type) {
+      case TriggerEffect::Type::kResistance: mode = 0x01; break;
+      case TriggerEffect::Type::kWeapon: mode = 0x02; break;
+      case TriggerEffect::Type::kVibration: mode = 0x26; break;
+      case TriggerEffect::Type::kOff: mode = 0x05; break;
+    }
+    Uint8 right_fx[11] = {mode, fx.start, fx.strength};
+    Uint8 left_fx[11] = {mode, fx.start, fx.strength};
+
+    // DS5EffectsState_t: enable bits then the per-trigger effect blocks. Bit
+    // 0x04 = right trigger, 0x08 = left trigger.
+    Uint8 report[48] = {};
+    report[0] = static_cast<Uint8>((right ? 0x04 : 0) | (left ? 0x08 : 0));
+    if (right) base::MemCopy(&report[10], right_fx, sizeof(right_fx));
+    if (left) base::MemCopy(&report[21], left_fx, sizeof(left_fx));
+    SDL_SendGamepadEffect(pad_, report, sizeof(report));
+  }
+
+  SDL_Window* window_;
+  SDL_Gamepad* pad_ = nullptr;
+  SDL_JoystickID pad_id_ = 0;
+  bool focused_ = true;
+#if defined(RX_HAS_WAYLAND_KDE_HDR)
+  // Lazily created by hdr_enabled() (a const query), hence mutable.
+  mutable bool kde_hdr_checked_ = false;
+  mutable base::UniquePointer<KdeOutputHdrMonitor> kde_hdr_;
+#endif
+};
+
+}  // namespace
+
+base::UniquePointer<Window> CreateSdl3Window(const WindowDesc& desc) {
+  // Must be set before the video subsystem starts synthesizing. Off means the
+  // panel only feeds Window::touch(), so mouse look cannot be dragged by a
+  // thumb resting on the screen.
+  if (!desc.touch_emits_mouse) SDL_SetHint(SDL_HINT_TOUCH_MOUSE_EVENTS, "0");
+  if (!SDL_InitSubSystem(SDL_INIT_VIDEO)) {
+    RX_ERROR("sdl init failed: {}", SDL_GetError());
+    return nullptr;
+  }
+  SDL_WindowFlags flags = SDL_WINDOW_VULKAN | SDL_WINDOW_RESIZABLE;
+  if (desc.fullscreen) flags |= SDL_WINDOW_FULLSCREEN;
+  if (desc.high_pixel_density) flags |= SDL_WINDOW_HIGH_PIXEL_DENSITY;
+  SDL_Window* window = SDL_CreateWindow(desc.title.c_str(), static_cast<int>(desc.width),
+                                        static_cast<int>(desc.height), flags);
+  if (!window) {
+    RX_ERROR("sdl window creation failed: {}", SDL_GetError());
+    SDL_QuitSubSystem(SDL_INIT_VIDEO);
+    return nullptr;
+  }
+  // Receive SDL_EVENT_TEXT_INPUT so editor text fields get typed characters.
+  // Key events still arrive; this only adds the translated text stream. Not on
+  // a Steam Deck: there SDL answers text input with Steam's on-screen keyboard,
+  // which would cover the game from the first frame. A field that wants text
+  // asks for it (SetTextInputActive), and the keyboard then shows when useful.
+  if (!IsSteamDeck()) SDL_StartTextInput(window);
+
+  // Enable the PS5 HIDAPI driver with enhanced reports so the DualSense exposes
+  // rumble, the lightbar, and adaptive triggers (set before the subsystem inits).
+  SDL_SetHint(SDL_HINT_JOYSTICK_HIDAPI_PS5, "1");
+  SDL_SetHint(SDL_HINT_JOYSTICK_ENHANCED_REPORTS, "1");
+  if (!SDL_InitSubSystem(SDL_INIT_GAMEPAD)) {
+    // Non-fatal: keyboard/mouse still work, gamepads just won't be seen.
+    RX_WARN("sdl gamepad subsystem init failed: {}", SDL_GetError());
+  }
+  return base::MakeUnique<Sdl3Window>(window);
+}
+
+}  // namespace rx

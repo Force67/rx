@@ -3,8 +3,8 @@
 #include <string.h>
 
 #include "foundation/logging/log.h"
-#include "render/rhi/vulkan_interop.h"
-#include "render/util/shader_util.h"
+#include "rxe/render/rhi/vulkan_interop.h"
+#include "rxe/render/util/shader_util.h"
 
 #include "shaders/scenehook_cull_cs_hlsl.h"
 #include "shaders/scenehook_ps_hlsl.h"

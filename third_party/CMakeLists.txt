@@ -5,8 +5,8 @@
 # Dear ImGui (docking branch). Split into a platform/API-agnostic core and the
 # SDL3 platform + raw-Vulkan render backends:
 #   rx_imgui_core - imgui core only (no SDL3, no volk). The engine's RHI imgui
-#                   render backend (engine/render/util/imgui_renderer) links this
-#                   for the imgui headers/structs, so engine/render pulls in
+#                   render backend (rxe/render/util/imgui_renderer) links this
+#                   for the imgui headers/structs, so rxe/render pulls in
 #                   neither SDL3 nor a second volk copy.
 #   rx_imgui      - the SDL3 platform backend plus the raw imgui_impl_vulkan
 #                   backend, on top of the core. Kept for apps that still record
@@ -77,7 +77,7 @@ if(RX_NRD)
 endif()
 
 # TinyUSDZ, downloaded via tools/get_tinyusdz.sh. The USD reader behind
-# engine/asset/usd_loader: crate/ascii/usdz parsing, composition, and Tydra
+# rxe/asset/usd_loader: crate/ascii/usdz parsing, composition, and Tydra
 # (its stage -> renderable-scene converter).
 if(RX_USD)
   set(TINYUSDZ_BUILD_TESTS OFF CACHE BOOL "" FORCE)
@@ -91,7 +91,7 @@ if(RX_USD)
   set(TINYUSDZ_WITH_TYDRA ON CACHE BOOL "" FORCE)
   set(TINYUSDZ_WITH_PCP ON CACHE BOOL "" FORCE)
   # The engine has no use for USD audio prims, and it pulls in decoders rx
-  # already carries in engine/audio.
+  # already carries in rxe/audio.
   set(TINYUSDZ_WITH_AUDIO OFF CACHE BOOL "" FORCE)
   # tinyusdz vendors the same stb v2.30 rx does, so point it at rx_stb_impl's
   # definitions instead of letting it emit a second copy that collides at link

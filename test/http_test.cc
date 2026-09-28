@@ -22,8 +22,8 @@
 #include "base/memory/unique_pointer.h"
 #include "base/threading/thread.h"
 #include "base/time/time.h"
-#include "http/http.h"
-#include "http/url.h"
+#include "rxe/http/http.h"
+#include "rxe/http/url.h"
 
 namespace {
 

@@ -4,17 +4,17 @@
 #include <stdio.h>
 #include <stdlib.h>
 
-#include "asset/material.h"
-#include "asset/primitives.h"
 #include "base/containers/span.h"
-#include "character/character.h"
-#include "combat/projectile.h"
-#include "ecs/world.h"
 #include "foundation/logging/log.h"
 #include "foundation/math/scalar.h"
-#include "scene/camera.h"
-#include "scene/camera_rig.h"
-#include "scene/components.h"
+#include "plugins/character/character.h"
+#include "plugins/combat/projectile.h"
+#include "rxe/asset/material.h"
+#include "rxe/asset/primitives.h"
+#include "rxe/ecs/world.h"
+#include "rxe/scene/camera.h"
+#include "rxe/scene/camera_rig.h"
+#include "rxe/scene/components.h"
 
 #if defined(RX_HAS_IMGUI)
 #include <imgui.h>

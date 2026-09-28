@@ -1,5 +1,5 @@
 #include "foundation/math/scalar.h"
-#include "render/pipeline/hair_material.h"
+#include "rxe/render/pipeline/hair_material.h"
 
 #include <math.h>
 #include <stdio.h>

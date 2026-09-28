@@ -5,14 +5,14 @@
 
 #include "base/containers/vector.h"
 #include "base/memory/mem_ops.h"
-#include "render/rhi/device.h"
-#include "render/core/bindless.h"
-#include "render/gi/raytracing.h"
-#include "shaders/recon_restir_di_temporal_cs_hlsl.h"
+#include "rxe/render/core/bindless.h"
+#include "rxe/render/gi/raytracing.h"
+#include "rxe/render/rhi/device.h"
 #include "shaders/path_continue_cs_hlsl.h"
 #include "shaders/recon_restir_di_spatial_cs_hlsl.h"
-#include "shaders/recon_restir_temporal_cs_hlsl.h"
+#include "shaders/recon_restir_di_temporal_cs_hlsl.h"
 #include "shaders/recon_restir_spatial_cs_hlsl.h"
+#include "shaders/recon_restir_temporal_cs_hlsl.h"
 
 using namespace rx;
 using namespace rx::render;

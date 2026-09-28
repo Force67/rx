@@ -1,0 +1,214 @@
+#ifndef RX_WEATHER_WEATHER_H_
+#define RX_WEATHER_WEATHER_H_
+
+// rx::weather: an art-directable weather-STATE framework. Decides WHAT
+// atmospheric conditions exist and where; never renders, just hands the
+// renderer two value structs per frame (CloudscapeControls for the cloud deck,
+// WeatherSettings for precipitation, wind, surface response, lightning,
+// aurora). Owns named WeatherStates, world-space WeatherRegions gating where
+// each may occur, a deterministic dwell-then-cross-fade scheduler, a scripted
+// override, and the integrals that persist across state changes (cloud-map wind
+// advection, surface soak/dry, strike timing).
+//
+// Conventions as rx::scene: right-handed, +Y up, metres, m/s, radians. Wind yaw
+// is the direction the wind blows TOWARD on the XZ plane and matches
+// render::WeatherSettings::wind_yaw. All randomness comes from
+// one seeded integer PRNG here, so a seed + Update() sequence reproduces the
+// schedule.
+
+#include <base/containers/vector.h>
+
+
+#include "base/functional/function.h"
+#include "foundation/build_config/types.h"
+#include "foundation/math/math.h" // Vec2 (weather map XZ offset), Vec3
+#include "plugins/weather/export.h"
+#include "rxe/render/atmosphere/cloudscape_types.h"
+#include "rxe/render/core/settings.h"
+
+namespace rx::weather {
+
+// A named preset: one fully-specified set of atmospheric conditions. Adding a
+// state to the system returns its index; regions and the scheduler refer to
+// states by that index. Defaults describe a calm, mostly-clear afternoon.
+struct WeatherState {
+  const char *name = ""; // debug label only
+
+  // Cloud deck (feeds render::CloudscapeMapState + CloudscapeControls)
+  f32 coverage = 0.4f;   // 0 clear .. 1 overcast
+  f32 cloud_type = 0.6f; // 0 stratus .. 0.5 stratocumulus .. 1 cumulus
+  f32 precipitation =
+      0.0f;              // 0 none .. 1 heavy (also the surface-response driver)
+  f32 storminess = 0.0f; // 0..1 anvil: flattened tops, dark precipitating bases
+  f32 darkness = 0.0f;   // 0..1 menace: blackens the deck (severe-storm skies)
+  f32 density = 1.0f;    // global cloud density multiplier
+  u32 map_seed = 1u;     // varies the spatial pattern of the weather map
+  // Shell altitudes, metres ASL. Author them to the class this state
+  // represents: real stratus ceilings base below ~1.2 km and stay thin,
+  // stratocumulus ~0.6-1.5 km base / ~2.5 km top, cumulus bases ride the
+  // condensation level (~0.5-2 km, higher in dry air), and cumulonimbus
+  // towers run from a low base to a 10-16 km anvil.
+  f32 base_altitude = 1800.0f;
+  f32 top_altitude = 6000.0f;
+
+  // Wind (shared by clouds + precipitation slant)
+  f32 wind_yaw = 0.29146f;    // radians on XZ, direction the wind blows toward
+  f32 wind_speed = 12.53f;    // m/s
+  f32 vertical_skew = 700.0f; // metres of extra downwind drift at the layer top
+  f32 turbulence = 1.0f;      // curl-noise distortion of the erosion detail
+
+  // Ground haze
+  f32 fog_density =
+      0.03f; // 0 clear .. 1 thick murk (post-rain mist adds on top)
+  f32 fog_height = 90.0f; // exponential falloff scale, metres
+  f32 fog_churn = 0.15f;  // 0 still .. 1 boiling (vapour rising off warm water)
+
+  // Surface / sky flags
+  bool snow = false; // precipitation falls as snow (whitens instead of wetting)
+  bool aurora = false; // night-sky curtains up in this state
+
+  // Tornado
+  // How prone this state is to spawning a vortex (0 = never). Requires the
+  // blended deck to be anvil-heavy; the layer then runs the whole lifecycle:
+  // touchdown, a wander downwind past the player, rope-out.
+  f32 tornado_prone = 0.0f;
+
+  // Lightning placement
+  // Strikes land in this ring around the player. The defaults put the storm
+  // overhead; a distant-front state pushes the ring kilometres out, and the
+  // global flash then attenuates with strike distance so only the far cell's
+  // corner of the sky flickers (plus its delayed, muffled thunder).
+  f32 strike_min_range = 100.0f;
+  f32 strike_max_range = 300.0f;
+
+  // Scheduling
+  f32 transition_seconds =
+      20.0f; // cross-fade duration when this state becomes the target
+  f32 min_dwell = 40.0f;  // shortest time to remain once settled (seconds)
+  f32 max_dwell = 140.0f; // longest time to remain once settled
+  f32 weight = 1.0f;      // base scheduling weight (relative likelihood)
+  f32 day_weight = 1.0f;  // weight multiplier at high noon
+  f32 night_weight =
+      1.0f; // weight multiplier at midnight (lerped by time of day)
+};
+
+// A world-space region that restricts which states may occur inside it. Regions
+// are axis-aligned boxes on the XZ plane; the highest-priority region that
+// contains the player wins. When no explicit region contains the player the
+// system falls back to an implicit global region that allows every state at its
+// own base weight, so a system with states but no regions still schedules.
+struct WeatherRegion {
+  const char *name = "";
+  Vec2 min_xz{0, 0}; // box corner (world metres)
+  Vec2 max_xz{0, 0}; // box corner; a degenerate box never contains anything
+  i32 priority = 0;  // higher wins ties by containment
+  base::Vector<u32> states;  // allowed state indices
+  base::Vector<f32> weights; // per-state weight, parallel to `states`
+                             // (missing/short entries default to 1)
+};
+
+// The weather layer. Construct with a PRNG seed, register states and regions,
+// then call Update() once per frame with the player position and the day phase.
+// Read cloudscape() / weather() and hand them to the renderer.
+class RX_WEATHER_EXPORT WeatherSystem {
+public:
+  // Optional ground-height sampler: lightning strikes ask it for the ground y
+  // at a world XZ. Defaults to the y=0 plane.
+  using GroundHeightFn = base::Function<f32(f32 x, f32 z)>;
+
+  explicit WeatherSystem(u32 rng_seed = 1);
+
+  // Registration. Returns the new index. Add every state before the regions
+  // that reference it; indices are stable (append only).
+  u32 AddState(const WeatherState &state);
+  u32 AddRegion(const WeatherRegion &region);
+
+  // Ground sampler for lightning strike placement (defaults to y=0).
+  void SetGroundHeight(GroundHeightFn fn);
+
+  // Scripted override for story moments: jump toward `state_index` over
+  // `transition_seconds` (<= 0 snaps instantly) and stop scheduling. A forced
+  // state never dwells out. ClearForced() resumes normal scheduling from the
+  // current state. Calling this before any state is registered is a no-op.
+  void ForceState(u32 state_index, f32 transition_seconds);
+  void ClearForced();
+
+  // Advance one frame. `time_of_day01` is 0 at midnight, 0.5 at noon, 1 at
+  // midnight again; it biases state weights (day_weight/night_weight) and is
+  // the only clock the layer reads. With no states registered this is a no-op
+  // that leaves the default outputs untouched (never crashes).
+  void Update(f32 dt, const Vec3 &player_pos, f32 time_of_day01);
+
+  // Per-frame outputs handed to the renderer.
+  const render::CloudscapeControls &cloudscape() const { return cloudscape_; }
+  const render::WeatherSettings &weather() const { return weather_; }
+
+  // Introspection. `active_state` is the state currently blended FROM (the
+  // settled state once a transition completes); `target_state` is the one being
+  // blended TO; `transition` is the raw 0..1 blend progress (0 when settled).
+  u32 active_state() const { return from_; }
+  u32 target_state() const { return to_; }
+  f32 transition() const { return blend_; }
+
+private:
+  // xorshift32: the whole layer's determinism rests on this single stream.
+  u32 NextU32();
+  f32 NextF32(); // [0, 1)
+  f32 RandomRange(f32 lo, f32 hi);
+  f32 RandomDwell(u32 state);
+
+  // Weighted next-state pick from the region that contains `player_pos`.
+  u32 PickNext(const Vec3 &player_pos, f32 time_of_day01);
+  const WeatherRegion *ActiveRegion(const Vec3 &player_pos) const;
+
+  void BeginTransition(u32 next); // start a cross-fade to `next`
+  void Settle();                  // collapse the transition (from_ == to_)
+  void Compose();                 // write cloudscape_/weather_ from the blend
+  void IntegrateSurface(f32 dt, f32 precip, bool snow);
+  void IntegrateTornado(f32 dt, const Vec3 &player_pos, f32 anvil);
+  bool IntegrateLightning(f32 dt, const Vec3 &player_pos, f32 precip,
+                          f32 anvil);
+  const WeatherState &TransitionSource() const;
+
+  render::CloudscapeMapState MapOf(const WeatherState &s) const;
+
+  u32 rng_; // live PRNG state
+
+  base::Vector<WeatherState> states_;
+  base::Vector<WeatherRegion> regions_;
+  GroundHeightFn ground_ = [](f32, f32) { return 0.0f; };
+
+  // State machine. A reverse retarget can have from_ == to_ while a snapshot
+  // transition is active, so activity is explicit rather than index-derived.
+  u32 from_ = 0;
+  u32 to_ = 0;
+  f32 blend_ = 0.0f;     // 0..1 progress from -> to
+  f32 blend_dur_ = 0.0f; // seconds for the active transition
+  f32 dwell_left_ =
+      0.0f; // seconds until the next reschedule (settled + unforced only)
+  bool forced_ = false;
+  bool started_ = false; // first Update selects a region-valid initial state
+  bool transition_active_ = false;
+  WeatherState transition_source_{};
+  bool has_transition_source_ = false;
+
+  // Running integrals that must survive state changes.
+  Vec2 map_offset_{0, 0}; // integrated wind advection of the weather map
+  f32 wetness_ = 0.0f;
+  f32 snow_cover_ = 0.0f;
+  // Vortex lifecycle (see IntegrateTornado): one funnel at a time.
+  bool tornado_active_ = false;
+  f32 tornado_age_ = 0.0f;
+  f32 tornado_dur_ = 0.0f;
+  f32 tornado_timer_ = 20.0f; // seconds until the first possible spawn
+  Vec2 tornado_pos_{0, 0};
+  f32 strike_timer_ =
+      0.0f; // seconds until the next stochastic strike (stormy only)
+
+  render::CloudscapeControls cloudscape_;
+  render::WeatherSettings weather_;
+};
+
+} // namespace rx::weather
+
+#endif // RX_WEATHER_WEATHER_H_

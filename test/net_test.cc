@@ -7,12 +7,12 @@
 #include <stdio.h>
 
 #include "base/containers/vector.h"
-#include "ecs/world.h"
-#include "net/bubble.h"
-#include "net/protocol.h"
-#include "net/replication.h"
-#include "net/wire.h"
-#include "scene/components.h"
+#include "plugins/replication/bubble.h"
+#include "plugins/replication/replication.h"
+#include "rxe/ecs/world.h"
+#include "rxe/net/protocol.h"
+#include "rxe/net/wire.h"
+#include "rxe/scene/components.h"
 
 namespace {
 

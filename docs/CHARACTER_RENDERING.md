@@ -36,11 +36,11 @@ resets to the region presets.
 
 | Piece | Where |
 | --- | --- |
-| The BRDF | `engine/render/shaders/human_brdf.hlsli` |
-| The eye | `engine/render/shaders/human_eye.hlsli` |
-| CPU side, presets, tiers, CPU mirror | `engine/render/pipeline/human_material.{h,cc}` |
-| Authored parameters | `asset::Material::HumanParams` (`engine/asset/material.h`) |
-| Reference comparison pass | `engine/render/post/reference_compare.{h,cc}` |
+| The BRDF | `rxe/render/shaders/human_brdf.hlsli` |
+| The eye | `rxe/render/shaders/human_eye.hlsli` |
+| CPU side, presets, tiers, CPU mirror | `rxe/render/pipeline/human_material.{h,cc}` |
+| Authored parameters | `asset::Material::HumanParams` (`rxe/asset/material.h`) |
+| Reference comparison pass | `rxe/render/post/reference_compare.{h,cc}` |
 | The bench | `runtime/demo_lookdev.{h,cc}` (`--demo lookdev`) |
 | Residual fitting | `tools/fit_residual.py` |
 | Regression test | `test/human_brdf_test.cc` |

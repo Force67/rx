@@ -7,8 +7,6 @@
 #include <math.h>
 #include <stdio.h>
 
-#include "audio/mixer.h"
-#include "audio/synth_voice.h"
 #include "base/atomic.h"
 #include "base/containers/vector.h"
 #include "base/memory/unique_pointer.h"
@@ -16,9 +14,11 @@
 #include "foundation/build_config/types.h"
 #include "foundation/math/math.h"
 #include "foundation/math/scalar.h"
-#include "vehicles/aux_synth.h"
-#include "vehicles/engine_synth.h"
-#include "vehicles/vehicle_audio.h"
+#include "plugins/vehicles/aux_synth.h"
+#include "plugins/vehicles/engine_synth.h"
+#include "plugins/vehicles/vehicle_audio.h"
+#include "rxe/audio/mixer.h"
+#include "rxe/audio/synth_voice.h"
 
 using namespace rx;
 using namespace rx::audio;

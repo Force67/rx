@@ -5,10 +5,6 @@
 #include <stdio.h>
 #include <stdlib.h>
 
-#include "asset/asset_database.h"
-#include "asset/asset_id.h"
-#include "asset/procedural_texture.h"
-#include "asset/vfs.h"
 #include "base/algorithm.h"
 #include "base/containers/unordered_map.h"
 #include "base/containers/vector.h"
@@ -16,15 +12,19 @@
 #include "base/optional.h"
 #include "base/strings/string_ref.h"
 #include "base/strings/xstring.h"
-#include "ecs/world.h"
-#include "edit/reflect.h"
-#include "edit/scene_io.h"
 #include "foundation/files/file_system.h"
 #include "foundation/logging/log.h"
 #include "foundation/strings/format.h"
 #include "foundation/strings/text_reader.h"
-#include "importers/materialx/materialx.h"
-#include "scene/components.h"
+#include "rxe/asset/asset_database.h"
+#include "rxe/asset/asset_id.h"
+#include "rxe/asset/procedural_texture.h"
+#include "rxe/asset/vfs.h"
+#include "rxe/ecs/world.h"
+#include "rxe/edit/reflect.h"
+#include "rxe/edit/scene_io.h"
+#include "rxe/importers/materialx/materialx.h"
+#include "rxe/scene/components.h"
 #include "scene_authoring.h"
 
 namespace rx {

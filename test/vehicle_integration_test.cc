@@ -16,15 +16,15 @@
 #include <math.h>
 #include <stdio.h>
 
-#include "audio/synth_voice.h"
 #include "base/containers/vector.h"
 #include "foundation/math/math.h"
 #include "foundation/math/scalar.h"
-#include "physics/physics_world.h"
-#include "physics/water_waves.h"
-#include "vehicles/aircraft.h"
-#include "vehicles/boat.h"
-#include "vehicles/engine_synth.h"
+#include "plugins/vehicles/aircraft.h"
+#include "plugins/vehicles/boat.h"
+#include "plugins/vehicles/engine_synth.h"
+#include "rxe/audio/synth_voice.h"
+#include "rxe/physics/physics_world.h"
+#include "rxe/physics/water_waves.h"
 
 using namespace rx;
 using audio::EnginePreset;

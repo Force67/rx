@@ -4,7 +4,7 @@
 A quoted include must resolve to a file of the including target itself or of a
 target it can see through its links: its direct links, plus what those export
 through INTERFACE_LINK_LIBRARIES. On top of that come the layering rules from
-docs/STRUCTURE.md, applied to today's module names until the tree moves.
+docs/STRUCTURE.md. A plugin is any module under plugins/.
 
 Existing violations live in baseline.txt next to this script. The check fails on
 a violation that is not in the baseline, and on a baseline entry that no longer
@@ -23,16 +23,12 @@ BASELINE = os.path.join(os.path.dirname(os.path.abspath(__file__)), "baseline.tx
 ENTITY_FREE = {"foundation", "events", "window", "ui", "asset", "audio", "net", "http", "rpc", "physics",
                "anim", "render", "render2d"}
 ENTITY_WORLD = {"ecs", "scene", "script", "world", "edit", "authoring", "app"}
-# Optional modules a game opts into (plugins/ after the move).
-PLUGINS = {"character", "combat", "inventory", "inventory_world", "locomotion",
-           "placement", "placement_gpu", "terrain", "nav", "nav_viz", "net_viz",
-           "replication", "vehicles", "weather"}
 # Headers only the editor and tools may use; a shipping game never links them.
-EDITOR_ONLY = {"engine/edit/hierarchy.h", "engine/edit/selection.h",
-               "engine/edit/undo.h", "engine/world/world_bake.h"}
+EDITOR_ONLY = {"rxe/edit/hierarchy.h", "rxe/edit/selection.h",
+               "rxe/edit/undo.h", "rxe/world/world_bake.h"}
 HEADER_EXTS = (".h", ".hpp", ".inl", ".def")
 SOURCE_EXTS = (".cc", ".cpp", ".c") + HEADER_EXTS
-CODE_DIRS = ("foundation", "engine", "runtime", "apps", "tools", "test", "examples")
+CODE_DIRS = ("foundation", "rxe", "plugins", "runtime", "apps", "tools", "test", "examples")
 
 
 def unwrap(item):
@@ -136,7 +132,7 @@ class Graph:
       inc, _ = unwrap(inc)
       if not inc.startswith("$<"):
         dirs.append(inc)
-    dirs += [os.path.join(self.root, "engine"), self.root]
+    dirs.append(self.root)
     for d in dirs:
       path = os.path.normpath(os.path.join(d, spelled))
       if os.path.isfile(path):
@@ -147,9 +143,12 @@ class Graph:
 def check(graph):
   rel = lambda p: os.path.relpath(p, graph.root)
   violations = {}  # key -> first path:line
-  # The layering rules bind foundation and engine modules. An app's own library (the viewer's
+  # The layering rules bind foundation, rxe and plugin modules. An app's own library (the viewer's
   # scene authoring) answers only to the link check, like the app.
-  module_dirs = tuple(os.path.join(graph.root, d) + os.sep for d in ("foundation", "engine"))
+  module_dirs = tuple(os.path.join(graph.root, d) + os.sep for d in ("foundation", "rxe", "plugins"))
+  plugin_dir = os.path.join(graph.root, "plugins") + os.sep
+  plugins = {module_of(t) for t, v in graph.targets.items()
+             if t in graph.libraries and (v["source_dir"] + os.sep).startswith(plugin_dir)}
   def module_rules_of(target):
     if (target in graph.libraries and
         (graph.targets[target]["source_dir"] + os.sep).startswith(module_dirs)):
@@ -191,7 +190,7 @@ def check(graph):
           found.append(("host", "only apps may depend on the host"))
         if rel(dep) in EDITOR_ONLY:
           found.append(("editor-only", "a library may not use editor-only code"))
-        if mod not in PLUGINS and dep_mods & PLUGINS:
+        if mod not in plugins and dep_mods & plugins:
           found.append(("plugin", "engine module %s may not depend on a plugin" % mod))
       for rule, why in found:
         key = "%s %s %s" % (rule, rel(path), rel(dep))

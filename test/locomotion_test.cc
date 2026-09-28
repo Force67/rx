@@ -10,11 +10,11 @@
 
 #include "foundation/math/math.h"
 #include "foundation/math/scalar.h"
-#include "locomotion/controller.h"
-#include "locomotion/estimator.h"
-#include "locomotion/rig.h"
-#include "locomotion/types.h"
-#include "physics/physics_world.h"
+#include "plugins/locomotion/controller.h"
+#include "plugins/locomotion/estimator.h"
+#include "plugins/locomotion/rig.h"
+#include "plugins/locomotion/types.h"
+#include "rxe/physics/physics_world.h"
 
 using namespace rx;
 using namespace rx::locomotion;
