@@ -178,15 +178,18 @@ if(@RX_INSTALL_JOLT@ AND TARGET rx::physics)
     INTERFACE_LINK_LIBRARIES $<LINK_ONLY:Jolt> $<LINK_ONLY:kinema::kinema>)
 endif()
 
-# rx::asset decodes images through stb, and reads USD stages through tinyusdz
-# when the package was built with it (both link-only: neither header is bundled).
-if(TARGET rx::asset)
-  set_property(TARGET rx::asset APPEND PROPERTY
-    INTERFACE_LINK_LIBRARIES $<LINK_ONLY:rx::stb_impl>)
-  if(@RX_INSTALL_USD@)
-    set_property(TARGET rx::asset APPEND PROPERTY
-      INTERFACE_LINK_LIBRARIES $<LINK_ONLY:rx::tinyusdz>)
+# rx::asset, rx::gltf and rx::usd decode images through stb, and rx::usd reads
+# USD stages through tinyusdz when the package was built with it (all link-only:
+# neither header is bundled).
+foreach(_rx_stb_user rx::asset rx::gltf rx::usd)
+  if(TARGET ${_rx_stb_user})
+    set_property(TARGET ${_rx_stb_user} APPEND PROPERTY
+      INTERFACE_LINK_LIBRARIES $<LINK_ONLY:rx::stb_impl>)
   endif()
+endforeach()
+if(@RX_INSTALL_USD@ AND TARGET rx::usd)
+  set_property(TARGET rx::usd APPEND PROPERTY
+    INTERFACE_LINK_LIBRARIES $<LINK_ONLY:rx::tinyusdz>)
 endif()
 
 # rx::anim's graph/rig/foot-placement units link kinema (link-only; kinema is

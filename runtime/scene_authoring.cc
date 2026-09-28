@@ -6,9 +6,7 @@
 #include <stdlib.h>
 #include <string.h>
 
-#include "asset/gltf_loader.h"
 #include "asset/image_file.h"
-#include "asset/materialx.h"
 #include "asset/primitives.h"
 #include "asset/procedural_texture.h"
 #include "asset/scene_import.h"
@@ -16,10 +14,10 @@
 #include "asset/vfs.h"
 #include "base/algorithm.h"
 #include "base/containers/pair.h"
-#include "base/containers/vector.h"
-#include "base/memory/mem_ops.h"
 #include "base/containers/unordered_map.h"
 #include "base/containers/unordered_set.h"
+#include "base/containers/vector.h"
+#include "base/memory/mem_ops.h"
 #include "base/memory/move.h"
 #include "base/memory/unique_pointer.h"
 #include "base/strings/string_ref.h"
@@ -32,6 +30,8 @@
 #include "edit/hierarchy.h"
 #include "edit/reflect.h"
 #include "edit/scene_io.h"
+#include "importers/gltf/gltf_loader.h"
+#include "importers/materialx/materialx.h"
 #include "scene/components.h"
 
 namespace rx {

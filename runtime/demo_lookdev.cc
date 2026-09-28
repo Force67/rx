@@ -11,7 +11,6 @@
 
 #include <base/option.h>
 
-#include "asset/gltf_loader.h"
 #include "asset/primitives.h"
 #include "asset/scene_import.h"
 #include "base/containers/span.h"
@@ -20,12 +19,13 @@
 #include "base/memory/move.h"
 #include "base/memory/unique_pointer.h"
 #include "base/strings/xstring.h"
+#include "core/file_system.h"
 #include "core/log.h"
 #include "core/scalar.h"
 #include "ecs/world.h"
+#include "importers/gltf/gltf_loader.h"
 #include "render/post/reference_compare.h"
 #include "scene/components.h"
-#include "core/file_system.h"
 
 namespace rx {
 namespace {

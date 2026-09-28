@@ -8,11 +8,11 @@
 #include "anim/expression.h"
 #include "app/application.h"
 #include "app/host.h"
-#include "asset/gltf_loader.h"
-#include "asset/usd_loader.h"
 #include "asset/mesh.h"
 #include "authoring/command_bridge.h"
 #include "authoring/command_endpoint.h"
+#include "importers/gltf/gltf_loader.h"
+#include "importers/usd/usd_loader.h"
 #include "script/handler_context.h"
 #include "script/handler_registry.h"
 #include "script/script_arena.h"
@@ -25,7 +25,8 @@
 #include "debug_ui.h"
 #include "demo_world.h"
 #include "engine_context.h"
-#include "fly_camera.h"
+#include "scene/fly_camera.h"
+#include "viewer_input.h"
 #include "showcase_camera.h"
 
 namespace rx {
@@ -104,7 +105,7 @@ class Viewer : public app::Application {
   const ActionState* actions_ = nullptr;
   base::Vector<PhysicsEntity>* physics_entities_ = nullptr;
 
-  FlyCamera camera_;
+  scene::FlyCamera camera_;
   DebugUi debug_ui_;
 
   // drive_sun_from_clock_ is false when RX_SUN_DIR pins a fixed sun (headless

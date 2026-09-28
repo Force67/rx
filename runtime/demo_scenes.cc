@@ -8,10 +8,8 @@
 
 #include "asset/asset_database.h"
 #include "asset/asset_id.h"
-#include "audio/audio_system.h"
-#include "audio/thunder_synth.h"
-#include "asset/materialx.h"
 #include "asset/primitives.h"
+#include "audio/audio_system.h"
 #include "base/algorithm.h"
 #include "base/containers/span.h"
 #include "base/containers/vector.h"
@@ -22,11 +20,13 @@
 #include "core/log.h"
 #include "core/math.h"
 #include "core/scalar.h"
+#include "importers/materialx/materialx.h"
 #include "physics/water_waves.h"
 #include "render/atmosphere/lightning.h"
 #include "render/geometry/hair_groom.h"
 #include "scene/components.h"
 #include "viewer_input.h"
+#include "weather/thunder_synth.h"
 
 namespace rx {
 

@@ -2,14 +2,14 @@
 #include <stdio.h>
 
 #include "anim/body_dynamics.h"
-#include "anim/locomotion.h"
 #include "anim/pose.h"
+#include "anim/procedural_gait.h"
 #include "asset/asset_id.h"
-#include "asset/blend_import.h"
-#include "asset/gltf_loader.h"
 #include "base/algorithm.h"
 #include "base/strings/xstring.h"
 #include "core/scalar.h"
+#include "importers/blend/blend_import.h"
+#include "importers/gltf/gltf_loader.h"
 
 namespace {
 
@@ -78,11 +78,11 @@ int TestBlend(const base::String &blend_path, const base::String &script) {
     return 1;
   anim::SkeletonPose hip_sway_pose;
   anim::SkeletonPose march_pose;
-  anim::Locomotion hip_sway;
+  anim::ProceduralGait hip_sway;
   hip_sway.phase = 0.125f;
   hip_sway.style = anim::MakeWalkStylePreset(anim::WalkStyleKind::kHipSway);
   hip_sway.Apply(skeleton, 1.35f, &hip_sway_pose);
-  anim::Locomotion march;
+  anim::ProceduralGait march;
   march.phase = hip_sway.phase;
   march.style = anim::MakeWalkStylePreset(anim::WalkStyleKind::kMarch);
   march.Apply(skeleton, 1.35f, &march_pose);

@@ -1,0 +1,884 @@
+#include "importers/gltf/gltf_loader.h"
+
+#include <ctype.h>
+#include <math.h>
+#include <stdlib.h>
+#include <string.h>
+
+#include "asset/asset_id.h"
+#include "asset/texture_compress.h"
+#include "base/memory/mem_ops.h"
+#include "base/algorithm.h"
+#include "base/memory/move.h"
+#include "base/strings/string_ref.h"
+#include "base/strings/xstring.h"
+#include "core/format.h"
+#include "core/file_system.h"
+#include "core/log.h"
+#include "core/memory/memory_tracker.h"
+#include "core/scalar.h"
+
+#define CGLTF_IMPLEMENTATION
+#include <cgltf.h>
+
+// The implementation lives in third_party/stb_impl.c (rx::stb_impl); this is
+// only the declarations.
+#include <stb_image.h>
+
+namespace rx::asset {
+namespace {
+
+AssetId ScopedId(const base::String &path, const char *kind, size_t index) {
+  return MakeAssetId(path + "#" + kind + rx::ToString(index));
+}
+
+// Decodes one glTF image to rgba8, from an external file, a GLB buffer view
+// or a base64 data uri.
+bool DecodeImage(const cgltf_image *image,
+                 base::StringRef base_dir, Texture *out) {
+  stbi_uc *pixels = nullptr;
+  int width = 0, height = 0, channels = 0;
+
+  if (image->buffer_view) {
+    const u8 *bytes =
+        static_cast<const u8 *>(image->buffer_view->buffer->data) +
+        image->buffer_view->offset;
+    pixels =
+        stbi_load_from_memory(bytes, static_cast<int>(image->buffer_view->size),
+                              &width, &height, &channels, 4);
+  } else if (image->uri) {
+    if (::strncmp(image->uri, "data:", 5) == 0) {
+      const char *comma = ::strchr(image->uri, ',');
+      if (!comma)
+        return false;
+      void *decoded = nullptr;
+      cgltf_options options{};
+      // Base64 length to byte count: every 4 chars carry 3 bytes.
+      cgltf_size size = (::strlen(comma + 1) / 4) * 3;
+      if (cgltf_load_buffer_base64(&options, size, comma + 1, &decoded) !=
+          cgltf_result_success) {
+        return false;
+      }
+      pixels = stbi_load_from_memory(static_cast<const stbi_uc *>(decoded),
+                                     static_cast<int>(size), &width, &height,
+                                     &channels, 4);
+      CGLTF_FREE(decoded);
+    } else {
+      char decoded_uri[1024];
+      ::strncpy(decoded_uri, image->uri, sizeof(decoded_uri) - 1);
+      decoded_uri[sizeof(decoded_uri) - 1] = 0;
+      cgltf_decode_uri(decoded_uri);
+      const base::String file = fs::Join(base_dir, decoded_uri);
+      pixels = stbi_load(file.c_str(), &width, &height, &channels, 4);
+    }
+  }
+  if (!pixels)
+    return false;
+
+  out->format = TextureFormat::kRgba8;
+  out->width = static_cast<u32>(width);
+  out->height = static_cast<u32>(height);
+  out->mip_count = 1;
+  out->data.resize(static_cast<size_t>(width) * height * 4);
+  base::MemCopy(out->data.data(), pixels, out->data.size());
+  stbi_image_free(pixels);
+  return true;
+}
+
+void ReadFloats(const cgltf_accessor *accessor, u32 components,
+                base::Vector<f32> *out) {
+  out->clear();
+  if (!accessor)
+    return;
+  out->resize(accessor->count * components);
+  // unpack_floats widens every component type and applies normalization.
+  cgltf_accessor_unpack_floats(accessor, out->data(),
+                               accessor->count * components);
+}
+
+// Average uv-space tangents per vertex when the source has none. Not
+// mikktspace, but enough for normal mapping on well behaved content.
+void GenerateTangents(MeshLod *lod, u32 vertex_offset, u32 index_offset) {
+  base::Vector<Vec3> tangents(lod->vertices.size() - vertex_offset);
+  for (size_t i = index_offset; i + 2 < lod->indices.size(); i += 3) {
+    Vertex &v0 = lod->vertices[lod->indices[i]];
+    Vertex &v1 = lod->vertices[lod->indices[i + 1]];
+    Vertex &v2 = lod->vertices[lod->indices[i + 2]];
+    Vec3 e1{v1.position[0] - v0.position[0], v1.position[1] - v0.position[1],
+            v1.position[2] - v0.position[2]};
+    Vec3 e2{v2.position[0] - v0.position[0], v2.position[1] - v0.position[1],
+            v2.position[2] - v0.position[2]};
+    f32 du1 = v1.uv[0] - v0.uv[0], dv1 = v1.uv[1] - v0.uv[1];
+    f32 du2 = v2.uv[0] - v0.uv[0], dv2 = v2.uv[1] - v0.uv[1];
+    f32 det = du1 * dv2 - du2 * dv1;
+    if (::fabsf(det) < 1e-12f)
+      continue;
+    f32 inv = 1.0f / det;
+    Vec3 tangent = (e1 * dv2 + e2 * -dv1) * inv;
+    for (int corner = 0; corner < 3; ++corner) {
+      u32 index = lod->indices[i + corner];
+      if (index >= vertex_offset)
+        tangents[index - vertex_offset] += tangent;
+    }
+  }
+  for (size_t i = 0; i < tangents.size(); ++i) {
+    Vertex &vertex = lod->vertices[vertex_offset + i];
+    Vec3 n{vertex.normal[0], vertex.normal[1], vertex.normal[2]};
+    Vec3 t = tangents[i] - n * Dot(n, tangents[i]);
+    if (Dot(t, t) < 1e-12f) {
+      // Degenerate uvs; any frame orthogonal to n will do.
+      t = ::fabsf(n.y) < 0.99f ? Cross(n, {0, 1, 0}) : Cross(n, {1, 0, 0});
+    }
+    t = Normalize(t);
+    vertex.tangent[0] = t.x;
+    vertex.tangent[1] = t.y;
+    vertex.tangent[2] = t.z;
+    vertex.tangent[3] = 1.0f;
+  }
+}
+
+// Rotation quaternion from an orthonormalized basis, Shepperd's method.
+void QuatFromMatrix(const f32 m[16], const Vec3 &scale, f32 out[4]) {
+  f32 r[9]; // row-major 3x3, normalized
+  for (int col = 0; col < 3; ++col) {
+    f32 axis_scale = col == 0 ? scale.x : (col == 1 ? scale.y : scale.z);
+    f32 inv = axis_scale > 1e-12f ? 1.0f / axis_scale : 0.0f;
+    for (int row = 0; row < 3; ++row)
+      r[row * 3 + col] = m[col * 4 + row] * inv;
+  }
+  f32 trace = r[0] + r[4] + r[8];
+  if (trace > 0) {
+    f32 s = ::sqrtf(trace + 1.0f) * 2;
+    out[3] = 0.25f * s;
+    out[0] = (r[7] - r[5]) / s;
+    out[1] = (r[2] - r[6]) / s;
+    out[2] = (r[3] - r[1]) / s;
+  } else if (r[0] > r[4] && r[0] > r[8]) {
+    f32 s = ::sqrtf(1.0f + r[0] - r[4] - r[8]) * 2;
+    out[3] = (r[7] - r[5]) / s;
+    out[0] = 0.25f * s;
+    out[1] = (r[1] + r[3]) / s;
+    out[2] = (r[2] + r[6]) / s;
+  } else if (r[4] > r[8]) {
+    f32 s = ::sqrtf(1.0f + r[4] - r[0] - r[8]) * 2;
+    out[3] = (r[2] - r[6]) / s;
+    out[0] = (r[1] + r[3]) / s;
+    out[1] = 0.25f * s;
+    out[2] = (r[5] + r[7]) / s;
+  } else {
+    f32 s = ::sqrtf(1.0f + r[8] - r[0] - r[4]) * 2;
+    out[3] = (r[3] - r[1]) / s;
+    out[0] = (r[2] + r[6]) / s;
+    out[1] = (r[5] + r[7]) / s;
+    out[2] = 0.25f * s;
+  }
+}
+
+// KHR_texture_transform: offset/rotation/scale applied to the uv before a
+// texture is sampled. Blender's exporter emits it for any Mapping node feeding
+// the image nodes, which is how an author says "this material tiles four times
+// across the wall". Dropping it renders at whatever the raw uvs say, which is a
+// texel density nobody chose and which nothing on screen explains.
+//
+// Baked into the VERTEX UVS here rather than carried on the material, for three
+// reasons: the bake is exact, it costs nothing at runtime, and the alternative
+// needs a per-slot uv matrix in the material params (whose byte layout three
+// shaders already pin by hand) to express something an offline multiply
+// expresses for free. The one thing it cannot express is two slots of one
+// material disagreeing, which is warned about below rather than silently
+// resolved.
+struct UvTransform {
+  f32 offset[2] = {0, 0};
+  f32 rotation = 0;
+  f32 scale[2] = {1, 1};
+  bool present = false;
+};
+
+bool SameUvTransform(const UvTransform &a, const cgltf_texture_transform &b) {
+  return a.offset[0] == b.offset[0] && a.offset[1] == b.offset[1] &&
+         a.rotation == b.rotation && a.scale[0] == b.scale[0] &&
+         a.scale[1] == b.scale[1];
+}
+
+// Folds one texture reference's transform into the material's, warning by name
+// when the slot disagrees with a slot already read. First one wins, so what a
+// conflicting material renders at is its base colour's density rather than
+// whichever slot the struct happened to list last.
+void MergeUvTransform(const cgltf_texture_view &view, const char *slot,
+                      const char *material_name, UvTransform *out) {
+  if (!view.texture || !view.has_transform)
+    return;
+  const cgltf_texture_transform &transform = view.transform;
+  if (out->present) {
+    if (!SameUvTransform(*out, transform)) {
+      RX_WARN("gltf material '{}': KHR_texture_transform on the {} map "
+              "(offset {} {}, rotation {}, scale {} {}) disagrees with an "
+              "earlier map's; the uvs are per vertex, so only one transform "
+              "can be baked and this one is DROPPED",
+              material_name, slot, transform.offset[0], transform.offset[1],
+              transform.rotation, transform.scale[0], transform.scale[1]);
+    }
+    return;
+  }
+  if (transform.has_texcoord && transform.texcoord != 0) {
+    // The importer reads uv set 0 only (attribute.index != 0 is skipped), so a
+    // transform that redirects the slot to another set would be baked onto uvs
+    // it does not belong to.
+    RX_WARN("gltf material '{}': KHR_texture_transform on the {} map selects "
+            "TEXCOORD_{}, and this importer reads uv set 0 only; the transform "
+            "is DROPPED",
+            material_name, slot, transform.texcoord);
+    return;
+  }
+  out->present = true;
+  out->offset[0] = transform.offset[0];
+  out->offset[1] = transform.offset[1];
+  out->rotation = transform.rotation;
+  out->scale[0] = transform.scale[0];
+  out->scale[1] = transform.scale[1];
+}
+
+// uv' = T * R * S * uv, spelt out from the extension's own sample shader.
+void ApplyUvTransform(const UvTransform &transform, f32 uv[2]) {
+  const f32 cos_r = ::cosf(transform.rotation);
+  const f32 sin_r = ::sinf(transform.rotation);
+  const f32 u = uv[0] * transform.scale[0];
+  const f32 v = uv[1] * transform.scale[1];
+  uv[0] = cos_r * u - sin_r * v + transform.offset[0];
+  uv[1] = sin_r * u + cos_r * v + transform.offset[1];
+}
+
+void Decompose(const Mat4 &matrix, Vec3 *translation, Quat *rotation,
+               f32 *scale) {
+  *translation = Translation(matrix);
+  const Vec3 axes = {
+      Length({matrix.m[0], matrix.m[1], matrix.m[2]}),
+      Length({matrix.m[4], matrix.m[5], matrix.m[6]}),
+      Length({matrix.m[8], matrix.m[9], matrix.m[10]}),
+  };
+  *scale = (axes.x + axes.y + axes.z) / 3.0f;
+  *rotation = QuatFromMat4(matrix);
+}
+
+} // namespace
+
+bool LoadGltfScene(const base::String &path, ImportedScene *out) {
+  static const mem::Category kAssetCategory = mem::RegisterCategory("assets");
+  mem::CategoryScope mem_scope(kAssetCategory);
+  cgltf_options options{};
+  cgltf_data *data = nullptr;
+  if (cgltf_parse_file(&options, path.c_str(), &data) != cgltf_result_success) {
+    RX_ERROR("gltf parse failed: {}", path);
+    return false;
+  }
+  if (cgltf_load_buffers(&options, data, path.c_str()) !=
+      cgltf_result_success) {
+    RX_ERROR("gltf buffer load failed: {}", path);
+    cgltf_free(data);
+    return false;
+  }
+  const base::String base_dir(fs::ParentPath(path));
+
+  // Base color and emissive sample as srgb, data maps stay linear. The same
+  // walk records which slot each image is bound as, because that - not the
+  // colour space - is what picks a block format, and a glTF image carries no
+  // hint of its own.
+  base::Vector<bool> texture_srgb(data->textures_count);
+  base::Vector<u8> texture_slots(data->textures_count);
+  constexpr u8 kSlotColor = 1u << 0;
+  constexpr u8 kSlotNormal = 1u << 1;
+  constexpr u8 kSlotData = 1u << 2;
+  auto mark = [&](const cgltf_texture *t, u8 slot) {
+    if (!t) return;
+    texture_slots[static_cast<size_t>(t - data->textures)] |= slot;
+    if (slot == kSlotColor) texture_srgb[static_cast<size_t>(t - data->textures)] = true;
+  };
+  for (size_t i = 0; i < data->materials_count; ++i) {
+    const cgltf_material &material = data->materials[i];
+    if (material.has_pbr_metallic_roughness) {
+      mark(material.pbr_metallic_roughness.base_color_texture.texture, kSlotColor);
+      mark(material.pbr_metallic_roughness.metallic_roughness_texture.texture,
+           kSlotData);
+    }
+    mark(material.emissive_texture.texture, kSlotColor);
+    mark(material.normal_texture.texture, kSlotNormal);
+  }
+
+  out->textures.resize(data->textures_count);
+  for (size_t i = 0; i < data->textures_count; ++i) {
+    Texture &texture = out->textures[i];
+    texture.id = ScopedId(path, "tex", i);
+    texture.is_srgb = texture_srgb[i];
+    if (!data->textures[i].image ||
+        !DecodeImage(data->textures[i].image, base_dir, &texture)) {
+      RX_WARN("gltf texture {} failed to decode", i);
+      texture.id = {};
+      continue;
+    }
+    // One image bound as more than one kind of map falls back to the format
+    // that keeps every channel. BC5 would drop the two channels the other
+    // slot reads, and a normal map is the only slot whose consumer knows to
+    // put one of them back.
+    const u8 slots = texture_slots[i];
+    TextureRole role = TextureRole::kData;
+    if (slots == kSlotNormal) {
+      role = TextureRole::kNormalTangent;
+    } else if (slots & kSlotColor) {
+      role = TextureRole::kColor;
+    }
+    CompressTexture(&texture, role, path + "#image" + rx::ToString(i));
+  }
+
+  auto texture_id = [&](const cgltf_texture *texture) -> AssetId {
+    if (!texture)
+      return {};
+    return out->textures[static_cast<size_t>(texture - data->textures)].id;
+  };
+
+  out->materials.resize(data->materials_count);
+  // Parallel to the materials: the uv transform every primitive drawn with one
+  // bakes into its own vertex range, below.
+  base::Vector<UvTransform> material_uv(data->materials_count);
+  for (size_t i = 0; i < data->materials_count; ++i) {
+    const cgltf_material &src = data->materials[i];
+    Material &material = out->materials[i];
+    material.id = ScopedId(path, "mat", i);
+    // Only the slots this importer actually binds: a transform on a map that is
+    // dropped anyway (occlusion, specular) is not a conflict worth reporting.
+    const char *material_name = src.name ? src.name : "<unnamed>";
+    if (src.has_pbr_metallic_roughness) {
+      MergeUvTransform(src.pbr_metallic_roughness.base_color_texture,
+                       "base colour", material_name, &material_uv[i]);
+      MergeUvTransform(src.pbr_metallic_roughness.metallic_roughness_texture,
+                       "metallic-roughness", material_name, &material_uv[i]);
+    }
+    MergeUvTransform(src.normal_texture, "normal", material_name,
+                     &material_uv[i]);
+    MergeUvTransform(src.emissive_texture, "emissive", material_name,
+                     &material_uv[i]);
+    if (material_uv[i].present) {
+      RX_INFO("gltf material '{}': baking KHR_texture_transform into the uvs "
+              "(offset {} {}, rotation {}, scale {} {})",
+              material_name, material_uv[i].offset[0], material_uv[i].offset[1],
+              material_uv[i].rotation, material_uv[i].scale[0],
+              material_uv[i].scale[1]);
+    }
+    if (src.has_pbr_metallic_roughness) {
+      const auto &pbr = src.pbr_metallic_roughness;
+      base::MemCopy(material.base_color_factor, pbr.base_color_factor,
+                  sizeof(f32) * 4);
+      material.metallic_factor = pbr.metallic_factor;
+      material.roughness_factor = pbr.roughness_factor;
+      material.base_color = texture_id(pbr.base_color_texture.texture);
+      material.metallic_roughness =
+          texture_id(pbr.metallic_roughness_texture.texture);
+    }
+    material.normal = texture_id(src.normal_texture.texture);
+    material.emissive = texture_id(src.emissive_texture.texture);
+    base::MemCopy(material.emissive_factor, src.emissive_factor, sizeof(f32) * 3);
+    material.alpha_cutoff = src.alpha_cutoff;
+    material.alpha_mode =
+        src.alpha_mode == cgltf_alpha_mode_opaque ? AlphaMode::kOpaque
+        : src.alpha_mode == cgltf_alpha_mode_mask ? AlphaMode::kMask
+                                                  : AlphaMode::kBlend;
+    material.two_sided = src.double_sided;
+    // Extended pbr lobes (KHR_materials_*). Untouched extensions keep the
+    // neutral defaults from the Material struct.
+    if (src.has_clearcoat) {
+      material.clearcoat = src.clearcoat.clearcoat_factor;
+      material.clearcoat_roughness = src.clearcoat.clearcoat_roughness_factor;
+    }
+    if (src.has_anisotropy)
+      material.anisotropy = src.anisotropy.anisotropy_strength;
+    if (src.has_ior)
+      material.ior = src.ior.ior;
+    if (src.has_transmission)
+      material.transmission = src.transmission.transmission_factor;
+    if (src.has_sheen) {
+      base::MemCopy(material.sheen_color, src.sheen.sheen_color_factor,
+                  sizeof(f32) * 3);
+      material.sheen_roughness = src.sheen.sheen_roughness_factor;
+    }
+    // Cloth heuristic: glTF has no wind flag, so name-tag the usual suspects.
+    // Sway weight follows the uv.y-away-from-attachment convention, which
+    // holds for typical hanging drapery unwraps.
+    if (src.name) {
+      material.name = src.name;
+      base::String n = src.name;
+      for (char &c : n)
+        c = static_cast<char>(::tolower(c));
+      if (n.find("curtain") != base::String::npos ||
+          n.find("banner") != base::String::npos ||
+          n.find("flag") != base::String::npos ||
+          n.find("cloth") != base::String::npos ||
+          n.find("fabric") != base::String::npos ||
+          n.find("drape") != base::String::npos) {
+        material.wind = true;
+      }
+      // Water heuristic: glTF has no water extension either, so name-tag water
+      // surfaces onto the dedicated water pipeline (waves, refraction, and the
+      // sims/caustics that key off a water submesh being present). Whole-token
+      // matches only, so "watermelon" and "waterfall" stay ordinary materials.
+      auto has_token = [&n](base::StringRef token) {
+        size_t pos = 0;
+        while ((pos = n.find(token, pos)) != base::String::npos) {
+          bool starts =
+              pos == 0 || !::isalpha(static_cast<unsigned char>(n[pos - 1]));
+          size_t end = pos + token.size();
+          bool ends = end >= n.size() ||
+                      !::isalpha(static_cast<unsigned char>(n[end]));
+          if (starts && ends)
+            return true;
+          ++pos;
+        }
+        return false;
+      };
+      if (has_token("water") || has_token("ocean") || has_token("sea") ||
+          has_token("lake") || has_token("river")) {
+        material.is_water = true;
+      }
+    }
+  }
+
+  // Skins become engine skeletons before meshes are decoded. In glTF the
+  // inverse bind matrices already express joints in mesh/model space:
+  // inverse(inverse_bind[j]) is the joint's bind model transform. Rebuilding
+  // the palette from this skeleton therefore produces identity at rest.
+  out->skeletons.resize(data->skins_count);
+  out->skin_bindings.resize(data->skins_count);
+  for (size_t i = 0; i < data->skins_count; ++i) {
+    const cgltf_skin &src = data->skins[i];
+    Skeleton &skeleton = out->skeletons[i];
+    SkinBinding &binding = out->skin_bindings[i];
+    skeleton.id = ScopedId(path, "skin", i);
+    binding.bones.reserve(src.joints_count);
+    binding.inverse_bind.resize(src.joints_count);
+    base::Vector<Mat4> bind_model(src.joints_count);
+    base::Vector<i32> source_parent(src.joints_count);
+    base::Fill(source_parent.begin(), source_parent.end(), -1);
+    for (size_t joint = 0; joint < src.joints_count; ++joint) {
+      Mat4 inverse_bind = Mat4::Identity();
+      const bool has_inverse_bind =
+          src.inverse_bind_matrices &&
+          joint < src.inverse_bind_matrices->count;
+      binding.bones.push_back(src.joints[joint]->name
+                                  ? src.joints[joint]->name
+                                  : "joint_" + rx::ToString(joint));
+      if (has_inverse_bind) {
+        cgltf_accessor_read_float(src.inverse_bind_matrices, joint,
+                                  inverse_bind.m, 16);
+        binding.inverse_bind[joint] = inverse_bind;
+      } else {
+        binding.inverse_bind[joint] = Mat4::Identity();
+      }
+      bind_model[joint] = has_inverse_bind
+                              ? Inverse(binding.inverse_bind[joint])
+                              : Mat4::Identity();
+      if (!has_inverse_bind)
+        cgltf_node_transform_world(src.joints[joint], bind_model[joint].m);
+      cgltf_node *parent = src.joints[joint]->parent;
+      while (parent && source_parent[joint] < 0) {
+        for (size_t candidate = 0; candidate < src.joints_count; ++candidate) {
+          if (src.joints[candidate] == parent) {
+            source_parent[joint] = static_cast<i32>(candidate);
+            break;
+          }
+        }
+        parent = parent->parent;
+      }
+    }
+
+    // A glTF skin's joint array is the palette order, not a hierarchy order.
+    // SkeletonPose requires parents before children, so build an independent
+    // topological bone order. Mesh::skin remains in source palette order and
+    // BuildBoneRemap connects the two by name.
+    base::Vector<i32> source_to_bone(src.joints_count);
+    base::Fill(source_to_bone.begin(), source_to_bone.end(), -1);
+    skeleton.bones.reserve(src.joints_count);
+    while (skeleton.bones.size() < src.joints_count) {
+      bool progressed = false;
+      for (size_t joint = 0; joint < src.joints_count; ++joint) {
+        if (source_to_bone[joint] >= 0)
+          continue;
+        const i32 source_parent_index = source_parent[joint];
+        if (source_parent_index >= 0 &&
+            source_to_bone[static_cast<u32>(source_parent_index)] < 0) {
+          continue;
+        }
+        Bone bone;
+        bone.name = src.joints[joint]->name
+                        ? src.joints[joint]->name
+                        : "joint_" + rx::ToString(joint);
+        bone.parent = source_parent_index >= 0
+                          ? source_to_bone[static_cast<u32>(source_parent_index)]
+                          : -1;
+        const Mat4 local =
+            source_parent_index >= 0
+                ? Inverse(bind_model[static_cast<u32>(source_parent_index)]) *
+                      bind_model[joint]
+                : bind_model[joint];
+        Decompose(local, &bone.bind_translation, &bone.bind_rotation,
+                  &bone.bind_scale);
+        source_to_bone[joint] = static_cast<i32>(skeleton.bones.size());
+        skeleton.bones.push_back(base::move(bone));
+        progressed = true;
+      }
+      if (progressed)
+        continue;
+
+      RX_WARN("gltf skin {} contains a cyclic joint hierarchy", i);
+      break;
+    }
+  }
+
+  // glTF nodes, rather than meshes, own skin associations. Mesh::skin keeps the
+  // first binding for compatibility with mesh-only consumers; ImportedScene users
+  // use Instance::skeleton_index with skin_bindings for the exact binding.
+  base::Vector<i32> mesh_skin(data->meshes_count);
+  base::Fill(mesh_skin.begin(), mesh_skin.end(), -1);
+  for (size_t node_index = 0; node_index < data->nodes_count; ++node_index) {
+    const cgltf_node &node = data->nodes[node_index];
+    if (!node.mesh || !node.skin)
+      continue;
+    const u32 mesh_index = static_cast<u32>(node.mesh - data->meshes);
+    const i32 skin_index = static_cast<i32>(node.skin - data->skins);
+    if (mesh_skin[mesh_index] < 0)
+      mesh_skin[mesh_index] = skin_index;
+  }
+
+  out->meshes.resize(data->meshes_count);
+  base::Vector<f32> scratch;
+  for (size_t i = 0; i < data->meshes_count; ++i) {
+    const cgltf_mesh &src = data->meshes[i];
+    Mesh &mesh = out->meshes[i];
+    mesh.id = ScopedId(path, "mesh", i);
+    const i32 skin_index = mesh_skin[i];
+    if (skin_index >= 0) {
+      mesh.skinned = true;
+      mesh.skin = out->skin_bindings[static_cast<u32>(skin_index)];
+    }
+    mesh.lods.resize(1);
+    MeshLod &lod = mesh.lods[0];
+
+    for (size_t p = 0; p < src.primitives_count; ++p) {
+      const cgltf_primitive &primitive = src.primitives[p];
+      if (primitive.type != cgltf_primitive_type_triangles)
+        continue;
+
+      const cgltf_accessor *position = nullptr;
+      const cgltf_accessor *normal = nullptr;
+      const cgltf_accessor *tangent = nullptr;
+      const cgltf_accessor *uv = nullptr;
+      const cgltf_accessor *color = nullptr;
+      const cgltf_accessor *joints = nullptr;
+      const cgltf_accessor *weights = nullptr;
+      for (size_t a = 0; a < primitive.attributes_count; ++a) {
+        const cgltf_attribute &attribute = primitive.attributes[a];
+        if (attribute.index != 0)
+          continue;
+        switch (attribute.type) {
+        case cgltf_attribute_type_position:
+          position = attribute.data;
+          break;
+        case cgltf_attribute_type_normal:
+          normal = attribute.data;
+          break;
+        case cgltf_attribute_type_tangent:
+          tangent = attribute.data;
+          break;
+        case cgltf_attribute_type_texcoord:
+          uv = attribute.data;
+          break;
+        case cgltf_attribute_type_color:
+          color = attribute.data;
+          break;
+        case cgltf_attribute_type_joints:
+          joints = attribute.data;
+          break;
+        case cgltf_attribute_type_weights:
+          weights = attribute.data;
+          break;
+        default:
+          break;
+        }
+      }
+      if (!position)
+        continue;
+
+      u32 vertex_offset = static_cast<u32>(lod.vertices.size());
+      u32 index_offset = static_cast<u32>(lod.indices.size());
+      u32 vertex_count = static_cast<u32>(position->count);
+      lod.vertices.resize(vertex_offset + vertex_count);
+      if (mesh.skinned)
+        lod.skinning.resize(vertex_offset + vertex_count);
+
+      ReadFloats(position, 3, &scratch);
+      for (u32 v = 0; v < vertex_count; ++v) {
+        base::MemCopy(lod.vertices[vertex_offset + v].position, &scratch[v * 3],
+                    sizeof(f32) * 3);
+      }
+      if (normal && normal->count == vertex_count) {
+        ReadFloats(normal, 3, &scratch);
+        for (u32 v = 0; v < vertex_count; ++v) {
+          base::MemCopy(lod.vertices[vertex_offset + v].normal, &scratch[v * 3],
+                      sizeof(f32) * 3);
+        }
+      } else {
+        for (u32 v = 0; v < vertex_count; ++v) {
+          lod.vertices[vertex_offset + v].normal[1] = 1.0f;
+        }
+      }
+      const UvTransform uv_transform =
+          primitive.material ? material_uv[static_cast<size_t>(
+                                   primitive.material - data->materials)]
+                             : UvTransform{};
+      if (uv && uv->count == vertex_count) {
+        ReadFloats(uv, 2, &scratch);
+        for (u32 v = 0; v < vertex_count; ++v) {
+          Vertex &vertex = lod.vertices[vertex_offset + v];
+          base::MemCopy(vertex.uv, &scratch[v * 2], sizeof(f32) * 2);
+          // Safe per primitive because this loader appends a fresh vertex range
+          // per primitive, so no two materials ever share a vertex to disagree
+          // over. Before the tangent generation below, which derives the frame
+          // from these uvs and so has to see the transformed ones.
+          if (uv_transform.present)
+            ApplyUvTransform(uv_transform, vertex.uv);
+        }
+      }
+      if (color && color->count == vertex_count) {
+        u32 components = static_cast<u32>(cgltf_num_components(color->type));
+        ReadFloats(color, components, &scratch);
+        for (u32 v = 0; v < vertex_count; ++v) {
+          f32 r = scratch[v * components + 0];
+          f32 g = components > 1 ? scratch[v * components + 1] : r;
+          f32 b = components > 2 ? scratch[v * components + 2] : r;
+          f32 a = components > 3 ? scratch[v * components + 3] : 1.0f;
+          auto to_u8 = [](f32 value) {
+            return static_cast<u32>(rx::Clamp(value, 0.0f, 1.0f) * 255.0f +
+                                    0.5f);
+          };
+          lod.vertices[vertex_offset + v].color =
+              to_u8(r) | to_u8(g) << 8 | to_u8(b) << 16 | to_u8(a) << 24;
+        }
+      }
+      if (mesh.skinned && joints && weights && joints->count == vertex_count &&
+          weights->count == vertex_count) {
+        for (u32 v = 0; v < vertex_count; ++v) {
+          cgltf_uint source_joints[4] = {};
+          cgltf_float source_weights[4] = {};
+          cgltf_accessor_read_uint(joints, v, source_joints, 4);
+          cgltf_accessor_read_float(weights, v, source_weights, 4);
+          SkinnedVertexExtra &extra = lod.skinning[vertex_offset + v];
+          f32 total = 0;
+          for (f32 weight : source_weights)
+            total += rx::Max(weight, 0.0f);
+          u32 quantized = 0;
+          for (u32 lane = 0; lane < 4; ++lane) {
+            extra.bone_indices[lane] =
+                source_joints[lane] < 256 ? static_cast<u8>(source_joints[lane])
+                                          : 0;
+            const f32 normalized =
+                total > 1e-8f ? rx::Max(source_weights[lane], 0.0f) / total
+                              : (lane == 0 ? 1.0f : 0.0f);
+            const u32 byte_weight =
+                lane == 3 ? 255 - rx::Min(quantized, 255u)
+                          : static_cast<u32>(normalized * 255.0f + 0.5f);
+            extra.bone_weights[lane] =
+                static_cast<u8>(rx::Min(byte_weight, 255u));
+            quantized += extra.bone_weights[lane];
+          }
+        }
+      }
+
+      if (primitive.indices) {
+        u32 index_count = static_cast<u32>(primitive.indices->count);
+        lod.indices.resize(index_offset + index_count);
+        for (u32 n = 0; n < index_count; ++n) {
+          lod.indices[index_offset + n] =
+              vertex_offset +
+              static_cast<u32>(cgltf_accessor_read_index(primitive.indices, n));
+        }
+      } else {
+        lod.indices.resize(index_offset + vertex_count);
+        for (u32 n = 0; n < vertex_count; ++n)
+          lod.indices[index_offset + n] = vertex_offset + n;
+      }
+
+      if (tangent && tangent->count == vertex_count) {
+        // A rotated uv transform turns the tangent frame with it, and an
+        // authored TANGENT was computed in the untransformed frame, so the
+        // normal map lights as if lit from the wrong side. Scale and offset do
+        // not move the frame, so only rotation is a problem.
+        if (uv_transform.present && uv_transform.rotation != 0.0f) {
+          RX_WARN("gltf mesh {}: KHR_texture_transform rotates the uvs of a "
+                  "primitive that ships its own TANGENT; the authored tangents "
+                  "are in the untransformed frame and normal mapping on it will "
+                  "be turned by {} radians",
+                  i, uv_transform.rotation);
+        }
+        ReadFloats(tangent, 4, &scratch);
+        for (u32 v = 0; v < vertex_count; ++v) {
+          base::MemCopy(lod.vertices[vertex_offset + v].tangent, &scratch[v * 4],
+                      sizeof(f32) * 4);
+        }
+      } else {
+        GenerateTangents(&lod, vertex_offset, index_offset);
+      }
+
+      // Morph targets: per-vertex deltas for this primitive's vertex range.
+      // glTF requires the same target count on every primitive of a mesh, so
+      // the mesh-level weight order matches across submeshes. Target tangent
+      // deltas are vec3 (the w handedness never morphs).
+      if (primitive.targets_count > mesh.morph_targets.size()) {
+        mesh.morph_targets.resize(primitive.targets_count);
+      }
+      for (size_t t = 0; t < primitive.targets_count; ++t) {
+        MorphTarget &target = mesh.morph_targets[t];
+        for (size_t a = 0; a < primitive.targets[t].attributes_count; ++a) {
+          const cgltf_attribute &attribute = primitive.targets[t].attributes[a];
+          base::Vector<f32> *deltas = nullptr;
+          switch (attribute.type) {
+          case cgltf_attribute_type_position:
+            deltas = &target.position_deltas;
+            break;
+          case cgltf_attribute_type_normal:
+            deltas = &target.normal_deltas;
+            break;
+          case cgltf_attribute_type_tangent:
+            deltas = &target.tangent_deltas;
+            break;
+          default:
+            break;
+          }
+          if (!deltas || attribute.data->count != vertex_count)
+            continue;
+          ReadFloats(attribute.data, 3, &scratch);
+          deltas->resize((static_cast<size_t>(vertex_offset) + vertex_count) *
+                         3);
+          base::MemCopy(deltas->data() + static_cast<size_t>(vertex_offset) * 3,
+                      scratch.data(), vertex_count * sizeof(f32) * 3);
+        }
+      }
+
+      Submesh submesh;
+      submesh.index_offset = index_offset;
+      submesh.index_count = static_cast<u32>(lod.indices.size()) - index_offset;
+      if (primitive.material) {
+        submesh.material =
+            out->materials[static_cast<size_t>(primitive.material -
+                                               data->materials)]
+                .id;
+      }
+      lod.submeshes.push_back(submesh);
+    }
+
+    // Pad delta streams a primitive left short (missing attribute, later
+    // primitives without targets) to the full vertex count, and name the
+    // targets from the mesh extras so games can address them by hash.
+    for (size_t t = 0; t < mesh.morph_targets.size(); ++t) {
+      MorphTarget &target = mesh.morph_targets[t];
+      size_t full = lod.vertices.size() * 3;
+      target.position_deltas.resize(full);
+      if (!target.normal_deltas.empty())
+        target.normal_deltas.resize(full);
+      if (!target.tangent_deltas.empty())
+        target.tangent_deltas.resize(full);
+      if (t < src.target_names_count && src.target_names[t]) {
+        target.name = src.target_names[t];
+        target.name_hash = MakeAssetId(target.name).hash;
+      }
+    }
+
+    // Bounding sphere around the vertex centroid, for culling later.
+    if (!lod.vertices.empty()) {
+      f64 center[3] = {0, 0, 0};
+      for (const Vertex &vertex : lod.vertices) {
+        for (int axis = 0; axis < 3; ++axis)
+          center[axis] += vertex.position[axis];
+      }
+      for (int axis = 0; axis < 3; ++axis) {
+        mesh.bounds_center[axis] =
+            static_cast<f32>(center[axis] / lod.vertices.size());
+      }
+      f32 radius_sq = 0;
+      for (const Vertex &vertex : lod.vertices) {
+        f32 dx = vertex.position[0] - mesh.bounds_center[0];
+        f32 dy = vertex.position[1] - mesh.bounds_center[1];
+        f32 dz = vertex.position[2] - mesh.bounds_center[2];
+        radius_sq = rx::Max(radius_sq, dx * dx + dy * dy + dz * dz);
+      }
+      mesh.bounds_radius = ::sqrtf(radius_sq);
+    }
+  }
+
+  // Morph weight animations: every "weights" channel becomes a track on the
+  // mesh its node instances. CUBICSPLINE outputs carry in-tangent/value/out-
+  // tangent per key; only the value is kept (sampled linearly).
+  for (size_t i = 0; i < data->animations_count; ++i) {
+    const cgltf_animation &animation = data->animations[i];
+    for (size_t c = 0; c < animation.channels_count; ++c) {
+      const cgltf_animation_channel &channel = animation.channels[c];
+      if (channel.target_path != cgltf_animation_path_type_weights)
+        continue;
+      if (!channel.target_node || !channel.target_node->mesh)
+        continue;
+      Mesh &mesh = out->meshes[static_cast<size_t>(channel.target_node->mesh -
+                                                   data->meshes)];
+      u32 targets = static_cast<u32>(mesh.morph_targets.size());
+      const cgltf_animation_sampler *sampler = channel.sampler;
+      if (targets == 0 || !sampler->input || !sampler->output)
+        continue;
+
+      MorphAnimation track;
+      track.name = animation.name ? animation.name : "";
+      track.step = sampler->interpolation == cgltf_interpolation_type_step;
+      ReadFloats(sampler->input, 1, &scratch);
+      track.times = scratch;
+      track.duration = track.times.empty() ? 0.0f : track.times.back();
+      ReadFloats(sampler->output, 1, &scratch);
+      bool cubic =
+          sampler->interpolation == cgltf_interpolation_type_cubic_spline;
+      size_t stride = cubic ? targets * 3 : targets;
+      if (scratch.size() < track.times.size() * stride)
+        continue;
+      track.weights.resize(track.times.size() * targets);
+      for (size_t k = 0; k < track.times.size(); ++k) {
+        const f32 *row = &scratch[k * stride + (cubic ? targets : 0)];
+        base::MemCopy(&track.weights[k * targets], row, targets * sizeof(f32));
+      }
+      mesh.morph_animations.push_back(base::move(track));
+    }
+  }
+
+  for (size_t i = 0; i < data->nodes_count; ++i) {
+    const cgltf_node &node = data->nodes[i];
+    if (!node.mesh)
+      continue;
+    ImportedScene::Instance instance;
+    instance.mesh_index = static_cast<u32>(node.mesh - data->meshes);
+    instance.skeleton_index =
+        node.skin ? static_cast<i32>(node.skin - data->skins) : -1;
+    if (!node.skin) {
+      f32 world[16];
+      cgltf_node_transform_world(&node, world);
+      instance.position = {world[12], world[13], world[14]};
+      Vec3 scale{::sqrtf(world[0] * world[0] + world[1] * world[1] +
+                           world[2] * world[2]),
+                 ::sqrtf(world[4] * world[4] + world[5] * world[5] +
+                           world[6] * world[6]),
+                 ::sqrtf(world[8] * world[8] + world[9] * world[9] +
+                           world[10] * world[10])};
+      instance.scale = (scale.x + scale.y + scale.z) / 3.0f;
+      QuatFromMatrix(world, scale, instance.rotation);
+    }
+    out->instances.push_back(instance);
+  }
+
+  RX_INFO("gltf {}: {} meshes, {} materials, {} textures, {} instances", path,
+          out->meshes.size(), out->materials.size(), out->textures.size(),
+          out->instances.size());
+  cgltf_free(data);
+  return true;
+}
+
+} // namespace rx::asset

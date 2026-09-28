@@ -2,12 +2,7 @@ if(RX_JOLT)
   rx_add_module(physics
     cloth_collision.cc
     physics_world.cc
-    vehicle_profiles.cc
-    boat.cc
-    boat_profiles.cc
     kinema_jolt.cc
-    aircraft.cc
-    kite.cc
   )
   target_link_libraries(rx_physics PUBLIC rx::core rx::asset)
   # PRIVATE static archives, needed at final link. Wrapped in BUILD_INTERFACE so
@@ -17,18 +12,11 @@ if(RX_JOLT)
     $<BUILD_INTERFACE:Jolt> $<BUILD_INTERFACE:kinema::kinema>)
   set(RX_INSTALL_JOLT ON PARENT_SCOPE)
 else()
-  # The force-based simulators are public-API-only consumers of PhysicsWorld
-  # (no Jolt), so they build against the stub and behave as inert/invalid
-  # objects there (valid() == false). They must stay in the fallback library so
-  # a no-Jolt build still links every consumer (e.g. demo_drive.cc).
+  # Without Jolt the world is a stub whose bodies are all invalid, so every
+  # consumer (rx::vehicles, demo_drive.cc) still links and degrades to inert.
   rx_add_module(physics
     physics_world_stub.cc
     cloth_collision.cc
-    vehicle_profiles.cc
-    boat.cc
-    boat_profiles.cc
-    aircraft.cc
-    kite.cc
   )
   target_link_libraries(rx_physics PUBLIC rx::core rx::asset)
 endif()

@@ -1,0 +1,42 @@
+#ifndef RX_VEHICLES_BOAT_PROFILES_H_
+#define RX_VEHICLES_BOAT_PROFILES_H_
+
+#include "core/export.h"
+#include "vehicles/boat.h"
+
+namespace rx::physics {
+
+// Boat-type presets: fully tuned BoatDesc values (as vehicle_profiles does for
+// cars), one function per type whose doc comment states the handling signature;
+// measured orderings (draft, top speed, planing, turn rate, stability, laden vs
+// empty) are proven in test/boat_profiles_test.cc. Units follow BoatDesc:
+// metres/kg/s/newtons, +Z fwd, +Y up. Draft is EMERGENT from displacement, so
+// presets differ in mass and footprint to sit at different waterlines, and
+// SetCargo adds mass so a laden hull visibly sinks, turns and planes worse.
+
+// ~3 m, ~220 kg including a small outboard: light and twitchy, low top speed,
+// planes early but chop-sensitive; a shallow ballast lever so it capsizes far
+// more easily than the bigger hulls.
+RX_VEHICLES_EXPORT BoatDesc DinghyProfile();
+
+// The ~6 m default motorboat, tuned: fast, planes hard, agile - the benchmark
+// the other profiles are read against (equals the BoatDesc defaults).
+RX_VEHICLES_EXPORT BoatDesc SpeedboatProfile();
+
+// Tiny ~2.2 m personal watercraft, ~350 kg: extreme thrust-to-weight so it
+// planes almost at once, spins on a dime (short hull, strong rudder, light yaw
+// damping), easily flipped but self-rights from the buoyancy grid.
+RX_VEHICLES_EXPORT BoatDesc JetskiProfile();
+
+// ~9 m displacement hull, ~6500 kg: heavy, high drag, generous cargo capacity,
+// stable (strong ballast); barely planes even empty.
+RX_VEHICLES_EXPORT BoatDesc FishingBoatProfile();
+
+// ~12 m, ~9000 kg: the heaviest hull, huge cargo capacity, enormous draft when laden
+// (deck near awash at the structural limit), a slow-spooling big-torque engine,
+// wide turning; never planes. The cargo showcase.
+RX_VEHICLES_EXPORT BoatDesc WorkBargeProfile();
+
+}  // namespace rx::physics
+
+#endif  // RX_VEHICLES_BOAT_PROFILES_H_

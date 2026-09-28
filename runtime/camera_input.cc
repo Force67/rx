@@ -42,7 +42,7 @@ void Viewer::UpdateCamera(f32 frame_delta) {
   bool kb = debug_ui_.wants_keyboard();
   bool allow_mouse = !debug_ui_.wants_mouse() || camera_.looking();
   bool allow_keyboard = !kb;
-  camera_.Update(input, *actions_, allow_mouse, allow_keyboard, frame_delta);
+  camera_.Update(input, FlyCameraIntent(*actions_), allow_mouse, allow_keyboard, frame_delta);
   window_->SetRelativeMouseMode(camera_.looking());
 
   DriveCamera(frame_delta);  // orbit / replay overrides + record

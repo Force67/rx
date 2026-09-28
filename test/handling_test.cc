@@ -21,7 +21,7 @@
 #include "core/math.h"
 #include "core/scalar.h"
 #include "physics/physics_world.h"
-#include "physics/vehicle_profiles.h"
+#include "vehicles/vehicle_profiles.h"
 
 using namespace rx;
 using physics::PhysicsWorld;

@@ -23,7 +23,6 @@ set(RX_RUNTIME_SOURCES
   feature_gym/feature_gym.cc
   scene_hook_demo.cc
   scene_hook_rhi_demo.cc
-  fly_camera.cc
   showcase_camera.cc
   debug_ui.cc
 )
@@ -33,6 +32,10 @@ set(RX_RUNTIME_MODULES
   rx::core
   rx::ecs
   rx::asset
+  rx::gltf
+  rx::usd
+  rx::materialx
+  rx::blend
   rx::scene
   # .rxscene text scenes: component reflection + the text loader.
   rx::edit
@@ -44,6 +47,7 @@ set(RX_RUNTIME_MODULES
   rx::audio
   rx::render
   rx::physics
+  rx::vehicles
   rx::anim
   rx::locomotion
   rx::net
@@ -119,7 +123,7 @@ endif()
 add_library(viewer_scene_authoring STATIC scene_authoring.cc)
 target_include_directories(viewer_scene_authoring PUBLIC ${CMAKE_CURRENT_SOURCE_DIR})
 target_link_libraries(viewer_scene_authoring PUBLIC
-  rx::edit rx::scene rx::ecs rx::asset rx::render rx::core)
+  rx::gltf rx::materialx rx::edit rx::scene rx::ecs rx::asset rx::render rx::core)
 rx_set_warnings(viewer_scene_authoring)
 
 add_executable(rx main.cc ${RX_RUNTIME_SOURCES})

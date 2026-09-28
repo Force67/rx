@@ -154,7 +154,7 @@ class DemoScenes {
   ecs::World& world_;
   ecs::Scheduler& scheduler_;
   render::Renderer& renderer_;
-  FlyCamera& camera_;
+  scene::FlyCamera& camera_;
   physics::PhysicsWorld& physics_;
   const EngineConfig& config_;
 

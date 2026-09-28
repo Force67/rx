@@ -1,7 +1,6 @@
 #ifndef RX_RUNTIME_DEMO_DRIVE_H_
 #define RX_RUNTIME_DEMO_DRIVE_H_
 
-#include "audio/vehicle_audio.h"
 #include "base/containers/pair.h"
 #include "base/containers/vector.h"
 #include "base/memory/unique_pointer.h"
@@ -10,11 +9,12 @@
 #include "core/input_actions.h"
 #include "core/math.h"
 #include "engine_context.h"
-#include "physics/aircraft.h"
-#include "physics/boat.h"
-#include "physics/kite.h"
 #include "physics/physics_world.h"
 #include "render/core/renderer.h"
+#include "vehicles/aircraft.h"
+#include "vehicles/boat.h"
+#include "vehicles/kite.h"
+#include "vehicles/vehicle_audio.h"
 
 namespace rx {
 

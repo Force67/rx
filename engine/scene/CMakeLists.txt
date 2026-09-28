@@ -1,6 +1,7 @@
 rx_add_module(scene
   camera.cc
   camera_rig.cc
+  fly_camera.cc
   world_streaming.cc
   scene_handlers.cc
 )

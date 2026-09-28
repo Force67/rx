@@ -20,10 +20,10 @@
 #include "base/memory/move.h"
 #include "base/memory/unique_pointer.h"
 #include "core/math.h"
-#include "physics/boat.h"
-#include "physics/boat_profiles.h"
 #include "physics/physics_world.h"
 #include "physics/water_waves.h"
+#include "vehicles/boat.h"
+#include "vehicles/boat_profiles.h"
 
 using namespace rx;
 using physics::Boat;

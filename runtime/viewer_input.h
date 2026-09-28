@@ -2,6 +2,7 @@
 #define RX_RUNTIME_VIEWER_INPUT_H_
 
 #include "core/input_actions.h"
+#include "scene/fly_camera.h"
 
 namespace rx {
 
@@ -31,6 +32,9 @@ enum class Axis : AxisId { kMoveX, kMoveY, kLookX, kLookY, kCount };
 // Registers the viewer's action/axis names, digital->analog folds and default
 // keyboard/mouse + gamepad bindings with `map`. Call once at startup.
 void RegisterViewerInput(InputMap& map);
+
+// The free camera's intent from this frame's resolved viewer actions.
+scene::FlyCameraInput FlyCameraIntent(const ActionState& actions);
 
 }  // namespace rx
 

@@ -3,7 +3,6 @@
 #include <float.h>
 #include <math.h>
 
-#include "asset/gltf_loader.h"
 #include "base/algorithm.h"
 #include "base/containers/array.h"
 #include "base/containers/pair.h"
@@ -14,11 +13,12 @@
 #include "base/memory/unique_pointer.h"
 #include "base/optional.h"
 #include "base/strings/xstring.h"
-#include "core/format.h"
 #include "core/file_system.h"
+#include "core/format.h"
 #include "core/log.h"
 #include "core/scalar.h"
 #include "edit/reflect.h"
+#include "importers/gltf/gltf_loader.h"
 #include "render/core/renderer.h"
 #include "scene/components.h"
 

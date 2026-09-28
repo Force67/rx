@@ -5,7 +5,10 @@
 # renderer value structs each frame. It never touches the GPU, but those structs
 # are render's own types (render/core/settings.h pulls in the render graph and
 # RHI headers), so it links rx::render rather than borrowing its headers.
+#
+# thunder_synth renders the thunder a strike schedules into an audio clip.
 rx_add_module(weather
   weather.cc
+  thunder_synth.cc
 )
-target_link_libraries(rx_weather PUBLIC rx::core rx::render)
+target_link_libraries(rx_weather PUBLIC rx::core rx::render rx::audio)

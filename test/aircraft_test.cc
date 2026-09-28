@@ -12,8 +12,8 @@
 #include "base/containers/vector.h"
 #include "core/math.h"
 #include "core/scalar.h"
-#include "physics/aircraft.h"
 #include "physics/physics_world.h"
+#include "vehicles/aircraft.h"
 
 using namespace rx;
 using physics::Aircraft;

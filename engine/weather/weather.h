@@ -20,21 +20,11 @@
 
 
 #include "base/functional/function.h"
-#include "core/export.h"
 #include "core/math.h" // Vec2 (weather map XZ offset), Vec3
 #include "core/types.h"
 #include "render/atmosphere/cloudscape_types.h"
 #include "render/core/settings.h"
-
-// Per-module export annotation. The weather module post-dates engine/core/
-// export.h's fixed macro table, so we derive RX_WEATHER_EXPORT locally from the
-// shared RX_DSO_* primitives using the same RX_<MODULE>_IMPLEMENTATION selector
-// rx_add_module() defines. In the default static build this expands to nothing.
-#if defined(RX_WEATHER_IMPLEMENTATION)
-#define RX_WEATHER_EXPORT RX_DSO_EXPORT
-#else
-#define RX_WEATHER_EXPORT RX_DSO_IMPORT
-#endif
+#include "weather/export.h"
 
 namespace rx::weather {
 

@@ -9,9 +9,9 @@
 #include <stdio.h>
 
 #include "core/math.h"
-#include "physics/boat.h"
 #include "physics/physics_world.h"
 #include "physics/water_waves.h"
+#include "vehicles/boat.h"
 
 using namespace rx;
 using physics::Boat;

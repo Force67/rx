@@ -10,9 +10,6 @@
 
 #include "anim/morph.h"
 #include "app/host.h"
-#include "asset/blend_import.h"
-#include "asset/gltf_loader.h"
-#include "asset/usd_loader.h"
 #include "asset/primitives.h"
 #include "asset/vfs.h"
 #include "base/algorithm.h"
@@ -27,6 +24,9 @@
 #include "core/scalar.h"
 #include "edit/hierarchy.h"
 #include "editor_input.h"
+#include "importers/blend/blend_import.h"
+#include "importers/gltf/gltf_loader.h"
+#include "importers/usd/usd_loader.h"
 #include "render/core/settings.h"
 #include "scene/components.h"
 
@@ -727,7 +727,7 @@ void Editor::UpdateImportedModels(f32 dt) {
     const bool fire_event = playing_ && event != model.force_event;
     for (ImportedSkin &skin : model.skins) {
       if (playing_) {
-        anim::Locomotion walk;
+        anim::ProceduralGait walk;
         walk.phase = model.walk_phase;
         walk.style = walk_style;
         walk.Apply(skin.skeleton, 1.35f, &skin.pose);
@@ -891,7 +891,15 @@ void Editor::UpdateCamera(f32 dt) {
       false; // camera only flies while RMB is held, so text fields are safe
   bool allow_mouse = CursorOverViewport() || camera_.looking();
   bool allow_keyboard = camera_.looking() && !typing;
-  camera_.Update(in, *actions_, allow_mouse, allow_keyboard, dt);
+  scene::FlyCameraInput fly;
+  fly.move_x = actions_->axis(Axis::kMoveX);
+  fly.move_y = actions_->axis(Axis::kMoveY);
+  fly.look_x = actions_->axis(Axis::kLookX);
+  fly.look_y = actions_->axis(Axis::kLookY);
+  fly.rise = actions_->down(Action::kCamUp) || actions_->down(Action::kJump);
+  fly.sink = actions_->down(Action::kCamDown) || actions_->down(Action::kSneak);
+  fly.sprint = actions_->down(Action::kSprint);
+  camera_.Update(in, fly, allow_mouse, allow_keyboard, dt);
   window_->SetRelativeMouseMode(camera_.looking());
 }
 

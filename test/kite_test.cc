@@ -15,8 +15,8 @@
 
 #include "core/math.h"
 #include "core/scalar.h"
-#include "physics/kite.h"
 #include "physics/physics_world.h"
+#include "vehicles/kite.h"
 
 using rx::f32;
 using rx::Vec3;

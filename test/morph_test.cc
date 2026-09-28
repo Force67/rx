@@ -18,7 +18,7 @@
 #include <string.h>
 
 #include "anim/morph.h"
-#include "asset/gltf_loader.h"
+#include "importers/gltf/gltf_loader.h"
 #include "render/rhi/command_list.h"
 #include "render/rhi/device.h"
 
