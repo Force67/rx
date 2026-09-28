@@ -11,7 +11,7 @@
 
 namespace rx::anim {
 
-namespace detail {
+namespace internal {
 
 kinema::Skeleton BuildKinemaSkeleton(const asset::Skeleton& skeleton) {
   kinema::Skeleton out;
@@ -34,11 +34,11 @@ kinema::Skeleton BuildKinemaSkeleton(const asset::Skeleton& skeleton) {
   return out;
 }
 
-}  // namespace detail
+}  // namespace internal
 
 namespace {
 
-using detail::GraphState;
+using internal::GraphState;
 
 constexpr f32 kPi = 3.14159265358979323846f;
 constexpr f32 kTwoPi = 2.0f * kPi;
@@ -131,7 +131,7 @@ kinema::OwnedClip BakeGait(const kinema::Skeleton& sk, u32 frames, f32 rate, con
 
 AnimGraph BuildBipedLocomotionGraph(const asset::Skeleton& skeleton) {
   auto state = base::MakeUnique<GraphState>();
-  state->skeleton = detail::BuildKinemaSkeleton(skeleton);
+  state->skeleton = internal::BuildKinemaSkeleton(skeleton);
   const kinema::Skeleton& sk = state->skeleton;
 
   state->param_names = {"speed", "phase"};

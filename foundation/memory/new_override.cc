@@ -29,20 +29,20 @@ namespace {
 // Object files given to the linker are always linked whole, so this
 // initializer runs in any binary that compiles this TU.
 struct TrackingMarker {
-  TrackingMarker() { rx::mem::detail::MarkTrackingActive(); }
+  TrackingMarker() { rx::internal::MarkTrackingActive(); }
 } g_tracking_marker;
 
 struct AllocationFooter {
   uintptr_t cookie;
   uintptr_t inverse_cookie;
   size_t usable_size;
-  rx::mem::Category category;
+  rx::MemoryCategory category;
 };
 
 constexpr uintptr_t kFooterMagic = static_cast<uintptr_t>(0xd6e8feb86659fd93ULL);
 
 uintptr_t FooterCookie(void* pointer, size_t usable_size,
-                            rx::mem::Category category) {
+                            rx::MemoryCategory category) {
   return kFooterMagic ^ reinterpret_cast<uintptr_t>(pointer) ^ usable_size ^ category;
 }
 
@@ -75,7 +75,7 @@ void* Allocate(size_t size, size_t alignment, bool aligned, bool nothrow) {
   __asm__("" : "+r"(pointer));
 
   const size_t usable_size = mi_usable_size(pointer);
-  const rx::mem::Category category = rx::mem::CurrentCategory();
+  const rx::MemoryCategory category = rx::CurrentMemoryCategory();
   const uintptr_t cookie = FooterCookie(pointer, usable_size, category);
   const AllocationFooter footer{
       .cookie = cookie,
@@ -85,7 +85,7 @@ void* Allocate(size_t size, size_t alignment, bool aligned, bool nothrow) {
   };
   base::MemCopy(static_cast<unsigned char*>(pointer) + usable_size - sizeof(footer), &footer,
               sizeof(footer));
-  rx::mem::detail::TrackAlloc(category, usable_size);
+  rx::internal::TrackAlloc(category, usable_size);
   return pointer;
 }
 
@@ -98,8 +98,8 @@ void Deallocate(void* pointer) noexcept {
                 sizeof(footer));
     const uintptr_t expected = FooterCookie(pointer, usable_size, footer.category);
     if (footer.usable_size == usable_size && footer.cookie == expected &&
-        footer.inverse_cookie == ~expected && footer.category < rx::mem::kMaxCategories) {
-      rx::mem::detail::TrackFree(footer.category, usable_size);
+        footer.inverse_cookie == ~expected && footer.category < rx::kMaxMemoryCategories) {
+      rx::internal::TrackFree(footer.category, usable_size);
       const AllocationFooter cleared{};
       base::MemCopy(static_cast<unsigned char*>(pointer) + usable_size - sizeof(cleared), &cleared,
                   sizeof(cleared));

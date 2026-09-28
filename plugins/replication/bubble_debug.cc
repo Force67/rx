@@ -12,7 +12,7 @@
 #include "shaders/bubble_wire_ps_hlsl.h"
 #include "shaders/bubble_wire_vs_hlsl.h"
 
-namespace rx::net {
+namespace rx::replication {
 namespace {
 
 base::Option<bool> BubblesOpt{"net.bubbles", true, "RX_NET_BUBBLES"};
@@ -171,7 +171,7 @@ void BubbleVisualizer::Record(const render::SceneHookContext& ctx) {
   push.jitter[0] = ctx.jitter[0];
   push.jitter[1] = ctx.jitter[1];
   push.segments = kRingSegments;
-  for (const BubbleState& b : bubbles_) {
+  for (const net::BubbleState& b : bubbles_) {
     // Pushed into the HDR scene before tonemapping, so the lines are emissive
     // (well above 1.0) to survive exposure and read at a distance.
     constexpr f32 kEmissive = 8.0f;
@@ -189,11 +189,11 @@ void BubbleVisualizer::Record(const render::SceneHookContext& ctx) {
 }
 
 void BubbleVisualizer::Emit(render::FrameView& view,
-                            const base::Vector<BubbleState>& bubbles) {
+                            const base::Vector<net::BubbleState>& bubbles) {
   if (!ready_ || pipeline_failed_ || bubbles.size() == 0) return;
   if (!BubblesOpt.get()) return;
   bubbles_.clear();
-  for (const BubbleState& b : bubbles) bubbles_.push_back(b);
+  for (const net::BubbleState& b : bubbles) bubbles_.push_back(b);
   // Compose with whatever transparent-phase pass the app already installed.
   auto previous = base::move(view.scene_transparent);
   view.scene_transparent = [this, previous](const render::SceneHookContext& ctx) {
@@ -217,4 +217,4 @@ void BubbleVisualizer::Shutdown() {
   pipeline_failed_ = false;
 }
 
-}  // namespace rx::net
+}  // namespace rx::replication

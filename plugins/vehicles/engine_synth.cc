@@ -3,7 +3,7 @@
 
 #include <math.h>
 
-namespace rx::audio {
+namespace rx::vehicles {
 namespace {
 
 constexpr f32 kPi = 3.14159265359f;
@@ -139,7 +139,7 @@ f32 EngineSynth::Noise() {
   return static_cast<f32>(rng_) * (2.0f / 4294967295.0f) - 1.0f;
 }
 
-void EngineSynth::Render(f32* out, u32 frames, const SynthParams& p) {
+void EngineSynth::Render(f32* out, u32 frames, const audio::SynthParams& p) {
   const f32 rate = rate_;
   const f32 inv_rate = inv_rate_;
   const f32 nyquist = rate * 0.5f;
@@ -300,4 +300,4 @@ void EngineSynth::Render(f32* out, u32 frames, const SynthParams& p) {
   }
 }
 
-}  // namespace rx::audio
+}  // namespace rx::vehicles

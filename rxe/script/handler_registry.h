@@ -74,7 +74,7 @@ class HandlerRegistry {
 
   // Looks up the name and invokes its handler. An unregistered name returns Null
   // and does nothing: a runtime may emit names this build does not implement,
-  // and that is dropped, not an error (mirrors rpc::RpcRegistry). A returned
+  // and that is dropped, not an error (mirrors net::RpcRegistry). A returned
   // string value views the context's scratch arena; the caller must consume it
   // before that arena is reset (see HandlerContext::scratch).
   RX_SCRIPT_EXPORT ScriptValue Dispatch(HandlerContext& ctx, ScriptStringView name,

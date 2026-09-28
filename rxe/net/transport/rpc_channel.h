@@ -27,7 +27,7 @@ class RX_NET_EXPORT RpcServerChannel {
  public:
   explicit RpcServerChannel(tx::network::ZServer& server) : server_(server) {}
 
-  rpc::RpcRegistry& registry() { return registry_; }
+  net::RpcRegistry& registry() { return registry_; }
 
   // Decodes a kRpcCall from `peer` and dispatches it with that peer as the
   // sender. Drops a malformed call or one with no registered handler.
@@ -35,25 +35,25 @@ class RX_NET_EXPORT RpcServerChannel {
 
   // Sends a call to one client. Returns false if the encoded call exceeds the
   // single-datagram limit (the caller should split its payload).
-  bool EmitToClient(u32 peer, const rpc::RpcCall& call);
-  bool EmitToClient(u32 peer, base::String name, rpc::RpcArgs args);
+  bool EmitToClient(u32 peer, const net::RpcCall& call);
+  bool EmitToClient(u32 peer, base::String name, net::RpcArgs args);
 
   // Sends a call to every connected client.
-  bool Broadcast(const rpc::RpcCall& call);
-  bool Broadcast(base::String name, rpc::RpcArgs args);
+  bool Broadcast(const net::RpcCall& call);
+  bool Broadcast(base::String name, net::RpcArgs args);
 
  private:
-  bool Send(u32 destination, const rpc::RpcCall& call);
+  bool Send(u32 destination, const net::RpcCall& call);
 
   tx::network::ZServer& server_;
-  rpc::RpcRegistry registry_;
+  net::RpcRegistry registry_;
 };
 
 class RX_NET_EXPORT RpcClientChannel {
  public:
   explicit RpcClientChannel(tx::network::ZClient& client) : client_(client) {}
 
-  rpc::RpcRegistry& registry() { return registry_; }
+  net::RpcRegistry& registry() { return registry_; }
 
   // Decodes a kRpcCall from the host and dispatches it as a server-originated
   // call. Drops a malformed call or one with no registered handler.
@@ -61,12 +61,12 @@ class RX_NET_EXPORT RpcClientChannel {
 
   // Sends a call to the host. Returns false if the encoded call exceeds the
   // single-datagram limit.
-  bool EmitToServer(const rpc::RpcCall& call);
-  bool EmitToServer(base::String name, rpc::RpcArgs args);
+  bool EmitToServer(const net::RpcCall& call);
+  bool EmitToServer(base::String name, net::RpcArgs args);
 
  private:
   tx::network::ZClient& client_;
-  rpc::RpcRegistry registry_;
+  net::RpcRegistry registry_;
 };
 
 }  // namespace rx::net

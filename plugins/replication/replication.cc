@@ -8,10 +8,10 @@
 #include "foundation/logging/log.h"
 #include "rxe/asset/asset_id.h"
 
-namespace rx::net {
+namespace rx::replication {
 namespace {
 
-scene::Transform StateTransform(const EntityState& state) {
+scene::Transform StateTransform(const net::EntityState& state) {
   scene::Transform t;
   for (int i = 0; i < 3; ++i) t.position[i] = state.position[i];
   for (int i = 0; i < 4; ++i) t.rotation[i] = state.rotation[i];
@@ -90,7 +90,7 @@ void WorldCapture::Capture(ecs::World& world, u64 server_tick,
   world.Each<NetworkId, scene::Transform>(
       [&](ecs::Entity entity, NetworkId& id, scene::Transform& t) {
         if (id.value == 0) return;
-        EntityState state;
+        net::EntityState state;
         state.net_id = id.value;
         for (int i = 0; i < 3; ++i) state.position[i] = t.position[i];
         for (int i = 0; i < 4; ++i) state.rotation[i] = t.rotation[i];
@@ -106,14 +106,14 @@ void WorldCapture::Capture(ecs::World& world, u64 server_tick,
 }
 
 u32 PeerStream::Build(const WorldCapture& capture, const InterestSet* interest,
-                      bool full, Snapshot* out) {
+                      bool full, net::Snapshot* out) {
   const u64 tick = capture.tick();
   out->server_tick = tick;
   out->full = full;
   out->entities.clear();
   out->despawned.clear();
 
-  for (const EntityState& state : capture.entities()) {
+  for (const net::EntityState& state : capture.entities()) {
     // Outside this peer's interest means "does not exist for this client";
     // the cache sweep below turns a cached-but-irrelevant entity into a
     // despawn, exactly like a destroyed one.
@@ -155,7 +155,7 @@ u32 PeerStream::Build(const WorldCapture& capture, const InterestSet* interest,
   return static_cast<u32>(out->entities.size());
 }
 
-bool SnapshotApplier::Apply(ecs::World& world, const Snapshot& snapshot,
+bool SnapshotApplier::Apply(ecs::World& world, const net::Snapshot& snapshot,
                             f32 lerp_duration, const ReplicationHooks& hooks) {
   const u64 tick = snapshot.server_tick;
   // Snapshots ride the unreliable channel; late arrivals are dropped rather
@@ -163,7 +163,7 @@ bool SnapshotApplier::Apply(ecs::World& world, const Snapshot& snapshot,
   if (latest_tick_ != 0 && tick <= latest_tick_) return false;
   latest_tick_ = tick;
 
-  for (const EntityState& state : snapshot.entities) {
+  for (const net::EntityState& state : snapshot.entities) {
     const u64 net_id = state.net_id;
     if (net_id == 0) continue;
 
@@ -251,4 +251,4 @@ ecs::Entity SnapshotApplier::Find(u64 net_id) const {
   return replica ? replica->entity : ecs::kInvalidEntity;
 }
 
-}  // namespace rx::net
+}  // namespace rx::replication

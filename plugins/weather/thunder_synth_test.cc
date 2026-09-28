@@ -30,19 +30,19 @@ base::Vector<float> Decode(audio::Decoder &decoder, u32 block_size) {
 }
 
 void TestInvalidInputs() {
-  Check(!audio::MakeThunder(0, 1, 1.0f, 100.0f), "zero sample rate is rejected");
-  Check(!audio::MakeThunder(base::MinMax<u32>::max(), 1, 1.0f, 100.0f),
+  Check(!weather::MakeThunder(0, 1, 1.0f, 100.0f), "zero sample rate is rejected");
+  Check(!weather::MakeThunder(base::MinMax<u32>::max(), 1, 1.0f, 100.0f),
         "unreasonable sample rates are rejected");
-  Check(!audio::MakeThunder(48000, 1, NAN, 100.0f),
+  Check(!weather::MakeThunder(48000, 1, NAN, 100.0f),
         "non-finite energy is rejected");
-  Check(!audio::MakeThunder(48000, 1, 1.0f,
+  Check(!weather::MakeThunder(48000, 1, 1.0f,
                             INFINITY),
         "non-finite distance is rejected");
 }
 
 void TestFiniteDeterministicStream() {
-  auto a = audio::MakeThunder(12000, 0x1234u, 0.8f, 750.0f);
-  auto b = audio::MakeThunder(12000, 0x1234u, 0.8f, 750.0f);
+  auto a = weather::MakeThunder(12000, 0x1234u, 0.8f, 750.0f);
+  auto b = weather::MakeThunder(12000, 0x1234u, 0.8f, 750.0f);
   Check(a && b, "valid thunder decoders are created");
   if (!a || !b) return;
   base::Vector<float> lhs = Decode(*a, 127);
@@ -62,7 +62,7 @@ void TestFiniteDeterministicStream() {
 }
 
 void TestZeroEnergyIsSilent() {
-  auto decoder = audio::MakeThunder(8000, 4u, 0.0f, 0.0f);
+  auto decoder = weather::MakeThunder(8000, 4u, 0.0f, 0.0f);
   Check(static_cast<bool>(decoder), "zero energy still yields a finite decoder");
   if (!decoder) return;
   base::Vector<float> samples = Decode(*decoder, 256);

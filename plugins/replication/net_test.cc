@@ -29,6 +29,7 @@ int g_failures = 0;
 #define CHECK_EQ(a, b) CHECK((a) == (b))
 
 namespace net = rx::net;
+namespace replication = rx::replication;
 namespace ecs = rx::ecs;
 namespace scene = rx::scene;
 using rx::f32;
@@ -52,7 +53,7 @@ ecs::Entity Spawn(ecs::World& world, u64 net_id, f32 x, f32 y, f32 z) {
   t.position[1] = y;
   t.position[2] = z;
   world.Add(e, t);
-  world.Add(e, net::NetworkId{net_id});
+  world.Add(e, replication::NetworkId{net_id});
   return e;
 }
 
@@ -164,9 +165,9 @@ void TestPeerStreamDelta() {
   ecs::Entity a = Spawn(world, 1, 0, 0, 0);
   Spawn(world, 2, 5, 0, 0);
 
-  net::ReplicationHooks hooks;
-  net::WorldCapture capture;
-  net::PeerStream stream;
+  replication::ReplicationHooks hooks;
+  replication::WorldCapture capture;
+  replication::PeerStream stream;
   net::Snapshot snap;
 
   capture.Capture(world, 10, hooks);
@@ -203,15 +204,15 @@ void TestPeerStreamInterest() {
   Spawn(world, 1, 0, 0, 0);
   Spawn(world, 2, 100, 0, 0);
 
-  net::ReplicationHooks hooks;
-  net::WorldCapture capture;
-  net::PeerStream near_stream;
-  net::PeerStream far_stream;
+  replication::ReplicationHooks hooks;
+  replication::WorldCapture capture;
+  replication::PeerStream near_stream;
+  replication::PeerStream far_stream;
   net::Snapshot snap;
 
-  net::InterestSet near_set;
+  replication::InterestSet near_set;
   near_set.Insert(1);
-  net::InterestSet far_set;
+  replication::InterestSet far_set;
   far_set.Insert(2);
 
   capture.Capture(world, 20, hooks);
@@ -241,10 +242,10 @@ void TestPeerStreamInterest() {
 
 void TestSnapshotApplier() {
   ecs::World world;
-  net::SnapshotApplier applier;
+  replication::SnapshotApplier applier;
 
   u64 tagged_entity_tag = 0;
-  net::ReplicationHooks hooks;
+  replication::ReplicationHooks hooks;
   hooks.on_replica_spawned = [&](ecs::World&, ecs::Entity, u64 tag) {
     tagged_entity_tag = tag;
   };
@@ -260,7 +261,7 @@ void TestSnapshotApplier() {
   CHECK_EQ(tagged_entity_tag, 0x77u);
   ecs::Entity replica = applier.Find(1);
   CHECK(world.IsAlive(replica));
-  CHECK(world.Get<net::InterpolatedTransform>(replica) != nullptr);
+  CHECK(world.Get<replication::InterpolatedTransform>(replica) != nullptr);
 
   // Stale ticks are dropped.
   snap.server_tick = 4;
@@ -283,16 +284,16 @@ void TestInterpolation() {
   scene::Transform from;
   scene::Transform to;
   to.position[0] = 10;
-  world.Add(e, net::InterpolatedTransform{from, to, 0, 1.0f});
-  world.Add(e, net::ReplicatedGait{});
+  world.Add(e, replication::InterpolatedTransform{from, to, 0, 1.0f});
+  world.Add(e, replication::ReplicatedGait{});
 
-  net::TickInterpolation(world, 0.5f);
+  replication::TickInterpolation(world, 0.5f);
   const scene::Transform* now = world.Get<scene::Transform>(e);
   CHECK(::fabsf(now->position[0] - 5.0f) < 1e-4f);
-  const net::ReplicatedGait* gait = world.Get<net::ReplicatedGait>(e);
+  const replication::ReplicatedGait* gait = world.Get<replication::ReplicatedGait>(e);
   CHECK(gait->moving && ::fabsf(gait->speed - 10.0f) < 1e-3f);
 
-  net::TickInterpolation(world, 0.6f);
+  replication::TickInterpolation(world, 0.6f);
   now = world.Get<scene::Transform>(e);
   CHECK_EQ(now->position[0], 10.0f);
 }
@@ -303,18 +304,18 @@ void TestBubbleMembership() {
   ecs::World world;
   // Peer 1's avatar with a 10-unit bubble at the origin.
   ecs::Entity avatar = Spawn(world, 100, 0, 0, 0);
-  world.Add(avatar, net::InterestBubble{1, 10.0f});
+  world.Add(avatar, replication::InterestBubble{1, 10.0f});
 
   ecs::Entity inside = Spawn(world, 5, 5, 0, 0);
   Spawn(world, 6, 50, 0, 0);  // far outside
 
-  net::InterestMap map;
-  net::InterestConfig config;
+  replication::InterestMap map;
+  replication::InterestConfig config;
   config.hysteresis = 1.5f;  // exit at 15
   map.Configure(config);
 
   map.Update(world, 1);
-  const net::InterestSet* set = map.InterestOf(1);
+  const replication::InterestSet* set = map.InterestOf(1);
   CHECK(set != nullptr);
   CHECK(set->Contains(100));  // own avatar always relevant
   CHECK(set->Contains(5));
@@ -342,14 +343,14 @@ void TestBubbleMembership() {
 void TestBubbleOwnership() {
   ecs::World world;
   ecs::Entity avatar1 = Spawn(world, 100, 0, 0, 0);
-  world.Add(avatar1, net::InterestBubble{1, 10.0f});
+  world.Add(avatar1, replication::InterestBubble{1, 10.0f});
   ecs::Entity avatar2 = Spawn(world, 200, 30, 0, 0);
-  world.Add(avatar2, net::InterestBubble{2, 10.0f});
+  world.Add(avatar2, replication::InterestBubble{2, 10.0f});
 
   ecs::Entity npc = Spawn(world, 7, 4, 0, 0);  // inside bubble 1 only
 
-  net::InterestMap map;
-  map.Configure(net::InterestConfig{});
+  replication::InterestMap map;
+  map.Configure(replication::InterestConfig{});
 
   int handoffs = 0;
   u32 last_new_owner = 0;
@@ -400,13 +401,13 @@ void TestBubbleOwnership() {
 void TestBubbleCounts() {
   ecs::World world;
   ecs::Entity avatar1 = Spawn(world, 100, 0, 0, 0);
-  world.Add(avatar1, net::InterestBubble{1, 10.0f});
+  world.Add(avatar1, replication::InterestBubble{1, 10.0f});
   ecs::Entity avatar2 = Spawn(world, 200, 8, 0, 0);
-  world.Add(avatar2, net::InterestBubble{2, 10.0f});
+  world.Add(avatar2, replication::InterestBubble{2, 10.0f});
   Spawn(world, 7, 4, 0, 0);  // covered by both bubbles
 
-  net::InterestMap map;
-  map.Configure(net::InterestConfig{});
+  replication::InterestMap map;
+  map.Configure(replication::InterestConfig{});
   map.Update(world, 1);
 
   // Both peers see all three entities (overlapping bubbles)...
@@ -419,7 +420,7 @@ void TestBubbleCounts() {
   for (const net::BubbleState& b : map.bubbles()) total_owned += b.owned_count;
   CHECK_EQ(total_owned, 3u);  // two avatars + one npc, each owned once
 
-  CHECK(net::PeerColor(1) != net::PeerColor(2));
+  CHECK(replication::PeerColor(1) != replication::PeerColor(2));
 }
 
 }  // namespace

@@ -145,7 +145,7 @@ void DemoScenes::CreateBubbleDemoScene() {
       ecs::Entity e = world_.Create();
       world_.Add(e, scene::Transform{.position = {gx * 3.0f, 0.0f, gz * 3.0f}});
       world_.Add(e, scene::Renderable{pawn.id});
-      world_.Add(e, net::AllocateNetworkId());
+      world_.Add(e, replication::AllocateNetworkId());
       world_.Add(e, scene::Tint{0x555555});
     }
   }
@@ -155,9 +155,9 @@ void DemoScenes::CreateBubbleDemoScene() {
     ecs::Entity e = world_.Create();
     world_.Add(e, scene::Transform{.position = {peer * 4.0f, 0.6f, 0.0f}});
     world_.Add(e, scene::Renderable{player.id});
-    world_.Add(e, net::AllocateNetworkId());
-    world_.Add(e, net::InterestBubble{peer, 8.0f});
-    world_.Add(e, scene::Tint{net::PeerColor(peer)});
+    world_.Add(e, replication::AllocateNetworkId());
+    world_.Add(e, replication::InterestBubble{peer, 8.0f});
+    world_.Add(e, scene::Tint{replication::PeerColor(peer)});
     BubbleAgent agent;
     agent.time = static_cast<f32>(peer) * 2.4f;
     agent.rate_x = 0.23f + 0.07f * static_cast<f32>(peer);
@@ -174,7 +174,7 @@ void DemoScenes::CreateBubbleDemoScene() {
         });
   });
 
-  bubble_map_.Configure(net::InterestConfig{});
+  bubble_map_.Configure(replication::InterestConfig{});
   bubbles_enabled_ = true;
 
   camera_.set_position({0.0f, 16.0f, 24.0f});
@@ -182,7 +182,7 @@ void DemoScenes::CreateBubbleDemoScene() {
   camera_.speed = 10.0f;
 
   if (!config_.headless) {
-    bubble_viz_ = base::MakeUnique<net::BubbleVisualizer>();
+    bubble_viz_ = base::MakeUnique<replication::BubbleVisualizer>();
     if (!bubble_viz_->Init(renderer_)) {
       RX_WARN("bubble visualizer unavailable; tinting only");
       bubble_viz_.Reset();
@@ -194,10 +194,10 @@ void DemoScenes::CreateBubbleDemoScene() {
 void DemoScenes::EmitBubbles(render::FrameView& view) {
   bubble_map_.Update(world_, ++bubble_tick_);
   // Paint every replicated entity with its owner's color; unowned = grey.
-  world_.Each<net::NetworkId, scene::Tint>(
-      [&](ecs::Entity, net::NetworkId& id, scene::Tint& tint) {
+  world_.Each<replication::NetworkId, scene::Tint>(
+      [&](ecs::Entity, replication::NetworkId& id, scene::Tint& tint) {
         const u32 owner = bubble_map_.OwnerOf(id.value);
-        tint.rgb = owner == net::kNoPeer ? 0x555555 : net::PeerColor(owner);
+        tint.rgb = owner == net::kNoPeer ? 0x555555 : replication::PeerColor(owner);
       });
   if (bubble_viz_) bubble_viz_->Emit(view, bubble_map_.bubbles());
 }
@@ -3463,7 +3463,7 @@ void DemoScenes::EmitSky(f32 dt) {
       params.position = Vec3{th.pos.x, th.pos.y + 400.0f, th.pos.z};
       params.atten = {200.0f, 9000.0f};
       u32 rate = ctx_.audio->mixer().output_rate();
-      ctx_.audio->mixer().Play(audio::MakeThunder(rate, th.seed, th.energy, th.dist), params);
+      ctx_.audio->mixer().Play(weather::MakeThunder(rate, th.seed, th.energy, th.dist), params);
     }
     sky_thunder_[i] = sky_thunder_.back();
     sky_thunder_.pop_back();
@@ -3567,7 +3567,7 @@ void DemoScenes::CreateMaterialXDemoScene() {
   for (int i = 0; i < n; ++i) {
     asset::Material mat;
     mat.id = asset::MakeAssetId("builtin/mtlx/mat" + rx::ToString(i));
-    if (!asset::LoadMaterialX(paths[i], &mat)) continue;
+    if (!importers::LoadMaterialX(paths[i], &mat)) continue;
     if (!config_.headless) renderer_.UploadMaterial(mat);
     base::String tag = "builtin/mtlx/sphere" + rx::ToString(i);
     asset::Mesh sphere = asset::MakeSphere(0.6f, 40, 60, asset::MakeAssetId(tag));

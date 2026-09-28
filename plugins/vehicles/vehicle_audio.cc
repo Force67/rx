@@ -9,7 +9,7 @@
 #include "plugins/vehicles/aux_synth.h"
 #include "rxe/audio/mixer.h"
 
-namespace rx::audio {
+namespace rx::vehicles {
 namespace {
 
 // Per-layer mix levels at full presence. The engine carries the sound; skid and
@@ -34,8 +34,8 @@ constexpr f32 kPositionEpsilon = 0.05f;
 constexpr f32 kSkidPanMeters = 1.5f;
 
 // Vehicles carry a fair way; the engine reaches furthest.
-Attenuation EngineAtten() { return Attenuation{6.0f, 130.0f}; }
-Attenuation AuxAtten() { return Attenuation{5.0f, 80.0f}; }
+audio::Attenuation EngineAtten() { return audio::Attenuation{6.0f, 130.0f}; }
+audio::Attenuation AuxAtten() { return audio::Attenuation{5.0f, 80.0f}; }
 
 f32 Dist2(const Vec3& a, const Vec3& b) {
   const Vec3 d = a - b;
@@ -44,16 +44,16 @@ f32 Dist2(const Vec3& a, const Vec3& b) {
 
 }  // namespace
 
-VehicleAudio::VehicleAudio(Mixer& mixer, const EnginePreset& preset) : mixer_(&mixer) {
+VehicleAudio::VehicleAudio(audio::Mixer& mixer, const EnginePreset& preset) : mixer_(&mixer) {
   const u32 rate = mixer.output_rate();
 
-  auto start = [&](Layer& layer, base::UniquePointer<Synth> model, const Attenuation& atten) {
-    auto voice = base::MakeUnique<SynthVoice>(rate, base::move(model));
+  auto start = [&](Layer& layer, base::UniquePointer<audio::Synth> model, const audio::Attenuation& atten) {
+    auto voice = base::MakeUnique<audio::SynthVoice>(rate, base::move(model));
     // Share the parameter mailbox before handing the voice to the mixer: the
     // mailbox outlives the voice, so Update can keep publishing after the mixer
     // retires and deletes the SynthVoice (no dangling pointer to dereference).
     layer.params = voice->params();
-    PlayParams params;
+    audio::PlayParams params;
     params.positional = true;
     params.gain = 0.0f;  // rise in from silence as Update feeds telemetry
     params.atten = atten;
@@ -119,7 +119,7 @@ void VehicleAudio::Update(const VehicleAudioState& state) {
 
   // Telemetry -> synth parameters. Each layer reads only what it needs, but the
   // block is shared so there is one contract to fill.
-  SynthParams params;
+  audio::SynthParams params;
   params.rpm = state.rpm;
   params.load = state.load;
   params.throttle = ::fabsf(state.throttle);  // signed input (astern); use its magnitude
@@ -175,9 +175,9 @@ void VehicleAudio::Stop() {
   if (engine_.voice) mixer_->Stop(engine_.voice, 0.08f);
   if (skid_.voice) mixer_->Stop(skid_.voice, 0.08f);
   if (wind_.voice) mixer_->Stop(wind_.voice, 0.08f);
-  engine_.params = skid_.params = wind_.params = Shared<ParamMailbox>();
+  engine_.params = skid_.params = wind_.params = Shared<audio::ParamMailbox>();
   engine_.voice = skid_.voice = wind_.voice = 0;
   stopped_ = true;
 }
 
-}  // namespace rx::audio
+}  // namespace rx::vehicles

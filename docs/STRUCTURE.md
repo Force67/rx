@@ -404,11 +404,11 @@ and after.
      `asset` and `ui/imgui`.
    - 4d-1 (done): `authoring` becomes `devtools`, and reflection, `.rxscene`
      io and the transform hierarchy move from `edit` into `scene`. `app` keeps
-     its name. What stays in `edit`
-     (selection, undo) becomes `editor` in phase 6, with `apps/editor`.
-   - 4d-2: namespace consolidation: flat foundation, `internal`, `rx::net`
-     absorbing http and rpc, and `rx::importers`, `rx::vehicles`,
-     `rx::weather`, `rx::replication` matching their folders.
+     its name. What stays in `edit` (selection, undo) becomes `editor` in
+     phase 6, with `apps/editor`.
+   - 4d-2 (done): flat foundation, `internal` for every `detail`, `rx::rpc`
+     into `rx::net`, and `rx::importers`, `rx::vehicles`, `rx::weather`,
+     `rx::replication` matching their folders.
    - 4d-3: the RHI into `rx::gpu` (backends nested), ui into `rx::ui`.
 5. **Development shared build.** Add the single-instance fixes and the `-dev`
    presets, then per-module feature flags on the single registry.
@@ -428,16 +428,15 @@ that moves a header appends to that file.
 
 | code | namespace |
 |---|---|
-| `foundation/` | flat `rx::` (`rx::StrFormat`, `rx::Min`, `rx::StableSort`, `rx::FrameArena`), as all of `base/` is `base::`. The one sub-namespace is `rx::fs`, mirroring `std::filesystem`. `rx::mem` goes flat. |
-| `rxe/<folder>/*` | `rx::<folder>`: one namespace per top-level folder, as `net::` covers all of Chromium's `net/`. `gpu::Device`, `ui::Window`, `net::Session`, `importers::LoadGltf`, `world::` for `world` and `world_bake`. |
+| `foundation/` | flat `rx::` (`rx::StrFormat`, `rx::Min`, `rx::StableSort`, `rx::FrameArena`), as all of `base/` is `base::`. The one sub-namespace is `rx::fs`, mirroring `std::filesystem`. `rx::mem` went flat; its category API says `Memory` in the name instead (`MemoryCategory`, `RegisterMemoryCategory`), since the namespace no longer does. |
+| `rxe/<folder>/*` | `rx::<folder>`: one namespace per top-level folder, as `net::` covers all of Chromium's `net/`. `gpu::Device`, `ui::Window`, `net::RpcValue`, `importers::LoadGltfScene`, `world::` for `world` and `world_bake`. One exception: `rxe/net/http` stays `rx::http`, because its API is named for the protocol (`http::Get`, `http::Url`, `http::Response`) and `net::Get` would lose that. |
 | backends | nested under their interface: `rx::gpu::vk`, `rx::gpu::d3d12`, `rx::gpu::null` (today `rx::render::vk`, `rx::render::d`) |
 | `plugins/<name>/*` | `rx::<name>` (`rx::nav`, `rx::vehicles`) |
 | first-party apps | `rx::shell`, `rx::editor` |
 | third-party plugins, games | their own root, never `rx::`, as Chromium components use `autofill::` and not `chrome::` |
 
-Renames: `rx::authoring` becomes `rx::devtools`,
-`rx::http`/`rx::rpc` become `rx::net`, and `rx::edit` splits into `rx::scene`
-and `rx::editor`.
+Renames: `rx::authoring` becomes `rx::devtools`, `rx::rpc` becomes `rx::net`,
+and `rx::edit` splits into `rx::scene` and `rx::editor`.
 
 - `rx_module(... NAMESPACE gpu)` declares it; `tools/checkincludes` checks that
   every header of the module opens that namespace.

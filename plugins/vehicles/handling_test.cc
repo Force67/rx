@@ -241,12 +241,12 @@ int main() {
     return 0;
   }
 
-  const Desc sports = physics::SportsCarProfile();
-  const Desc muscle = physics::MuscleCarProfile();
-  const Desc hatch = physics::HatchbackProfile();
-  const Desc suv = physics::SuvProfile();
-  const Desc van = physics::VanProfile(1.0f);  // fully laden
-  const Desc semi = physics::SemiTruckProfile();
+  const Desc sports = vehicles::SportsCarProfile();
+  const Desc muscle = vehicles::MuscleCarProfile();
+  const Desc hatch = vehicles::HatchbackProfile();
+  const Desc suv = vehicles::SuvProfile();
+  const Desc van = vehicles::VanProfile(1.0f);  // fully laden
+  const Desc semi = vehicles::SemiTruckProfile();
 
   // (a) 0-100 km/h, strictly ordered.
   {

@@ -21,7 +21,7 @@ extern char **environ;
 #include "foundation/strings/format.h"
 #include "rxe/asset/asset_id.h"
 
-namespace rx::asset {
+namespace rx::importers {
 namespace {
 
 base::String CacheRoot(const BlendImportOptions &options) {
@@ -50,7 +50,7 @@ base::String CacheKey(base::StringRef source, base::StringRef script) {
       rx::ToString(*source_time) + ":" + rx::ToString(*script_time);
   char key[17];
   ::snprintf(key, sizeof(key), "%016llx",
-                static_cast<unsigned long long>(MakeAssetId(identity).hash));
+                static_cast<unsigned long long>(asset::MakeAssetId(identity).hash));
   return key;
 }
 
@@ -151,4 +151,4 @@ bool ConvertBlendScene(const base::String &blend_path,
   return true;
 }
 
-} // namespace rx::asset
+} // namespace rx::importers

@@ -2097,11 +2097,11 @@ void VulkanDevice::WriteDescriptors(VkDescriptorSet set, base::Span<const Bindin
   // handful of items; inline storage keeps this allocation-free. The write
   // entries point into the side arrays, which is safe because each is sized
   // once up front and never grows mid-loop.
-  mem::SmallVector<VkWriteDescriptorSet, 8> writes;
-  mem::SmallVector<VkDescriptorImageInfo, 8> images;
-  mem::SmallVector<VkDescriptorBufferInfo, 8> buffers;
-  mem::SmallVector<VkWriteDescriptorSetAccelerationStructureKHR, 8> accels;
-  mem::SmallVector<VkAccelerationStructureKHR, 8> accel_handles;
+  SmallVector<VkWriteDescriptorSet, 8> writes;
+  SmallVector<VkDescriptorImageInfo, 8> images;
+  SmallVector<VkDescriptorBufferInfo, 8> buffers;
+  SmallVector<VkWriteDescriptorSetAccelerationStructureKHR, 8> accels;
+  SmallVector<VkAccelerationStructureKHR, 8> accel_handles;
   writes.resize(items.size());
   images.resize(items.size());
   buffers.resize(items.size());

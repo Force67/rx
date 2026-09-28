@@ -10,7 +10,7 @@
 #include "rxe/net/rpc/rpc_message.h"
 #include "rxe/net/rpc/rpc_value.h"
 
-namespace rx::rpc {
+namespace rx::net {
 
 // Identifies who sent an RPC, so a handler can authorize or attribute it. On the
 // server, sender is the zetanet peer id of the calling client. On the client,
@@ -43,6 +43,6 @@ class RX_RPC_EXPORT RpcRegistry {
   base::UnorderedMap<base::String, RpcHandler> handlers_;
 };
 
-}  // namespace rx::rpc
+}  // namespace rx::net
 
 #endif  // RX_RPC_RPC_REGISTRY_H_

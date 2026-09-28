@@ -3,7 +3,7 @@
 
 #include <math.h>
 
-namespace rx::net {
+namespace rx::replication {
 namespace {
 
 // Packs a signed XZ cell coordinate into one grid key.
@@ -29,7 +29,7 @@ void InterestMap::Update(ecs::World& world, u64 tick) {
   f32 max_exit = 0;
   world.Each<InterestBubble, scene::Transform>(
       [&](ecs::Entity entity, InterestBubble& bubble, scene::Transform& t) {
-        if (bubble.peer == kNoPeer || bubble.radius <= 0) return;
+        if (bubble.peer == net::kNoPeer || bubble.radius <= 0) return;
         BubbleRef ref;
         ref.peer = bubble.peer;
         ref.state_index = static_cast<u32>(bubbles_.size());
@@ -43,7 +43,7 @@ void InterestMap::Update(ecs::World& world, u64 tick) {
         }
         scratch_bubbles_.push_back(ref);
 
-        BubbleState state;
+        net::BubbleState state;
         state.peer = bubble.peer;
         for (int i = 0; i < 3; ++i) state.center[i] = t.position[i];
         state.radius = bubble.radius;
@@ -72,7 +72,7 @@ void InterestMap::Update(ecs::World& world, u64 tick) {
     for (auto owned : owners_) scratch_removed_.push_back(owned.key);
     for (u64 net_id : scratch_removed_) {
       const Ownership* o = owners_.find(net_id);
-      if (o && owner_changed_) owner_changed_(net_id, o->peer, kNoPeer);
+      if (o && owner_changed_) owner_changed_(net_id, o->peer, net::kNoPeer);
       owners_.erase(net_id);
     }
     return;
@@ -136,7 +136,7 @@ void InterestMap::Update(ecs::World& world, u64 tick) {
         const i32 cx = static_cast<i32>(::floorf(t.position[0] * inv_cell));
         const i32 cz = static_cast<i32>(::floorf(t.position[2] * inv_cell));
         const base::Vector<u32>* bucket = scratch_grid_.find(CellKey(cx, cz));
-        u32 avatar_peer = kNoPeer;
+        u32 avatar_peer = net::kNoPeer;
         if (bucket) {
           for (u32 bi : *bucket) {
             BubbleRef& b = scratch_bubbles_[bi];
@@ -159,10 +159,10 @@ void InterestMap::Update(ecs::World& world, u64 tick) {
 
         // ownership
         Ownership* owned = owners_.find(id.value);
-        const u32 prev_owner = owned ? owned->peer : kNoPeer;
+        const u32 prev_owner = owned ? owned->peer : net::kNoPeer;
         u32 next_owner = prev_owner;
 
-        if (avatar_peer != kNoPeer) {
+        if (avatar_peer != net::kNoPeer) {
           // A player's avatar belongs to its own peer, always.
           next_owner = avatar_peer;
         } else {
@@ -173,10 +173,10 @@ void InterestMap::Update(ecs::World& world, u64 tick) {
           if (!prev_owner_holds) {
             // Handoff: nearest containing bubble, ties to the lower peer id;
             // no bubble means back to the server.
-            next_owner = kNoPeer;
+            next_owner = net::kNoPeer;
             f32 best = 0;
             for (const Candidate& c : candidates) {
-              if (next_owner == kNoPeer || c.dist_sq < best ||
+              if (next_owner == net::kNoPeer || c.dist_sq < best ||
                   (c.dist_sq == best && c.peer < next_owner)) {
                 next_owner = c.peer;
                 best = c.dist_sq;
@@ -186,7 +186,7 @@ void InterestMap::Update(ecs::World& world, u64 tick) {
         }
 
         if (next_owner != prev_owner) {
-          if (next_owner == kNoPeer) {
+          if (next_owner == net::kNoPeer) {
             owners_.erase(id.value);
           } else if (owned) {
             owned->peer = next_owner;
@@ -223,7 +223,7 @@ const InterestSet* InterestMap::InterestOf(u32 peer) const {
 
 u32 InterestMap::OwnerOf(u64 net_id) const {
   const Ownership* owned = owners_.find(net_id);
-  return owned ? owned->peer : kNoPeer;
+  return owned ? owned->peer : net::kNoPeer;
 }
 
 void InterestMap::RemovePeer(u32 peer) {
@@ -234,7 +234,7 @@ void InterestMap::RemovePeer(u32 peer) {
   }
   for (u64 net_id : scratch_removed_) {
     owners_.erase(net_id);
-    if (owner_changed_) owner_changed_(net_id, peer, kNoPeer);
+    if (owner_changed_) owner_changed_(net_id, peer, net::kNoPeer);
   }
 }
 
@@ -257,4 +257,4 @@ u32 PeerColor(u32 peer) {
   return (ri << 16) | (gi << 8) | bi;
 }
 
-}  // namespace rx::net
+}  // namespace rx::replication

@@ -9,7 +9,7 @@
 #include "foundation/build_config/export.h"
 #include "rxe/asset/scene_import.h"
 
-namespace rx::asset {
+namespace rx::importers {
 
 // Overrides for a stage's authored `visibility`. Scenes routinely ship several
 // mutually exclusive configurations in one file and switch between them by
@@ -39,9 +39,9 @@ RX_USD_EXPORT bool IsUsdPath(base::StringRef path);
 // Returns false and logs on a stage that fails to open. A stage that opens but
 // carries geometry the importer cannot represent still returns true, with the
 // skipped prims logged.
-RX_USD_EXPORT bool LoadUsdScene(const base::String &path, ImportedScene *out,
+RX_USD_EXPORT bool LoadUsdScene(const base::String &path, asset::ImportedScene *out,
                                   const UsdLoadOptions &options = {});
 
-} // namespace rx::asset
+} // namespace rx::importers
 
 #endif // RX_IMPORTERS_USD_USD_LOADER_H_

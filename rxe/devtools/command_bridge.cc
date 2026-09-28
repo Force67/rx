@@ -20,28 +20,28 @@ using script::ScriptValue;
 // one-to-one: rpc has no vector value, so it travels as three numbers.
 size_t WireSlots(ScriptType type) { return type == ScriptType::kVec3 ? 3 : 1; }
 
-bool IsNumber(const rpc::RpcValue& value) {
-  return value.type() == rpc::RpcValue::Type::kInt ||
-         value.type() == rpc::RpcValue::Type::kFloat;
+bool IsNumber(const net::RpcValue& value) {
+  return value.type() == net::RpcValue::Type::kInt ||
+         value.type() == net::RpcValue::Type::kFloat;
 }
 
 // An int where a float is wanted is a widening, not a reinterpretation, and it
 // is the difference between `SetScale e 2` working and needing `2.0`. The
 // reverse is not accepted: truncating a caller's 2.7 into an entity index or a
 // count would be guessing at intent.
-f64 AsNumber(const rpc::RpcValue& value) {
-  return value.type() == rpc::RpcValue::Type::kInt ? static_cast<f64>(value.as_int())
+f64 AsNumber(const net::RpcValue& value) {
+  return value.type() == net::RpcValue::Type::kInt ? static_cast<f64>(value.as_int())
                                                    : value.as_float();
 }
 
-const char* WireTypeName(rpc::RpcValue::Type type) {
+const char* WireTypeName(net::RpcValue::Type type) {
   switch (type) {
-    case rpc::RpcValue::Type::kNull: return "null";
-    case rpc::RpcValue::Type::kBool: return "bool";
-    case rpc::RpcValue::Type::kInt: return "int";
-    case rpc::RpcValue::Type::kFloat: return "float";
-    case rpc::RpcValue::Type::kString: return "string";
-    case rpc::RpcValue::Type::kBlob: return "blob";
+    case net::RpcValue::Type::kNull: return "null";
+    case net::RpcValue::Type::kBool: return "bool";
+    case net::RpcValue::Type::kInt: return "int";
+    case net::RpcValue::Type::kFloat: return "float";
+    case net::RpcValue::Type::kString: return "string";
+    case net::RpcValue::Type::kBlob: return "blob";
   }
   return "unknown";
 }
@@ -70,7 +70,7 @@ ecs::Entity UnpackEntity(i64 packed) {
   return ecs::Entity{static_cast<u32>(bits), static_cast<u32>(bits >> 32)};
 }
 
-base::String TypeError(size_t index, ScriptType want, const rpc::RpcValue& got) {
+base::String TypeError(size_t index, ScriptType want, const net::RpcValue& got) {
   return rx::StrFormat("arg {} expects {}, got {}", index, script::ScriptTypeName(want),
                      WireTypeName(got.type()));
 }
@@ -78,7 +78,7 @@ base::String TypeError(size_t index, ScriptType want, const rpc::RpcValue& got) 
 // HandlerSig decides the arity and every conversion; a call that does not match
 // is refused here rather than reaching a handler that would read the wrong union
 // member out of a defaulted ScriptValue.
-bool BuildStack(const script::HandlerSig& sig, const rpc::RpcArgs& args,
+bool BuildStack(const script::HandlerSig& sig, const net::RpcArgs& args,
                 script::HandlerContext& ctx, script::ScriptStack* stack,
                 base::String* error) {
   size_t want = 0;
@@ -91,17 +91,17 @@ bool BuildStack(const script::HandlerSig& sig, const rpc::RpcArgs& args,
 
   size_t at = 0;
   for (u8 p = 0; p < sig.count; ++p) {
-    const rpc::RpcValue& value = args[at];
+    const net::RpcValue& value = args[at];
     switch (sig.params[p]) {
       case ScriptType::kBool:
-        if (value.type() != rpc::RpcValue::Type::kBool) {
+        if (value.type() != net::RpcValue::Type::kBool) {
           *error = TypeError(at, ScriptType::kBool, value);
           return false;
         }
         stack->push_back(ScriptValue::Bool(value.as_bool()));
         break;
       case ScriptType::kInt:
-        if (value.type() != rpc::RpcValue::Type::kInt) {
+        if (value.type() != net::RpcValue::Type::kInt) {
           *error = TypeError(at, ScriptType::kInt, value);
           return false;
         }
@@ -115,7 +115,7 @@ bool BuildStack(const script::HandlerSig& sig, const rpc::RpcArgs& args,
         stack->push_back(ScriptValue::Float(AsNumber(value)));
         break;
       case ScriptType::kEntity:
-        if (value.type() != rpc::RpcValue::Type::kInt) {
+        if (value.type() != net::RpcValue::Type::kInt) {
           *error = TypeError(at, ScriptType::kEntity, value);
           return false;
         }
@@ -134,7 +134,7 @@ bool BuildStack(const script::HandlerSig& sig, const rpc::RpcArgs& args,
         break;
       }
       case ScriptType::kString:
-        if (value.type() != rpc::RpcValue::Type::kString) {
+        if (value.type() != net::RpcValue::Type::kString) {
           *error = TypeError(at, ScriptType::kString, value);
           return false;
         }
@@ -143,7 +143,7 @@ bool BuildStack(const script::HandlerSig& sig, const rpc::RpcArgs& args,
         stack->push_back(ScriptValue::Str(script::ScriptStringView(value.as_string())));
         break;
       case ScriptType::kSymbol:
-        if (value.type() != rpc::RpcValue::Type::kString) {
+        if (value.type() != net::RpcValue::Type::kString) {
           *error = TypeError(at, ScriptType::kSymbol, value);
           return false;
         }
@@ -163,7 +163,7 @@ bool BuildStack(const script::HandlerSig& sig, const rpc::RpcArgs& args,
 // context's scratch arena here: the arena is reset once the caller is done
 // polling, and the reply outlives that.
 bool BuildReply(ScriptType ret, const ScriptValue& value, script::HandlerContext& ctx,
-                rpc::RpcArgs* out, base::String* error) {
+                net::RpcArgs* out, base::String* error) {
   switch (ret) {
     case ScriptType::kVoid:
       return true;
@@ -209,7 +209,7 @@ CommandBridge::CommandBridge(script::HandlerRegistry& commands, script::HandlerC
     const script::ScriptStringView name = desc.name;
     const script::HandlerSig sig = desc.sig;
     registry_.On(base::String(name.view()),
-                 [this, name, sig](const rpc::RpcContext&, const rpc::RpcArgs& args) {
+                 [this, name, sig](const net::RpcContext&, const net::RpcArgs& args) {
                    // No reply slot means this Dispatch did not come through
                    // Invoke, so it never passed the trust check: do nothing.
                    if (!pending_) return;
@@ -229,8 +229,8 @@ CommandBridge::CommandBridge(script::HandlerRegistry& commands, script::HandlerC
   }
 }
 
-CommandBridge::Reply CommandBridge::Invoke(const rpc::RpcContext& ctx,
-                                           const rpc::RpcCall& call) {
+CommandBridge::Reply CommandBridge::Invoke(const net::RpcContext& ctx,
+                                           const net::RpcCall& call) {
   Reply reply;
   if (ctx.sender != kLocalSender || ctx.from_server) {
     // Deliberately terse to the caller (it learns nothing about what exists) and

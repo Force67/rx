@@ -28,7 +28,7 @@ struct ComponentInfo {
   bool trivially_copyable = false;
 };
 
-namespace detail {
+namespace internal {
 
 RX_ECS_EXPORT ComponentId ResolveComponentId(u64 type_key, const ComponentInfo& info);
 
@@ -63,11 +63,11 @@ ComponentId ComponentIdFor() {
   return id;
 }
 
-}  // namespace detail
+}  // namespace internal
 
 template <typename T>
 ComponentId GetComponentId() {
-  return detail::ComponentIdFor<base::remove_cvref_t<T>>();
+  return internal::ComponentIdFor<base::remove_cvref_t<T>>();
 }
 
 RX_ECS_EXPORT const ComponentInfo& GetComponentInfo(ComponentId id);

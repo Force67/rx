@@ -375,10 +375,10 @@ bool Viewer::LoadRxScene() {
 bool Viewer::LoadSceneFile() {
   if (config_.scene_path.ends_with(".rxscene")) return LoadRxScene();
   asset::ImportedScene scene;
-  const bool loaded = asset::IsUsdPath(config_.scene_path)
-                          ? asset::LoadUsdScene(config_.scene_path, &scene,
+  const bool loaded = importers::IsUsdPath(config_.scene_path)
+                          ? importers::LoadUsdScene(config_.scene_path, &scene,
                                                 config_.usd_visibility)
-                          : asset::LoadGltfScene(config_.scene_path, &scene);
+                          : importers::LoadGltfScene(config_.scene_path, &scene);
   if (!loaded) return false;
 
   if (!config_.headless) {

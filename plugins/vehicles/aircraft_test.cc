@@ -16,10 +16,10 @@
 #include "rxe/physics/physics_world.h"
 
 using namespace rx;
-using physics::Aircraft;
-using physics::AircraftDesc;
-using physics::AircraftInput;
-using physics::AircraftState;
+using vehicles::Aircraft;
+using vehicles::AircraftDesc;
+using vehicles::AircraftInput;
+using vehicles::AircraftState;
 using physics::PhysicsWorld;
 using physics::SurfaceType;
 

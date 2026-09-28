@@ -9,7 +9,7 @@
 #include "foundation/memory/frame_arena.h"
 #include "foundation/memory/memory_tracker.h"
 
-namespace rx::mem {
+namespace rx {
 namespace {
 
 constexpr u64 kMiB = 1u << 20;
@@ -80,10 +80,10 @@ void ParseMemoryConfigText(base::StringRef text, MemoryConfig& config) {
 
 void ApplyMemoryConfig(const MemoryConfig& config) {
   for (const auto& budget : config.budgets) {
-    SetCategoryBudget(budget.name.c_str(), budget.bytes);
+    SetMemoryCategoryBudget(budget.name.c_str(), budget.bytes);
   }
   GlobalChunkPool().Reserve(config.ecs_chunk_reserve);
   MainFrameArena().Init(config.frame_arena_bytes);
 }
 
-}  // namespace rx::mem
+}  // namespace rx

@@ -5,7 +5,7 @@
 #include "foundation/math/scalar.h"
 #include "rxe/asset/shape_desc.h"
 
-namespace rx::physics {
+namespace rx::vehicles {
 
 namespace {
 
@@ -57,7 +57,7 @@ AircraftDesc::AircraftDesc() {
   wheels[2].braked = true;
 }
 
-Aircraft::Aircraft(PhysicsWorld& world, const AircraftDesc& desc, const Vec3& position,
+Aircraft::Aircraft(physics::PhysicsWorld& world, const AircraftDesc& desc, const Vec3& position,
                    f32 yaw_radians)
     : world_(world), desc_(desc) {
   // Clamp payload to the hard structural limit; the plane still spawns when
@@ -326,7 +326,7 @@ void Aircraft::Update(const AircraftInput& input, f32 dt) {
     const Vec3 attach = pos + Rotate(q, w.local_pos);
     const Vec3 down{0, -1, 0};  // suspension travels along world down (gravity)
     const f32 reach = w.travel + w.radius;
-    PhysicsWorld::RayHit hit;
+    physics::PhysicsWorld::RayHit hit;
     // Exclude our own fuselage: the hardpoint sits inside the collision box, so
     // an un-filtered ray would hit the plane's underside instead of the ground.
     if (!world_.Raycast(attach, down, reach + 0.02f, &hit, body_)) continue;
@@ -409,4 +409,4 @@ void Aircraft::Update(const AircraftInput& input, f32 dt) {
   state_.rotation = q;
 }
 
-}  // namespace rx::physics
+}  // namespace rx::vehicles

@@ -25,17 +25,17 @@
 // only the declarations.
 #include <stb_image.h>
 
-namespace rx::asset {
+namespace rx::importers {
 namespace {
 
-AssetId ScopedId(const base::String &path, const char *kind, size_t index) {
-  return MakeAssetId(path + "#" + kind + rx::ToString(index));
+asset::AssetId ScopedId(const base::String &path, const char *kind, size_t index) {
+  return asset::MakeAssetId(path + "#" + kind + rx::ToString(index));
 }
 
 // Decodes one glTF image to rgba8, from an external file, a GLB buffer view
 // or a base64 data uri.
 bool DecodeImage(const cgltf_image *image,
-                 base::StringRef base_dir, Texture *out) {
+                 base::StringRef base_dir, asset::Texture *out) {
   stbi_uc *pixels = nullptr;
   int width = 0, height = 0, channels = 0;
 
@@ -75,7 +75,7 @@ bool DecodeImage(const cgltf_image *image,
   if (!pixels)
     return false;
 
-  out->format = TextureFormat::kRgba8;
+  out->format = asset::TextureFormat::kRgba8;
   out->width = static_cast<u32>(width);
   out->height = static_cast<u32>(height);
   out->mip_count = 1;
@@ -98,12 +98,12 @@ void ReadFloats(const cgltf_accessor *accessor, u32 components,
 
 // Average uv-space tangents per vertex when the source has none. Not
 // mikktspace, but enough for normal mapping on well behaved content.
-void GenerateTangents(MeshLod *lod, u32 vertex_offset, u32 index_offset) {
+void GenerateTangents(asset::MeshLod *lod, u32 vertex_offset, u32 index_offset) {
   base::Vector<Vec3> tangents(lod->vertices.size() - vertex_offset);
   for (size_t i = index_offset; i + 2 < lod->indices.size(); i += 3) {
-    Vertex &v0 = lod->vertices[lod->indices[i]];
-    Vertex &v1 = lod->vertices[lod->indices[i + 1]];
-    Vertex &v2 = lod->vertices[lod->indices[i + 2]];
+    asset::Vertex &v0 = lod->vertices[lod->indices[i]];
+    asset::Vertex &v1 = lod->vertices[lod->indices[i + 1]];
+    asset::Vertex &v2 = lod->vertices[lod->indices[i + 2]];
     Vec3 e1{v1.position[0] - v0.position[0], v1.position[1] - v0.position[1],
             v1.position[2] - v0.position[2]};
     Vec3 e2{v2.position[0] - v0.position[0], v2.position[1] - v0.position[1],
@@ -122,7 +122,7 @@ void GenerateTangents(MeshLod *lod, u32 vertex_offset, u32 index_offset) {
     }
   }
   for (size_t i = 0; i < tangents.size(); ++i) {
-    Vertex &vertex = lod->vertices[vertex_offset + i];
+    asset::Vertex &vertex = lod->vertices[vertex_offset + i];
     Vec3 n{vertex.normal[0], vertex.normal[1], vertex.normal[2]};
     Vec3 t = tangents[i] - n * Dot(n, tangents[i]);
     if (Dot(t, t) < 1e-12f) {
@@ -262,9 +262,9 @@ void Decompose(const Mat4 &matrix, Vec3 *translation, Quat *rotation,
 
 } // namespace
 
-bool LoadGltfScene(const base::String &path, ImportedScene *out) {
-  static const mem::Category kAssetCategory = mem::RegisterCategory("assets");
-  mem::CategoryScope mem_scope(kAssetCategory);
+bool LoadGltfScene(const base::String &path, asset::ImportedScene *out) {
+  static const MemoryCategory kAssetCategory = RegisterMemoryCategory("assets");
+  MemoryCategoryScope mem_scope(kAssetCategory);
   cgltf_options options{};
   cgltf_data *data = nullptr;
   if (cgltf_parse_file(&options, path.c_str(), &data) != cgltf_result_success) {
@@ -306,7 +306,7 @@ bool LoadGltfScene(const base::String &path, ImportedScene *out) {
 
   out->textures.resize(data->textures_count);
   for (size_t i = 0; i < data->textures_count; ++i) {
-    Texture &texture = out->textures[i];
+    asset::Texture &texture = out->textures[i];
     texture.id = ScopedId(path, "tex", i);
     texture.is_srgb = texture_srgb[i];
     if (!data->textures[i].image ||
@@ -320,16 +320,16 @@ bool LoadGltfScene(const base::String &path, ImportedScene *out) {
     // slot reads, and a normal map is the only slot whose consumer knows to
     // put one of them back.
     const u8 slots = texture_slots[i];
-    TextureRole role = TextureRole::kData;
+    asset::TextureRole role = asset::TextureRole::kData;
     if (slots == kSlotNormal) {
-      role = TextureRole::kNormalTangent;
+      role = asset::TextureRole::kNormalTangent;
     } else if (slots & kSlotColor) {
-      role = TextureRole::kColor;
+      role = asset::TextureRole::kColor;
     }
-    CompressTexture(&texture, role, path + "#image" + rx::ToString(i));
+    asset::CompressTexture(&texture, role, path + "#image" + rx::ToString(i));
   }
 
-  auto texture_id = [&](const cgltf_texture *texture) -> AssetId {
+  auto texture_id = [&](const cgltf_texture *texture) -> asset::AssetId {
     if (!texture)
       return {};
     return out->textures[static_cast<size_t>(texture - data->textures)].id;
@@ -341,7 +341,7 @@ bool LoadGltfScene(const base::String &path, ImportedScene *out) {
   base::Vector<UvTransform> material_uv(data->materials_count);
   for (size_t i = 0; i < data->materials_count; ++i) {
     const cgltf_material &src = data->materials[i];
-    Material &material = out->materials[i];
+    asset::Material &material = out->materials[i];
     material.id = ScopedId(path, "mat", i);
     // Only the slots this importer actually binds: a transform on a map that is
     // dropped anyway (occlusion, specular) is not a conflict worth reporting.
@@ -378,9 +378,9 @@ bool LoadGltfScene(const base::String &path, ImportedScene *out) {
     base::MemCopy(material.emissive_factor, src.emissive_factor, sizeof(f32) * 3);
     material.alpha_cutoff = src.alpha_cutoff;
     material.alpha_mode =
-        src.alpha_mode == cgltf_alpha_mode_opaque ? AlphaMode::kOpaque
-        : src.alpha_mode == cgltf_alpha_mode_mask ? AlphaMode::kMask
-                                                  : AlphaMode::kBlend;
+        src.alpha_mode == cgltf_alpha_mode_opaque ? asset::AlphaMode::kOpaque
+        : src.alpha_mode == cgltf_alpha_mode_mask ? asset::AlphaMode::kMask
+                                                  : asset::AlphaMode::kBlend;
     material.two_sided = src.double_sided;
     // Extended pbr lobes (KHR_materials_*). Untouched extensions keep the
     // neutral defaults from the Material struct.
@@ -448,8 +448,8 @@ bool LoadGltfScene(const base::String &path, ImportedScene *out) {
   out->skin_bindings.resize(data->skins_count);
   for (size_t i = 0; i < data->skins_count; ++i) {
     const cgltf_skin &src = data->skins[i];
-    Skeleton &skeleton = out->skeletons[i];
-    SkinBinding &binding = out->skin_bindings[i];
+    asset::Skeleton &skeleton = out->skeletons[i];
+    asset::SkinBinding &binding = out->skin_bindings[i];
     skeleton.id = ScopedId(path, "skin", i);
     binding.bones.reserve(src.joints_count);
     binding.inverse_bind.resize(src.joints_count);
@@ -505,7 +505,7 @@ bool LoadGltfScene(const base::String &path, ImportedScene *out) {
             source_to_bone[static_cast<u32>(source_parent_index)] < 0) {
           continue;
         }
-        Bone bone;
+        asset::Bone bone;
         bone.name = src.joints[joint]->name
                         ? src.joints[joint]->name
                         : "joint_" + rx::ToString(joint);
@@ -550,7 +550,7 @@ bool LoadGltfScene(const base::String &path, ImportedScene *out) {
   base::Vector<f32> scratch;
   for (size_t i = 0; i < data->meshes_count; ++i) {
     const cgltf_mesh &src = data->meshes[i];
-    Mesh &mesh = out->meshes[i];
+    asset::Mesh &mesh = out->meshes[i];
     mesh.id = ScopedId(path, "mesh", i);
     const i32 skin_index = mesh_skin[i];
     if (skin_index >= 0) {
@@ -558,7 +558,7 @@ bool LoadGltfScene(const base::String &path, ImportedScene *out) {
       mesh.skin = out->skin_bindings[static_cast<u32>(skin_index)];
     }
     mesh.lods.resize(1);
-    MeshLod &lod = mesh.lods[0];
+    asset::MeshLod &lod = mesh.lods[0];
 
     for (size_t p = 0; p < src.primitives_count; ++p) {
       const cgltf_primitive &primitive = src.primitives[p];
@@ -635,7 +635,7 @@ bool LoadGltfScene(const base::String &path, ImportedScene *out) {
       if (uv && uv->count == vertex_count) {
         ReadFloats(uv, 2, &scratch);
         for (u32 v = 0; v < vertex_count; ++v) {
-          Vertex &vertex = lod.vertices[vertex_offset + v];
+          asset::Vertex &vertex = lod.vertices[vertex_offset + v];
           base::MemCopy(vertex.uv, &scratch[v * 2], sizeof(f32) * 2);
           // Safe per primitive because this loader appends a fresh vertex range
           // per primitive, so no two materials ever share a vertex to disagree
@@ -668,7 +668,7 @@ bool LoadGltfScene(const base::String &path, ImportedScene *out) {
           cgltf_float source_weights[4] = {};
           cgltf_accessor_read_uint(joints, v, source_joints, 4);
           cgltf_accessor_read_float(weights, v, source_weights, 4);
-          SkinnedVertexExtra &extra = lod.skinning[vertex_offset + v];
+          asset::SkinnedVertexExtra &extra = lod.skinning[vertex_offset + v];
           f32 total = 0;
           for (f32 weight : source_weights)
             total += rx::Max(weight, 0.0f);
@@ -733,7 +733,7 @@ bool LoadGltfScene(const base::String &path, ImportedScene *out) {
         mesh.morph_targets.resize(primitive.targets_count);
       }
       for (size_t t = 0; t < primitive.targets_count; ++t) {
-        MorphTarget &target = mesh.morph_targets[t];
+        asset::MorphTarget &target = mesh.morph_targets[t];
         for (size_t a = 0; a < primitive.targets[t].attributes_count; ++a) {
           const cgltf_attribute &attribute = primitive.targets[t].attributes[a];
           base::Vector<f32> *deltas = nullptr;
@@ -760,7 +760,7 @@ bool LoadGltfScene(const base::String &path, ImportedScene *out) {
         }
       }
 
-      Submesh submesh;
+      asset::Submesh submesh;
       submesh.index_offset = index_offset;
       submesh.index_count = static_cast<u32>(lod.indices.size()) - index_offset;
       if (primitive.material) {
@@ -776,7 +776,7 @@ bool LoadGltfScene(const base::String &path, ImportedScene *out) {
     // primitives without targets) to the full vertex count, and name the
     // targets from the mesh extras so games can address them by hash.
     for (size_t t = 0; t < mesh.morph_targets.size(); ++t) {
-      MorphTarget &target = mesh.morph_targets[t];
+      asset::MorphTarget &target = mesh.morph_targets[t];
       size_t full = lod.vertices.size() * 3;
       target.position_deltas.resize(full);
       if (!target.normal_deltas.empty())
@@ -785,14 +785,14 @@ bool LoadGltfScene(const base::String &path, ImportedScene *out) {
         target.tangent_deltas.resize(full);
       if (t < src.target_names_count && src.target_names[t]) {
         target.name = src.target_names[t];
-        target.name_hash = MakeAssetId(target.name).hash;
+        target.name_hash = asset::MakeAssetId(target.name).hash;
       }
     }
 
     // Bounding sphere around the vertex centroid, for culling later.
     if (!lod.vertices.empty()) {
       f64 center[3] = {0, 0, 0};
-      for (const Vertex &vertex : lod.vertices) {
+      for (const asset::Vertex &vertex : lod.vertices) {
         for (int axis = 0; axis < 3; ++axis)
           center[axis] += vertex.position[axis];
       }
@@ -801,7 +801,7 @@ bool LoadGltfScene(const base::String &path, ImportedScene *out) {
             static_cast<f32>(center[axis] / lod.vertices.size());
       }
       f32 radius_sq = 0;
-      for (const Vertex &vertex : lod.vertices) {
+      for (const asset::Vertex &vertex : lod.vertices) {
         f32 dx = vertex.position[0] - mesh.bounds_center[0];
         f32 dy = vertex.position[1] - mesh.bounds_center[1];
         f32 dz = vertex.position[2] - mesh.bounds_center[2];
@@ -822,14 +822,14 @@ bool LoadGltfScene(const base::String &path, ImportedScene *out) {
         continue;
       if (!channel.target_node || !channel.target_node->mesh)
         continue;
-      Mesh &mesh = out->meshes[static_cast<size_t>(channel.target_node->mesh -
+      asset::Mesh &mesh = out->meshes[static_cast<size_t>(channel.target_node->mesh -
                                                    data->meshes)];
       u32 targets = static_cast<u32>(mesh.morph_targets.size());
       const cgltf_animation_sampler *sampler = channel.sampler;
       if (targets == 0 || !sampler->input || !sampler->output)
         continue;
 
-      MorphAnimation track;
+      asset::MorphAnimation track;
       track.name = animation.name ? animation.name : "";
       track.step = sampler->interpolation == cgltf_interpolation_type_step;
       ReadFloats(sampler->input, 1, &scratch);
@@ -854,7 +854,7 @@ bool LoadGltfScene(const base::String &path, ImportedScene *out) {
     const cgltf_node &node = data->nodes[i];
     if (!node.mesh)
       continue;
-    ImportedScene::Instance instance;
+    asset::ImportedScene::Instance instance;
     instance.mesh_index = static_cast<u32>(node.mesh - data->meshes);
     instance.skeleton_index =
         node.skin ? static_cast<i32>(node.skin - data->skins) : -1;
@@ -881,4 +881,4 @@ bool LoadGltfScene(const base::String &path, ImportedScene *out) {
   return true;
 }
 
-} // namespace rx::asset
+} // namespace rx::importers

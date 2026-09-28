@@ -13,7 +13,7 @@ class CommandBridge;
 
 // A unix domain socket that lets an out-of-process tool call the engine's script
 // commands while it runs. The frame is a u32 little-endian length followed by
-// exactly that many bytes of rpc::EncodeCall output; the reply is one frame in
+// exactly that many bytes of net::EncodeCall output; the reply is one frame in
 // the same shape, an RpcCall named "ok" whose args are the command's return, or
 // "error" whose single arg is the message.
 //

@@ -111,9 +111,9 @@ class DriveDemo {
 
   // vehicles
   physics::VehicleId car_ = 0;
-  base::UniquePointer<physics::Boat> boat_;
-  base::UniquePointer<physics::Aircraft> aircraft_;
-  base::UniquePointer<physics::Kite> kite_;
+  base::UniquePointer<vehicles::Boat> boat_;
+  base::UniquePointer<vehicles::Aircraft> aircraft_;
+  base::UniquePointer<vehicles::Kite> kite_;
   Vehicle active_ = Vehicle::kCar;
 
   // Active handling profile (0..5: sports/muscle/hatch/suv/van/semi) and the
@@ -147,7 +147,7 @@ class DriveDemo {
   // desc it resolved to (for the hull-scale + HUD) and the current cargo fraction
   // cycled by key L (0 / 0.5 / 1.0 / 1.25-overload).
   u32 boat_profile_ = 1;  // speedboat by default (the BoatDesc defaults)
-  physics::BoatDesc boat_desc_{};
+  vehicles::BoatDesc boat_desc_{};
   u32 boat_cargo_step_ = 0;  // 0/1/2/3 -> 0 / 0.5 / 1.0 / 1.25
   f32 boat_cargo_frac_ = 0;
 
@@ -170,9 +170,9 @@ class DriveDemo {
   f32 wetness_ = 0;
 
   // procedural audio (one voice set per vehicle)
-  base::UniquePointer<audio::VehicleAudio> car_audio_;
-  base::UniquePointer<audio::VehicleAudio> boat_audio_;
-  base::UniquePointer<audio::VehicleAudio> plane_audio_;
+  base::UniquePointer<vehicles::VehicleAudio> car_audio_;
+  base::UniquePointer<vehicles::VehicleAudio> boat_audio_;
+  base::UniquePointer<vehicles::VehicleAudio> plane_audio_;
 
   // visuals
   Model car_model_;

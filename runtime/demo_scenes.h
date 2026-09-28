@@ -308,8 +308,8 @@ class DemoScenes {
   // --demo bubbles: the streaming-bubble interest map driven locally (no
   // transport), plus its wire-sphere visualizer. Non-null only for that demo.
   bool bubbles_enabled_ = false;
-  net::InterestMap bubble_map_;
-  base::UniquePointer<net::BubbleVisualizer> bubble_viz_;
+  replication::InterestMap bubble_map_;
+  base::UniquePointer<replication::BubbleVisualizer> bubble_viz_;
   u64 bubble_tick_ = 0;
 };
 

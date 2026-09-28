@@ -26,10 +26,10 @@
 #include "rxe/physics/water_waves.h"
 
 using namespace rx;
-using physics::Boat;
-using physics::BoatDesc;
-using physics::BoatInput;
-using physics::BoatState;
+using vehicles::Boat;
+using vehicles::BoatDesc;
+using vehicles::BoatInput;
+using vehicles::BoatState;
 using physics::PhysicsWorld;
 
 namespace {
@@ -75,11 +75,11 @@ const char* Name(int i) {
 }
 BoatDesc Profile(int i) {
   switch (i) {
-    case 0: return physics::DinghyProfile();
-    case 1: return physics::SpeedboatProfile();
-    case 2: return physics::JetskiProfile();
-    case 3: return physics::FishingBoatProfile();
-    default: return physics::WorkBargeProfile();
+    case 0: return vehicles::DinghyProfile();
+    case 1: return vehicles::SpeedboatProfile();
+    case 2: return vehicles::JetskiProfile();
+    case 3: return vehicles::FishingBoatProfile();
+    default: return vehicles::WorkBargeProfile();
   }
 }
 

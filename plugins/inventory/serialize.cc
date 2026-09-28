@@ -11,7 +11,7 @@
 namespace rx::inventory {
 namespace {
 
-using namespace detail;
+using namespace internal;
 
 // "RXIN" v1.
 constexpr u8 kMagic0 = 'R', kMagic1 = 'X', kMagic2 = 'I', kMagic3 = 'N';

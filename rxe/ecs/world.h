@@ -14,7 +14,7 @@
 
 namespace rx::ecs {
 
-namespace detail {
+namespace internal {
 // Position of T in Us. Each's component types are distinct, as the query
 // that fetches one column per type requires.
 template <typename T, typename... Us>
@@ -24,7 +24,7 @@ constexpr mem_size IndexOf() {
   ((found = found || base::is_same_v<T, Us>, index += found ? 0 : 1), ...);
   return index;
 }
-}  // namespace detail
+}  // namespace internal
 
 // A run of freshly appended rows in one archetype, handed to a
 // World::CreateBatch callback. Component memory is uninitialized, exactly as
@@ -106,7 +106,7 @@ class RX_ECS_EXPORT World {
         const u32 in_chunk = row % rows_per_chunk;
         fn(archetype->entity_at(row),
            static_cast<Ts*>(archetype->ChunkColumnData(
-               chunk, indices[detail::IndexOf<Ts, Ts...>()]))[in_chunk]...);
+               chunk, indices[internal::IndexOf<Ts, Ts...>()]))[in_chunk]...);
       }
     }
   }

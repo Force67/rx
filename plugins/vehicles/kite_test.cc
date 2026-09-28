@@ -20,10 +20,10 @@
 
 using rx::f32;
 using rx::Vec3;
-using rx::physics::Kite;
-using rx::physics::KiteDesc;
-using rx::physics::KiteInput;
-using rx::physics::KiteState;
+using rx::vehicles::Kite;
+using rx::vehicles::KiteDesc;
+using rx::vehicles::KiteInput;
+using rx::vehicles::KiteState;
 using rx::physics::PhysicsWorld;
 
 namespace {

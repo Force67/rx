@@ -458,7 +458,7 @@ void LookdevDemo::Impl::LoadSubject() {
   }
 
   asset::ImportedScene scene;
-  if (!asset::LoadGltfScene(path, &scene) || scene.meshes.empty()) {
+  if (!importers::LoadGltfScene(path, &scene) || scene.meshes.empty()) {
     RX_WARN("lookdev: cannot load {}, using the procedural stand-in", path);
     BuildProceduralSubject();
     return;

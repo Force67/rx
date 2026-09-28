@@ -408,7 +408,7 @@ GpuImage MaterialSystem::UploadTextureImage(const asset::Texture& texture, u32 f
   device_.RecordUpload([&](CommandList& cmd) {
     cmd.Barrier(Transition(image, ResourceState::kUndefined, ResourceState::kCopyDst));
 
-    mem::SmallVector<BufferTextureCopy, 16> regions;  // one per mip
+    SmallVector<BufferTextureCopy, 16> regions;  // one per mip
     u64 offset = 0;
     u32 width = top_width;
     u32 height = top_height;

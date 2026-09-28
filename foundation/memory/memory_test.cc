@@ -30,9 +30,9 @@ int g_failures = 0;
     }                                                                  \
   } while (0)
 
-rx::mem::CategoryStats FindCategory(const char* name) {
-  rx::mem::CategoryStats stats[rx::mem::kMaxCategories];
-  const rx::u32 count = rx::mem::SnapshotCategories(stats, rx::mem::kMaxCategories);
+rx::MemoryCategoryStats FindCategory(const char* name) {
+  rx::MemoryCategoryStats stats[rx::kMaxMemoryCategories];
+  const rx::u32 count = rx::SnapshotMemoryCategories(stats, rx::kMaxMemoryCategories);
   for (rx::u32 i = 0; i < count; ++i) {
     if (::strcmp(stats[i].name, name) == 0) return stats[i];
   }
@@ -40,47 +40,47 @@ rx::mem::CategoryStats FindCategory(const char* name) {
 }
 
 void TestTracker() {
-  const rx::mem::Category category = rx::mem::RegisterCategory("test-cat");
-  CHECK(category != rx::mem::kGeneralCategory);
-  CHECK(rx::mem::RegisterCategory("test-cat") == category);  // idempotent by name
+  const rx::MemoryCategory category = rx::RegisterMemoryCategory("test-cat");
+  CHECK(category != rx::kGeneralMemoryCategory);
+  CHECK(rx::RegisterMemoryCategory("test-cat") == category);  // idempotent by name
 
-  if (!rx::mem::TrackingActive()) {
+  if (!rx::TrackingActive()) {
     ::puts("tracker: RX_MIMALLOC off, skipping counter checks");
     return;
   }
 
-  const rx::mem::CategoryStats before = FindCategory("test-cat");
+  const rx::MemoryCategoryStats before = FindCategory("test-cat");
   void* block = nullptr;
   {
-    rx::mem::CategoryScope scope(category);
+    rx::MemoryCategoryScope scope(category);
     block = ::operator new(1 << 16, std::align_val_t{256});
   }
   CHECK(reinterpret_cast<uintptr_t>(block) % 256 == 0);
-  const rx::mem::CategoryStats held = FindCategory("test-cat");
+  const rx::MemoryCategoryStats held = FindCategory("test-cat");
   CHECK(held.current_bytes - before.current_bytes >= 1 << 16);
   CHECK(held.peak_bytes >= static_cast<rx::u64>(held.current_bytes));
   CHECK(held.alloc_count > before.alloc_count);
 
   // Freeing from another scope/thread must still debit the owning category.
   ::operator delete(block, std::align_val_t{256});
-  const rx::mem::CategoryStats released = FindCategory("test-cat");
+  const rx::MemoryCategoryStats released = FindCategory("test-cat");
   CHECK(released.current_bytes == before.current_bytes);  // exact: mi_usable_size both sides
 
 #if defined(RX_MIMALLOC)
   // Simulate a pointer crossing from a shared module whose local new routed
   // straight to mimalloc and therefore has no rx category footer.
-  const rx::mem::CategoryStats general_before = FindCategory("<general>");
+  const rx::MemoryCategoryStats general_before = FindCategory("<general>");
   void* untracked = mi_new(256);
   ::operator delete(untracked);
   CHECK(FindCategory("<general>").current_bytes == general_before.current_bytes);
 #endif
 
-  rx::mem::SetCategoryBudget("test-cat", 123);
+  rx::SetMemoryCategoryBudget("test-cat", 123);
   CHECK(FindCategory("test-cat").budget_bytes == 123);
 }
 
 void TestFrameArena() {
-  rx::mem::FrameArena arena;
+  rx::FrameArena arena;
   arena.Init(4096);
 
   void* a = arena.Alloc(100, 8);
@@ -110,7 +110,7 @@ void TestFrameArena() {
 }
 
 void TestChunkPool() {
-  rx::mem::ChunkPool pool;
+  rx::ChunkPool pool;
   pool.Reserve(3);
   CHECK(pool.stats().total_chunks >= 3);
   CHECK(pool.stats().free_chunks == pool.stats().total_chunks);
@@ -118,9 +118,9 @@ void TestChunkPool() {
   void* a = pool.Acquire();
   void* b = pool.Acquire();
   CHECK(a != nullptr && b != nullptr && a != b);
-  CHECK(reinterpret_cast<uintptr_t>(a) % rx::mem::ChunkPool::kChunkAlign == 0);
+  CHECK(reinterpret_cast<uintptr_t>(a) % rx::ChunkPool::kChunkAlign == 0);
   // Chunks are writable across their whole extent.
-  base::MemSet(a, 0xab, rx::mem::ChunkPool::kChunkSize);
+  base::MemSet(a, 0xab, rx::ChunkPool::kChunkSize);
 
   const size_t total = pool.stats().total_chunks;
   CHECK(pool.stats().free_chunks == total - 2);
@@ -140,7 +140,7 @@ struct Probe {
 
 void TestSmallVector() {
   {
-    rx::mem::SmallVector<Probe, 4> vec;
+    rx::SmallVector<Probe, 4> vec;
     for (int i = 0; i < 3; ++i) vec.emplace_back(i);
     const void* inline_data = vec.data();
     for (int i = 3; i < 32; ++i) vec.emplace_back(i);  // grows to the heap
@@ -148,20 +148,20 @@ void TestSmallVector() {
     CHECK(vec.data() != inline_data);
     for (int i = 0; i < 32; ++i) CHECK(vec[static_cast<size_t>(i)].value == i);
 
-    rx::mem::SmallVector<Probe, 4> moved(base::move(vec));
+    rx::SmallVector<Probe, 4> moved(base::move(vec));
     CHECK(moved.size() == 32);
     CHECK(vec.size() == 0);
     CHECK(Probe::live == 32);
   }
   CHECK(Probe::live == 0);
 
-  rx::mem::SmallVector<int, 8> ints;
+  rx::SmallVector<int, 8> ints;
   for (int i = 0; i < 8; ++i) ints.push_back(i);
   CHECK(ints.capacity() == 8);  // still inline at exactly N
   ints.clear();
   CHECK(ints.empty());
 
-  rx::mem::SmallVector<base::String, 2> strings;
+  rx::SmallVector<base::String, 2> strings;
   strings.emplace_back("alpha");
   strings.emplace_back("beta");
   strings.emplace_back(strings[0]);  // aliased argument across growth
@@ -171,10 +171,10 @@ void TestSmallVector() {
 }
 
 void TestConfig() {
-  rx::mem::MemoryConfig config;
+  rx::MemoryConfig config;
   CHECK(config.frame_arena_bytes == 8u << 20);  // the desktop default
 
-  rx::mem::ParseMemoryConfigText(
+  rx::ParseMemoryConfigText(
       "; comment\n"
       "[arena]\n"
       "frame_mb = 2\n"

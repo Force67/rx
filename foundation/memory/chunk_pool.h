@@ -8,7 +8,7 @@
 #include "foundation/build_config/export.h"
 #include "foundation/build_config/types.h"
 
-namespace rx::mem {
+namespace rx {
 
 // Pool of fixed 16 KiB blocks, the backing store for ECS archetype chunks
 // (and any other consumer with chunk-shaped lifetimes). One block size means
@@ -55,6 +55,6 @@ class RX_FOUNDATION_EXPORT ChunkPool {
 
 RX_FOUNDATION_EXPORT ChunkPool& GlobalChunkPool();
 
-}  // namespace rx::mem
+}  // namespace rx
 
 #endif  // RX_FOUNDATION_MEMORY_CHUNK_POOL_H_

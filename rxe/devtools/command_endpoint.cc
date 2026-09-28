@@ -224,15 +224,15 @@ bool CommandEndpoint::Serve(int index, CommandBridge& bridge) {
     if (buffer.size() - consumed - 4 < length) break;  // partial, wait for more
     const u8* payload = buffer.data() + consumed + 4;
 
-    rpc::RpcCall reply;
-    base::Optional<rpc::RpcCall> call = rpc::DecodeCall(payload, length);
+    net::RpcCall reply;
+    base::Optional<net::RpcCall> call = net::DecodeCall(payload, length);
     if (!call) {
       reply.name = "error";
       reply.args.emplace_back(base::String("malformed rpc frame"));
     } else {
       // The uid check at accept is what makes this a trusted origin; the sender
       // id is how that fact reaches the bridge (see kLocalSender).
-      const rpc::RpcContext ctx{kLocalSender, /*from_server=*/false};
+      const net::RpcContext ctx{kLocalSender, /*from_server=*/false};
       CommandBridge::Reply result = bridge.Invoke(ctx, *call);
       reply.name = result.ok ? "ok" : "error";
       if (result.ok)
@@ -243,7 +243,7 @@ bool CommandEndpoint::Serve(int index, CommandBridge& bridge) {
     consumed += 4 + length;
 
     base::Vector<u8> frame;
-    const base::Vector<u8> encoded = rpc::EncodeCall(reply);
+    const base::Vector<u8> encoded = net::EncodeCall(reply);
     PutU32(frame, static_cast<u32>(encoded.size()));
     frame.insert(frame.end(), encoded.begin(), encoded.end());
     // A reply is tens of bytes against a socket buffer of hundreds of kilobytes,

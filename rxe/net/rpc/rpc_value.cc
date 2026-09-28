@@ -3,7 +3,7 @@
 #include "base/strings/xstring.h"
 #include "rxe/net/rpc/rpc_value.h"
 
-namespace rx::rpc {
+namespace rx::net {
 
 RpcValue::RpcValue() = default;
 RpcValue::RpcValue(bool v) : type_(Type::kBool), bool_(v) {}
@@ -57,4 +57,4 @@ bool RpcValue::operator==(const RpcValue& other) const {
   return false;
 }
 
-}  // namespace rx::rpc
+}  // namespace rx::net

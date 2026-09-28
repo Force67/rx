@@ -5,7 +5,7 @@
 #include "foundation/build_config/types.h"
 #include "rxe/audio/synth_voice.h"
 
-namespace rx::audio {
+namespace rx::vehicles {
 
 // Static description of one powerplant, all constructor data. A preset is pure
 // numbers so a game can tweak or add engines without touching the DSP; the
@@ -65,12 +65,12 @@ RX_VEHICLES_EXPORT EnginePreset LightJetPreset();        // turbine whine + exha
 // gains by load, adds overrun burble and intake/exhaust noise, and optionally a
 // propeller or turbine layer. Everything is float, NaN-free and bounded; state
 // (oscillator phases, filters, noise) lives here and is render-thread only.
-class RX_VEHICLES_EXPORT EngineSynth final : public Synth {
+class RX_VEHICLES_EXPORT EngineSynth final : public audio::Synth {
  public:
   // `output_rate` is the mixer mix rate; all frequencies render at it directly.
   EngineSynth(const EnginePreset& preset, u32 output_rate);
 
-  void Render(f32* out, u32 frames, const SynthParams& p) override;
+  void Render(f32* out, u32 frames, const audio::SynthParams& p) override;
 
   const EnginePreset& preset() const { return preset_; }
 
@@ -110,6 +110,6 @@ class RX_VEHICLES_EXPORT EngineSynth final : public Synth {
   f32 Noise();
 };
 
-}  // namespace rx::audio
+}  // namespace rx::vehicles
 
 #endif  // RX_VEHICLES_ENGINE_SYNTH_H_

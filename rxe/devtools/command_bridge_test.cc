@@ -42,7 +42,7 @@ int g_failures = 0;
 
 namespace devtools = rx::devtools;
 namespace ecs = rx::ecs;
-namespace rpc = rx::rpc;
+namespace net = rx::net;
 namespace scene = rx::scene;
 namespace script = rx::script;
 using rx::u8;
@@ -65,9 +65,9 @@ struct Rig {
     bridge.emplace(commands, ctx);
   }
 
-  devtools::CommandBridge::Reply Call(base::String name, rpc::RpcArgs args) {
-    const rpc::RpcContext local{devtools::kLocalSender, /*from_server=*/false};
-    return bridge->Invoke(local, rpc::RpcCall{base::move(name), base::move(args)});
+  devtools::CommandBridge::Reply Call(base::String name, net::RpcArgs args) {
+    const net::RpcContext local{devtools::kLocalSender, /*from_server=*/false};
+    return bridge->Invoke(local, net::RpcCall{base::move(name), base::move(args)});
   }
 };
 
@@ -78,8 +78,8 @@ void TestMarshalling() {
 
   // World.Spawn(symbol, vec3, float): 3 params, 5 wire args.
   devtools::CommandBridge::Reply reply =
-      rig.Call("World.Spawn", {rpc::RpcValue(base::String("crate")), rpc::RpcValue(1.0),
-                               rpc::RpcValue(2.0), rpc::RpcValue(3.0), rpc::RpcValue(rx::i64(2))});
+      rig.Call("World.Spawn", {net::RpcValue(base::String("crate")), net::RpcValue(1.0),
+                               net::RpcValue(2.0), net::RpcValue(3.0), net::RpcValue(rx::i64(2))});
   CHECK(reply.ok);
   CHECK(reply.values.size() == 1);
   const rx::i64 entity = reply.values[0].as_int();
@@ -90,19 +90,19 @@ void TestMarshalling() {
   // widening is the one conversion the bridge performs.
   CHECK(rig.world.Get<scene::Transform>(spawned)->scale == 2.0f);
 
-  reply = rig.Call("World.Teleport", {rpc::RpcValue(entity), rpc::RpcValue(4.0),
-                                      rpc::RpcValue(5.0), rpc::RpcValue(6.0)});
+  reply = rig.Call("World.Teleport", {net::RpcValue(entity), net::RpcValue(4.0),
+                                      net::RpcValue(5.0), net::RpcValue(6.0)});
   CHECK(reply.ok && reply.values.empty());  // void returns nothing, not null
 
-  reply = rig.Call("World.GetPosition", {rpc::RpcValue(entity)});
+  reply = rig.Call("World.GetPosition", {net::RpcValue(entity)});
   CHECK(reply.ok && reply.values.size() == 3);  // a vec3 return is three floats
   CHECK(reply.values[0].as_float() == 4.0);
   CHECK(reply.values[2].as_float() == 6.0);
 
   // A string round trip: in as a borrowed view, out of the scratch arena and
   // copied into the reply, so resetting the arena cannot invalidate it.
-  rig.Call("World.SetName", {rpc::RpcValue(entity), rpc::RpcValue(base::String("Crate 01"))});
-  reply = rig.Call("World.GetName", {rpc::RpcValue(entity)});
+  rig.Call("World.SetName", {net::RpcValue(entity), net::RpcValue(base::String("Crate 01"))});
+  reply = rig.Call("World.GetName", {net::RpcValue(entity)});
   rig.scratch.Reset();
   CHECK(reply.ok && reply.values.size() == 1);
   CHECK(reply.values[0].as_string() == "Crate 01");
@@ -116,7 +116,7 @@ void TestMarshalling() {
   const rx::i64 stale_id =
       static_cast<rx::i64>(static_cast<rx::u64>(stale.index) |
                            (static_cast<rx::u64>(stale.generation) << 32));
-  reply = rig.Call("World.IsValid", {rpc::RpcValue(stale_id)});
+  reply = rig.Call("World.IsValid", {net::RpcValue(stale_id)});
   CHECK(reply.ok && reply.values[0].as_bool() == false);
 }
 
@@ -124,20 +124,20 @@ void TestRejection() {
   Rig rig;
 
   // Too few args for the signature.
-  devtools::CommandBridge::Reply reply = rig.Call("World.Teleport", {rpc::RpcValue(rx::i64(1))});
+  devtools::CommandBridge::Reply reply = rig.Call("World.Teleport", {net::RpcValue(rx::i64(1))});
   CHECK(!reply.ok);
   CHECK(reply.error.find("expects 4 arg(s) for (entity, vec3)") != base::String::npos);
 
   // Right arity, wrong type: a float where an entity id is wanted is a caller
   // bug, and truncating it would move some other entity.
-  reply = rig.Call("World.Teleport", {rpc::RpcValue(1.5), rpc::RpcValue(0.0),
-                                      rpc::RpcValue(0.0), rpc::RpcValue(0.0)});
+  reply = rig.Call("World.Teleport", {net::RpcValue(1.5), net::RpcValue(0.0),
+                                      net::RpcValue(0.0), net::RpcValue(0.0)});
   CHECK(!reply.ok);
   CHECK(reply.error.find("arg 0 expects entity, got float") != base::String::npos);
 
   // A string where a number is wanted, inside the vec3 expansion.
-  reply = rig.Call("World.Teleport", {rpc::RpcValue(rx::i64(1)), rpc::RpcValue(0.0),
-                                      rpc::RpcValue(base::String("up")), rpc::RpcValue(0.0)});
+  reply = rig.Call("World.Teleport", {net::RpcValue(rx::i64(1)), net::RpcValue(0.0),
+                                      net::RpcValue(base::String("up")), net::RpcValue(0.0)});
   CHECK(!reply.ok);
   CHECK(reply.error.find("arg 2 expects float") != base::String::npos);
 
@@ -151,17 +151,17 @@ void TestTrustGate() {
   ecs::Entity e = rig.world.Create();
   rig.world.Add(e, scene::Transform{{1, 2, 3}});
   const rx::i64 id = static_cast<rx::i64>(e.index);
-  const rpc::RpcCall move{"World.Teleport",
-                          {rpc::RpcValue(id), rpc::RpcValue(9.0), rpc::RpcValue(9.0),
-                           rpc::RpcValue(9.0)}};
+  const net::RpcCall move{"World.Teleport",
+                          {net::RpcValue(id), net::RpcValue(9.0), net::RpcValue(9.0),
+                           net::RpcValue(9.0)}};
 
   // A remote game peer: any peer id the net path could attribute a packet to.
-  devtools::CommandBridge::Reply reply = rig.bridge->Invoke(rpc::RpcContext{7, false}, move);
+  devtools::CommandBridge::Reply reply = rig.bridge->Invoke(net::RpcContext{7, false}, move);
   CHECK(!reply.ok);
   CHECK(reply.error.find("local-endpoint only") != base::String::npos);
 
   // The host, on a client build. Also not the local authoring endpoint.
-  reply = rig.bridge->Invoke(rpc::RpcContext{devtools::kLocalSender, true}, move);
+  reply = rig.bridge->Invoke(net::RpcContext{devtools::kLocalSender, true}, move);
   CHECK(!reply.ok);
 
   // Nothing moved: a refusal happens before any marshalling or dispatch.
@@ -169,7 +169,7 @@ void TestTrustGate() {
 
   // Dispatching straight through the registry, bypassing Invoke, also cannot
   // reach a handler: there is no reply slot, so the bound handler does nothing.
-  CHECK(rig.bridge->registry().Dispatch(rpc::RpcContext{devtools::kLocalSender, false}, move));
+  CHECK(rig.bridge->registry().Dispatch(net::RpcContext{devtools::kLocalSender, false}, move));
   CHECK(rig.world.Get<scene::Transform>(e)->position[0] == 1.0f);
 }
 
@@ -199,10 +199,10 @@ void TestEndpoint() {
 
   ecs::Entity e = rig.world.Create();
   rig.world.Add(e, scene::Transform{{0, 0, 0}});
-  const rpc::RpcCall call{"World.Teleport",
-                          {rpc::RpcValue(static_cast<rx::i64>(e.index)), rpc::RpcValue(1.0),
-                           rpc::RpcValue(2.0), rpc::RpcValue(3.0)}};
-  const base::Vector<u8> payload = rpc::EncodeCall(call);
+  const net::RpcCall call{"World.Teleport",
+                          {net::RpcValue(static_cast<rx::i64>(e.index)), net::RpcValue(1.0),
+                           net::RpcValue(2.0), net::RpcValue(3.0)}};
+  const base::Vector<u8> payload = net::EncodeCall(call);
   base::Vector<u8> frame;
   for (int i = 0; i < 4; ++i)
     frame.push_back(static_cast<u8>(static_cast<u32>(payload.size()) >> (8 * i)));
@@ -217,7 +217,7 @@ void TestEndpoint() {
                      u32(header[3]) << 24;
   base::Vector<u8> reply_bytes(length);
   CHECK(::read(fd, reply_bytes.data(), length) == static_cast<ssize_t>(length));
-  base::Optional<rpc::RpcCall> reply = rpc::DecodeCall(reply_bytes.data(), reply_bytes.size());
+  base::Optional<net::RpcCall> reply = net::DecodeCall(reply_bytes.data(), reply_bytes.size());
   CHECK(reply && reply->name == "ok");
   CHECK(rig.world.Get<scene::Transform>(e)->position[2] == 3.0f);
 

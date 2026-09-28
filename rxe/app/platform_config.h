@@ -15,7 +15,7 @@ namespace rx::app {
 // one kind of machine (docs/CONFIG.md). Each section belongs to the subsystem
 // that owns its keys:
 //   [render] [render.<group>]   RenderSettings, the render::ApplyIni keys
-//   [memory.<group>]            the memory plan (mem::ParseMemoryConfigText)
+//   [memory.<group>]            the memory plan (ParseMemoryConfigText)
 //   [options]                   any registered base::Option, by its name
 // `include = <vfs path>` applies another file first, so the including file's
 // keys win. Several files read into one config layer the same way: later wins.

@@ -6,7 +6,7 @@
 #include "foundation/build_config/export.h"
 #include "foundation/build_config/types.h"
 
-namespace rx::rpc {
+namespace rx::net {
 
 // A compact dynamic value for one RPC argument. RPC calls cross the wire between
 // untrusted peers, so arguments cannot be a fixed struct; each handler decides
@@ -52,6 +52,6 @@ class RX_RPC_EXPORT RpcValue {
 
 using RpcArgs = base::Vector<RpcValue>;
 
-}  // namespace rx::rpc
+}  // namespace rx::net
 
 #endif  // RX_RPC_RPC_VALUE_H_

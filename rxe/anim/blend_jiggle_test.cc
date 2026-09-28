@@ -34,18 +34,18 @@ f32 RotationDifference(const Quat &a, const Quat &b) {
 }
 
 int TestBlend(const base::String &blend_path, const base::String &script) {
-  asset::BlendImportOptions options;
+  importers::BlendImportOptions options;
   options.converter_script = script;
-  asset::BlendImportResult converted;
+  importers::BlendImportResult converted;
   base::String error;
   const bool converted_ok =
-      asset::ConvertBlendScene(blend_path, options, &converted, &error);
+      importers::ConvertBlendScene(blend_path, options, &converted, &error);
   if (!Check(converted_ok,
              error.empty() ? "Blender conversion succeeds" : error.c_str()))
     return 1;
 
   asset::ImportedScene scene;
-  if (!Check(asset::LoadGltfScene(converted.glb_path, &scene),
+  if (!Check(importers::LoadGltfScene(converted.glb_path, &scene),
              "converted GLB loads"))
     return 1;
   if (!Check(!scene.meshes.empty() && !scene.instances.empty(),
@@ -221,12 +221,12 @@ int main(int argc, char **argv) {
 
   // Keep the default CTest path hermetic: Blender and a user asset are not
   // required to verify that the public API rejects invalid sources cleanly.
-  asset::BlendImportOptions options;
+  importers::BlendImportOptions options;
   options.converter_script = RX_BLEND_CONVERTER_SCRIPT;
-  asset::BlendImportResult result;
+  importers::BlendImportResult result;
   base::String error;
   if (!Check(
-          !asset::ConvertBlendScene("missing.blend", options, &result, &error),
+          !importers::ConvertBlendScene("missing.blend", options, &result, &error),
           "missing .blend is rejected"))
     return 1;
   if (!Check(!error.empty(), "missing .blend reports a useful error"))

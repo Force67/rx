@@ -677,8 +677,8 @@ struct FeatureGym::Impl {
   Vec3 strand_center{};
   base::Vector<f32> strand_positions;
 
-  net::InterestMap bubble_map;
-  base::UniquePointer<net::BubbleVisualizer> bubble_viz;
+  replication::InterestMap bubble_map;
+  base::UniquePointer<replication::BubbleVisualizer> bubble_viz;
   u64 bubble_tick = 0;
 
   ecs::Entity camera_base_mode{};
@@ -765,11 +765,11 @@ struct FeatureGym::Impl {
   base::Array<Mat4, 4> circuit_wheel_previous{};
   base::Array<bool, 4> circuit_wheel_previous_valid{};
 
-  // Marina: a force-simulated physics::Boat that floats on the water-district
+  // Marina: a force-simulated vehicles::Boat that floats on the water-district
   // lake. Update() must run every fixed step to keep it buoyant (the hull is
   // exempt from the world's generic buoyancy); it idles at its berth and runs a
   // slow circuit during the boat stop. Meshes are a hull + cabin box.
-  base::UniquePointer<physics::Boat> boat;
+  base::UniquePointer<vehicles::Boat> boat;
   u64 boat_hull_mesh = 0;
   u64 boat_cabin_mesh = 0;
   Vec3 boat_berth{};
@@ -788,7 +788,7 @@ struct FeatureGym::Impl {
   // around a circle at altitude over the circuit (closed-loop heading + altitude
   // hold), then falls away unseen once the stop ends. Update() runs every step
   // so the gear holds it on the apron while idle.
-  base::UniquePointer<physics::Aircraft> aircraft;
+  base::UniquePointer<vehicles::Aircraft> aircraft;
   u64 plane_body_mesh = 0;
   u64 plane_wing_mesh = 0;
   u64 plane_tail_mesh = 0;
@@ -1553,8 +1553,8 @@ void FeatureGym::Impl::CreateMarina() {
   // anywhere that returns true. Update() runs every fixed step in AddSimulation;
   // the cruise runs it gently so a hull that can only turn wide still stays on
   // the small lake.
-  physics::BoatDesc desc = physics::SpeedboatProfile();
-  boat = base::MakeUnique<physics::Boat>(physics, desc, boat_berth, 0.0f);
+  vehicles::BoatDesc desc = vehicles::SpeedboatProfile();
+  boat = base::MakeUnique<vehicles::Boat>(physics, desc, boat_berth, 0.0f);
   if (!boat->valid())
     RX_WARN("feature gym: marina boat is static; rebuild with Jolt for buoyancy");
 
@@ -1662,15 +1662,15 @@ void FeatureGym::Impl::CreateNetworkBubbles() {
   for (int z = -3; z <= 3; ++z) {
     for (int x = -4; x <= 4; ++x) {
       ecs::Entity entity = Spawn(pawn_mesh, c + Vec3{x * 2.1f, 0.55f, z * 2.1f});
-      world.Add(entity, net::AllocateNetworkId());
+      world.Add(entity, replication::AllocateNetworkId());
       world.Add(entity, scene::Tint{0x555555});
     }
   }
   for (u32 peer = 1; peer <= 2; ++peer) {
     ecs::Entity entity = Spawn(player_mesh, c + Vec3{peer == 1 ? -3.0f : 3.0f, 1.0f, 0});
-    world.Add(entity, net::AllocateNetworkId());
-    world.Add(entity, net::InterestBubble{peer, 5.8f});
-    world.Add(entity, scene::Tint{net::PeerColor(peer)});
+    world.Add(entity, replication::AllocateNetworkId());
+    world.Add(entity, replication::InterestBubble{peer, 5.8f});
+    world.Add(entity, scene::Tint{replication::PeerColor(peer)});
     world.Add(entity, BubbleAgent{.time = peer * 2.4f,
                                   .rate_x = 0.22f + peer * 0.06f,
                                   .rate_z = 0.31f - peer * 0.05f,
@@ -1679,7 +1679,7 @@ void FeatureGym::Impl::CreateNetworkBubbles() {
   }
   bubble_map.Configure({.hysteresis = 1.15f, .cell_size = 4.0f});
   if (!headless) {
-    bubble_viz = base::MakeUnique<net::BubbleVisualizer>();
+    bubble_viz = base::MakeUnique<replication::BubbleVisualizer>();
     if (!bubble_viz->Init(renderer)) bubble_viz.Reset();
   }
 }
@@ -1974,8 +1974,8 @@ void FeatureGym::Impl::CreateAircraft() {
   // Park it on the apron east of the oval; spawn ~1.4 m up and let the gear
   // settle (zero-input steps in AddSimulation) before the flyby flings it aloft.
   const Vec3 apron = circuit_center + Vec3{circuit_rx + 6.0f, 1.4f, -circuit_rz - 2.0f};
-  physics::AircraftDesc desc;
-  aircraft = base::MakeUnique<physics::Aircraft>(physics, desc, apron, 0.0f);
+  vehicles::AircraftDesc desc;
+  aircraft = base::MakeUnique<vehicles::Aircraft>(physics, desc, apron, 0.0f);
   if (!aircraft->valid())
     RX_WARN("feature gym: flyover aircraft is static; rebuild with Jolt for flight");
 }
@@ -2285,7 +2285,7 @@ void FeatureGym::Impl::AddSimulation() {
   scheduler.AddSystem(ecs::Stage::kPreSim, "feature_gym_marina",
                       [this, alive = simulation_alive](ecs::World&, f32 dt) {
                         if (!*alive || !boat || !boat->valid()) return;
-                        physics::BoatInput input;
+                        vehicles::BoatInput input;
                         if (active_mode == TourMode::kBoatCruise) {
                           if (!boat_cruise_active) {
                             // Re-berth on entry so the long idle drift (Gerstner
@@ -2298,7 +2298,7 @@ void FeatureGym::Impl::AddSimulation() {
                             boat_time = 0;
                           }
                           boat_time += dt;
-                          const physics::BoatState& s = boat->state();
+                          const vehicles::BoatState& s = boat->state();
                           const f32 theta = boat_time * 0.5f + 0.6f;
                           Vec3 target = boat_circuit_center +
                                         Vec3{boat_circuit_radius * ::cosf(theta), 0,
@@ -2336,7 +2336,7 @@ void FeatureGym::Impl::AddSimulation() {
       ecs::Stage::kPreSim, "feature_gym_flyover",
       [this, alive = simulation_alive](ecs::World&, f32 dt) {
         if (!*alive || !aircraft || !aircraft->valid()) return;
-        physics::AircraftInput ai;
+        vehicles::AircraftInput ai;
         if (active_mode == TourMode::kAircraftFlyby) {
           if (!plane_flyby_active) {
             // A light plane cannot bank a tight circle at flying speed without
@@ -2352,7 +2352,7 @@ void FeatureGym::Impl::AddSimulation() {
             plane_time = 0;
           }
           plane_time += dt;
-          const physics::AircraftState& s = aircraft->state();
+          const vehicles::AircraftState& s = aircraft->state();
           const Vec3 fwd = Rotate(s.rotation, Vec3{0, 0, 1});
           f32 herr = (kPi * 0.5f) - ::atan2f(fwd.x, fwd.z);
           while (herr > kPi) herr -= 2.0f * kPi;
@@ -2582,7 +2582,7 @@ void FeatureGym::Impl::EmitVehicles(render::FrameView& view) {
 
 void FeatureGym::Impl::EmitBoat(f32 dt, render::FrameView& view) {
   if (!boat || !boat->valid()) return;
-  const physics::BoatState& s = boat->state();
+  const vehicles::BoatState& s = boat->state();
   const Mat4 hull_xform = MakeTranslation(s.position) * MakeFromQuat(s.rotation);
   render::DrawItem hull;
   hull.mesh = boat_hull_mesh;
@@ -2622,7 +2622,7 @@ void FeatureGym::Impl::EmitBoat(f32 dt, render::FrameView& view) {
 
 void FeatureGym::Impl::EmitAircraft(render::FrameView& view) {
   if (!aircraft || !aircraft->valid()) return;
-  const physics::AircraftState& s = aircraft->state();
+  const vehicles::AircraftState& s = aircraft->state();
   const Mat4 pose = MakeTranslation(s.position) * MakeFromQuat(s.rotation);
   auto part = [&](u64 mesh, Vec3 offset) {
     if (!mesh) return;
@@ -2675,10 +2675,10 @@ void FeatureGym::Impl::EmitStrandGroom() {
 void FeatureGym::Impl::EmitNetworkBubbles(render::FrameView& view) {
   if (active_mode != TourMode::kTransportFreeNetworkBubbles) return;
   bubble_map.Update(world, ++bubble_tick);
-  world.Each<net::NetworkId, scene::Tint>(
-      [this](ecs::Entity, net::NetworkId& id, scene::Tint& tint) {
+  world.Each<replication::NetworkId, scene::Tint>(
+      [this](ecs::Entity, replication::NetworkId& id, scene::Tint& tint) {
         const u32 owner = bubble_map.OwnerOf(id.value);
-        tint.rgb = owner == net::kNoPeer ? 0x555555 : net::PeerColor(owner);
+        tint.rgb = owner == net::kNoPeer ? 0x555555 : replication::PeerColor(owner);
       });
   if (bubble_viz) bubble_viz->Emit(view, bubble_map.bubbles());
 }

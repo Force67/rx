@@ -25,7 +25,7 @@ namespace rx::devtools {
 // entities: reaching them equals owning the running scene. Two gates:
 //  1. The bridge owns its OWN RpcRegistry, never the net session's, so an
 //     authoring name does not resolve on the game's packet path at all.
-//  2. rpc::RpcContext cannot express "trusted local origin" (a peer id plus
+//  2. net::RpcContext cannot express "trusted local origin" (a peer id plus
 //     from_server is producible by a remote packet), so trust is established by
 //     the TRANSPORT (CommandEndpoint checks the connecting uid) and carried in
 //     `sender` as kLocalSender, zetanet's never-assigned invalid peer id.
@@ -54,14 +54,14 @@ class RX_DEVTOOLS_EXPORT CommandBridge {
   CommandBridge(script::HandlerRegistry& commands, script::HandlerContext& ctx);
 
   // Names known to the bridge, for a transport that wants to reject early.
-  const rpc::RpcRegistry& registry() const { return registry_; }
+  const net::RpcRegistry& registry() const { return registry_; }
 
   struct Reply {
     bool ok = false;
     // The handler's return, flattened (a vec3 return is three floats). Empty for
     // a void command. Strings are copied out of the context's scratch arena, so
     // the reply stays valid after the arena is reset.
-    rpc::RpcArgs values;
+    net::RpcArgs values;
     base::String error;  // set only when !ok, safe to show a caller
   };
 
@@ -69,12 +69,12 @@ class RX_DEVTOOLS_EXPORT CommandBridge {
   // an unknown name, an untrusted context or a signature mismatch all come back
   // as ok=false. Synchronous, so the caller may pass args that only live for the
   // duration of the call (string args are borrowed, not copied).
-  Reply Invoke(const rpc::RpcContext& ctx, const rpc::RpcCall& call);
+  Reply Invoke(const net::RpcContext& ctx, const net::RpcCall& call);
 
  private:
   script::HandlerRegistry& commands_;
   script::HandlerContext& ctx_;
-  rpc::RpcRegistry registry_;
+  net::RpcRegistry registry_;
   // Where the registered rpc handler drops what the script handler returned.
   // RpcHandler returns void, so a request/reply endpoint has to catch the result
   // on the side; this is safe because Dispatch is synchronous and single

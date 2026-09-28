@@ -15,8 +15,8 @@ int Fail(const char* what) {
   return 1;
 }
 
-physics::detail::ClothTopology ManualTopology(u32 vertex_count) {
-  physics::detail::ClothTopology topology;
+physics::internal::ClothTopology ManualTopology(u32 vertex_count) {
+  physics::internal::ClothTopology topology;
   topology.neighbor_offsets.resize(static_cast<size_t>(vertex_count) + 1);
   return topology;
 }
@@ -35,21 +35,21 @@ int TestTopology() {
   const Vec3 bow_tie[] = {
       {0, 0, 0}, {1, 0, 0}, {0, 1, 0}, {-1, 0, 0}, {0, -1, 0}};
   const u32 bow_tie_indices[] = {0, 1, 2, 0, 3, 4};
-  physics::detail::ClothTopology topology;
-  if (physics::detail::BuildClothTopology(bow_tie, 5, bow_tie_indices, 6,
+  physics::internal::ClothTopology topology;
+  if (physics::internal::BuildClothTopology(bow_tie, 5, bow_tie_indices, 6,
                                           &topology)) {
     return Fail("bow-tie vertex topology was accepted");
   }
 
   const Vec3 isolated[] = {{0, 0, 0}, {1, 0, 0}, {0, 1, 0}, {2, 2, 2}};
   const u32 triangle[] = {0, 1, 2};
-  if (physics::detail::BuildClothTopology(isolated, 4, triangle, 3,
+  if (physics::internal::BuildClothTopology(isolated, 4, triangle, 3,
                                           &topology)) {
     return Fail("isolated vertex topology was accepted");
   }
 
   const Vec3 overflow[] = {{3.0e38f, 0, 0}, {-3.0e38f, 0, 0}, {0, 3.0e38f, 0}};
-  if (physics::detail::BuildClothTopology(overflow, 3, triangle, 3,
+  if (physics::internal::BuildClothTopology(overflow, 3, triangle, 3,
                                           &topology)) {
     return Fail("finite geometry with overflowing metrics was accepted");
   }
@@ -59,7 +59,7 @@ int TestTopology() {
                         {-0.12f, 0.12f, -0.12f},
                         {0.12f, -0.12f, -0.12f}};
   const u32 tetra_indices[] = {0, 2, 1, 0, 1, 3, 0, 3, 2, 1, 2, 3};
-  if (!physics::detail::BuildClothTopology(tetra, 4, tetra_indices, 12,
+  if (!physics::internal::BuildClothTopology(tetra, 4, tetra_indices, 12,
                                            &topology) ||
       !topology.closed || topology.component_count != 1 ||
       topology.signed_volume <= 0) {
@@ -70,18 +70,18 @@ int TestTopology() {
 }
 
 int TestVertexFaceCcd() {
-  physics::detail::ClothTopology topology = ManualTopology(4);
+  physics::internal::ClothTopology topology = ManualTopology(4);
   topology.indices = {0, 1, 2};
   base::Vector<Vec3> positions{
       {-0.5f, -0.5f, 0}, {0.5f, -0.5f, 0}, {0, 0.5f, 0}, {0, 0, 0.1f}};
   base::Vector<Vec3> velocities(4);
   velocities[3] = {0, 0, -12};
   base::Vector<f32> inverse_masses{0, 0, 0, 1};
-  physics::detail::ClothSelfCollisionConfig config;
+  physics::internal::ClothSelfCollisionConfig config;
   config.distance = 0.02f;
   config.iterations = 2;
-  physics::detail::ClothSelfCollisionScratch scratch;
-  if (physics::detail::SolveClothSelfCollision(topology, config, positions,
+  physics::internal::ClothSelfCollisionScratch scratch;
+  if (physics::internal::SolveClothSelfCollision(topology, config, positions,
                                                &velocities, inverse_masses,
                                                1.0f / 60.0f, &scratch) == 0) {
     return Fail("swept vertex/triangle crossing produced no contact");
@@ -94,18 +94,18 @@ int TestVertexFaceCcd() {
 }
 
 int TestHighTangentialCcd() {
-  physics::detail::ClothTopology topology = ManualTopology(4);
+  physics::internal::ClothTopology topology = ManualTopology(4);
   topology.indices = {0, 1, 2};
   base::Vector<Vec3> positions{
       {-10, -10, 0}, {20, -10, 0}, {5, 20, 0}, {0, 0, 0.1f}};
   base::Vector<Vec3> velocities(4);
   velocities[3] = {600, 0, -12};
   base::Vector<f32> inverse_masses{0, 0, 0, 1};
-  physics::detail::ClothSelfCollisionConfig config;
+  physics::internal::ClothSelfCollisionConfig config;
   config.distance = 0.005f;
   config.max_velocity = 1000;
-  physics::detail::ClothSelfCollisionScratch scratch;
-  if (physics::detail::SolveClothSelfCollision(topology, config, positions,
+  physics::internal::ClothSelfCollisionScratch scratch;
+  if (physics::internal::SolveClothSelfCollision(topology, config, positions,
                                                &velocities, inverse_masses,
                                                1.0f / 60.0f, &scratch) == 0) {
     return Fail("high-tangential-speed crossing produced no contact");
@@ -117,18 +117,18 @@ int TestHighTangentialCcd() {
 }
 
 int TestEdgeEdgeCcd() {
-  physics::detail::ClothTopology topology = ManualTopology(4);
+  physics::internal::ClothTopology topology = ManualTopology(4);
   topology.edges = {0, 1, 2, 3};
   base::Vector<Vec3> positions{
       {-0.5f, 0, 0}, {0.5f, 0, 0}, {0, -0.5f, 0.1f}, {0, 0.5f, 0.1f}};
   base::Vector<Vec3> velocities(4);
   velocities[2] = velocities[3] = {0, 0, -12};
   base::Vector<f32> inverse_masses{0, 0, 1, 1};
-  physics::detail::ClothSelfCollisionConfig config;
+  physics::internal::ClothSelfCollisionConfig config;
   config.distance = 0.02f;
   config.iterations = 2;
-  physics::detail::ClothSelfCollisionScratch scratch;
-  if (physics::detail::SolveClothSelfCollision(topology, config, positions,
+  physics::internal::ClothSelfCollisionScratch scratch;
+  if (physics::internal::SolveClothSelfCollision(topology, config, positions,
                                                &velocities, inverse_masses,
                                                1.0f / 60.0f, &scratch) == 0) {
     return Fail("swept edge/edge crossing produced no contact");
@@ -142,16 +142,16 @@ int TestEdgeEdgeCcd() {
 }
 
 int TestRuntimeDegenerateTriangle() {
-  physics::detail::ClothTopology topology = ManualTopology(4);
+  physics::internal::ClothTopology topology = ManualTopology(4);
   topology.indices = {0, 1, 2};
   base::Vector<Vec3> positions{
       {-0.5f, 0, 0}, {0, 0, 0}, {0.5f, 0, 0}, {0, 0, 0.005f}};
   base::Vector<Vec3> velocities(4);
   base::Vector<f32> inverse_masses{0, 0, 0, 1};
-  physics::detail::ClothSelfCollisionConfig config;
+  physics::internal::ClothSelfCollisionConfig config;
   config.distance = 0.02f;
-  physics::detail::ClothSelfCollisionScratch scratch;
-  physics::detail::SolveClothSelfCollision(topology, config, positions,
+  physics::internal::ClothSelfCollisionScratch scratch;
+  physics::internal::SolveClothSelfCollision(topology, config, positions,
                                            &velocities, inverse_masses,
                                            1.0f / 60.0f, &scratch);
   return Finite(velocities)

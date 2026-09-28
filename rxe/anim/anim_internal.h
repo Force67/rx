@@ -19,7 +19,7 @@
 #include "rxe/anim/pose.h"
 #include "rxe/asset/skeleton.h"
 
-namespace rx::anim::detail {
+namespace rx::anim::internal {
 
 // rx and kinema grew from the same TRS lineage; the pose SoA is bit-compatible,
 // so a kinema PoseView can alias an rx SkeletonPose's arrays with no copy. These
@@ -67,6 +67,6 @@ struct GraphState {
   }
 };
 
-}  // namespace rx::anim::detail
+}  // namespace rx::anim::internal
 
 #endif  // RX_ANIM_ANIM_INTERNAL_H_

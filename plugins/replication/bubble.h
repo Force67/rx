@@ -14,7 +14,7 @@
 #include "rxe/net/transport/protocol.h"
 #include "rxe/scene/components.h"
 
-namespace rx::net {
+namespace rx::replication {
 
 // A streaming bubble: the sphere of the world one connected player receives.
 // Attached to the player's avatar entity (the bubble follows its Transform).
@@ -23,7 +23,7 @@ namespace rx::net {
 // density instead of world population: the lever that lets one server carry
 // more players.
 struct InterestBubble {
-  u32 peer = kNoPeer;  // the transport peer this bubble streams to
+  u32 peer = net::kNoPeer;  // the transport peer this bubble streams to
   f32 radius = 0;      // world units; entities inside are relevant
 };
 
@@ -64,7 +64,7 @@ class RX_REPLICATION_EXPORT InterestMap {
 
   // Every bubble as of the last Update, ready to replicate (kBubbleSync) and
   // to visualize.
-  const base::Vector<BubbleState>& bubbles() const { return bubbles_; }
+  const base::Vector<net::BubbleState>& bubbles() const { return bubbles_; }
 
   // Forgets a departed peer's bubble state and releases everything it owned.
   void RemovePeer(u32 peer);
@@ -87,7 +87,7 @@ class RX_REPLICATION_EXPORT InterestMap {
   InterestConfig config_;
   base::UnorderedMap<u32, PeerData> peers_;
   base::UnorderedMap<u64, Ownership> owners_;
-  base::Vector<BubbleState> bubbles_;
+  base::Vector<net::BubbleState> bubbles_;
   base::Function<void(u64, u32, u32)> owner_changed_;
 
   // Scratch, kept across updates for capacity.
@@ -109,6 +109,6 @@ class RX_REPLICATION_EXPORT InterestMap {
 // the same color everywhere.
 RX_REPLICATION_EXPORT u32 PeerColor(u32 peer);
 
-}  // namespace rx::net
+}  // namespace rx::replication
 
 #endif  // RX_NET_BUBBLE_H_

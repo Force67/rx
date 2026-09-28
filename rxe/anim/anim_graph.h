@@ -9,7 +9,7 @@
 
 namespace rx::anim {
 
-namespace detail {
+namespace internal {
 struct GraphState;
 }
 
@@ -25,7 +25,7 @@ struct GraphState;
 class AnimGraph {
  public:
   AnimGraph();
-  explicit AnimGraph(base::UniquePointer<detail::GraphState> state);
+  explicit AnimGraph(base::UniquePointer<internal::GraphState> state);
   AnimGraph(AnimGraph&&) noexcept;
   AnimGraph& operator=(AnimGraph&&) noexcept;
   ~AnimGraph();
@@ -40,10 +40,10 @@ class AnimGraph {
   // Internal handle to the compiled payload. Returns a detail type, so it is
   // only usable in a translation unit that includes anim_internal.h (RigPlayer /
   // FootPlacement); ordinary callers cannot reach kinema through it.
-  const detail::GraphState* state() const { return state_ ? &*state_ : nullptr; }
+  const internal::GraphState* state() const { return state_ ? &*state_ : nullptr; }
 
  private:
-  base::UniquePointer<detail::GraphState> state_;
+  base::UniquePointer<internal::GraphState> state_;
 };
 
 // Author an idle / walk / run locomotion archetype for a biped built on the

@@ -27,6 +27,8 @@ def load_renames():
       parts = line.split("#", 1)[0].split()
       if not parts:
         continue
+      if len(parts) == 2 and parts[0] == "symbol":
+        parts.append("")  # a qualifier that went away: `symbol mem::`
       kind, old, new = parts
       if kind == "include":
         includes[old] = new

@@ -1,6 +1,6 @@
 #include "plugins/vehicles/boat_profiles.h"
 
-namespace rx::physics {
+namespace rx::vehicles {
 
 // Draft is emergent: at rest the hull settles to draft = mass / (rho * footprint)
 // with footprint = (2*hex)*(2*hez), independent of hull height. The presets pick
@@ -163,4 +163,4 @@ BoatDesc WorkBargeProfile() {
   return d;
 }
 
-}  // namespace rx::physics
+}  // namespace rx::vehicles

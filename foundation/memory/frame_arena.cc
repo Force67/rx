@@ -4,7 +4,7 @@
 #include <stdint.h>
 #include <new>
 
-namespace rx::mem {
+namespace rx {
 
 namespace {
 constexpr size_t kArenaAlign = 64;
@@ -69,4 +69,4 @@ FrameArena& MainFrameArena() {
   return arena;
 }
 
-}  // namespace rx::mem
+}  // namespace rx

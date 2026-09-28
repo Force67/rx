@@ -103,8 +103,8 @@ constexpr char kConstantsOnly[] = R"(<?xml version="1.0"?>
 void TestOpenPbrImages() {
   const base::String path = Write("rx_openpbr.mtlx", kOpenPbrWithImages);
   asset::Material material;
-  asset::MaterialXMaps maps;
-  Check(asset::LoadMaterialX(path, &material, &maps),
+  importers::MaterialXMaps maps;
+  Check(importers::LoadMaterialX(path, &material, &maps),
         "an open_pbr_surface document loads (a texture library ships nothing else)");
   Check(maps.base_color == Beside("stone_color.png"), "base colour resolves beside the document");
   // Through the normalmap node, which only converts the encoding the engine
@@ -128,8 +128,8 @@ void TestOpenPbrImages() {
 void TestNodegraphAndUnsupportedNode() {
   const base::String path = Write("rx_nodegraph.mtlx", kNodegraphStandardSurface);
   asset::Material material;
-  asset::MaterialXMaps maps;
-  Check(asset::LoadMaterialX(path, &material, &maps),
+  importers::MaterialXMaps maps;
+  Check(importers::LoadMaterialX(path, &material, &maps),
         "a nodegraph-style standard_surface document loads");
   Check(maps.base_color == Beside("brick_color.png"),
         "a nodegraph output resolves to the image behind it");
@@ -144,7 +144,7 @@ void TestNodegraphAndUnsupportedNode() {
 void TestConstantsStillLoad() {
   const base::String path = Write("rx_constants.mtlx", kConstantsOnly);
   asset::Material material;
-  Check(asset::LoadMaterialX(path, &material, nullptr),
+  Check(importers::LoadMaterialX(path, &material, nullptr),
         "a constants-only document loads with no maps requested");
   // base is a weight on base_color, not a field of its own.
   Check(::fabsf(material.base_color_factor[0] - 0.1f) < 1e-6f &&

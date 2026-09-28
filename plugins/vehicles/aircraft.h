@@ -6,7 +6,7 @@
 #include "foundation/math/math.h"
 #include "rxe/physics/physics_world.h"
 
-namespace rx::physics {
+namespace rx::vehicles {
 
 // Force-based fixed-wing aircraft simulator. One instance drives one plane: a
 // single dynamic fuselage body in the PhysicsWorld, into which each step
@@ -180,7 +180,7 @@ class RX_VEHICLES_EXPORT Aircraft {
   // zero input) before flying. The plane keeps a reference to `world`; it must
   // outlive the Aircraft. valid() is false if the body could not be created
   // (e.g. against the physics stub).
-  Aircraft(PhysicsWorld& world, const AircraftDesc& desc, const Vec3& position, f32 yaw_radians);
+  Aircraft(physics::PhysicsWorld& world, const AircraftDesc& desc, const Vec3& position, f32 yaw_radians);
   // Removes the fuselage body from the world.
   ~Aircraft();
 
@@ -195,7 +195,7 @@ class RX_VEHICLES_EXPORT Aircraft {
 
   const AircraftState& state() const { return state_; }
   const AircraftDesc& desc() const { return desc_; }
-  BodyId body() const { return body_; }
+  physics::BodyId body() const { return body_; }
   bool valid() const { return body_ != 0; }
 
   f32 total_mass() const { return total_mass_; }
@@ -210,9 +210,9 @@ class RX_VEHICLES_EXPORT Aircraft {
   Vec3 wind() const { return wind_; }
 
  private:
-  PhysicsWorld& world_;
+  physics::PhysicsWorld& world_;
   AircraftDesc desc_;
-  BodyId body_ = 0;
+  physics::BodyId body_ = 0;
   AircraftState state_;
   Vec3 wind_{};
 
@@ -221,6 +221,6 @@ class RX_VEHICLES_EXPORT Aircraft {
   f32 flaps_ = 0;        // 0..1 filtered flap deflection
 };
 
-}  // namespace rx::physics
+}  // namespace rx::vehicles
 
 #endif  // RX_VEHICLES_AIRCRAFT_H_

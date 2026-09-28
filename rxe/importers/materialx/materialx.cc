@@ -7,7 +7,7 @@
 #include "foundation/logging/log.h"
 #include "foundation/strings/text_reader.h"
 
-namespace rx::asset {
+namespace rx::importers {
 namespace {
 
 // Value of an attribute key="..." inside a single tag's text. The match has to
@@ -202,7 +202,7 @@ auto MapSlot(const base::String& canonical) -> base::String MaterialXMaps::* {
 
 }  // namespace
 
-bool LoadMaterialX(const base::String& path, Material* out, MaterialXMaps* maps) {
+bool LoadMaterialX(const base::String& path, asset::Material* out, MaterialXMaps* maps) {
   base::String doc;
   if (!fs::ReadTextFile(path, &doc)) {
     RX_WARN("materialx: cannot open {}", path);
@@ -240,7 +240,7 @@ bool LoadMaterialX(const base::String& path, Material* out, MaterialXMaps* maps)
   // units and parametrization, and taking the glTF-derived engine value for an
   // input the document leaves unauthored would shade something nobody wrote.
   const bool open_pbr = surface->category == "open_pbr_surface";
-  if (open_pbr) ApplyOpenPbrDefaults(out);
+  if (open_pbr) asset::ApplyOpenPbrDefaults(out);
 
   // Surface inputs that are not 1:1 engine fields get combined below.
   f32 base_weight = 1.0f;
@@ -348,17 +348,17 @@ bool LoadMaterialX(const base::String& path, Material* out, MaterialXMaps* maps)
   }
   if (open_pbr) {
     out->iridescence_thickness = thin_film_thickness * 1000.0f;
-    out->anisotropy = OpenPbrAnisotropyToEngine(out->anisotropy);
+    out->anisotropy = asset::OpenPbrAnisotropyToEngine(out->anisotropy);
     out->base_color_factor[3] = opacity;
   } else if (thin_film_thickness > 0.0f) {
     out->iridescence = 1.0f;
     out->iridescence_thickness = thin_film_thickness;
   }
   if (out->transmission > 0.0f || out->base_color_factor[3] < 1.0f) {
-    out->alpha_mode = AlphaMode::kBlend;
+    out->alpha_mode = asset::AlphaMode::kBlend;
   }
   RX_INFO("materialx: loaded <{}> from {}", surface->category, path);
   return true;
 }
 
-}  // namespace rx::asset
+}  // namespace rx::importers

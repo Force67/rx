@@ -12,7 +12,7 @@
 
 namespace rx::ecs {
 
-namespace detail {
+namespace internal {
 namespace {
 
 // Every DSO has its own ComponentIdFor<T> cache, so first use resolves a stable
@@ -52,10 +52,10 @@ ComponentId ResolveComponentId(u64 type_key, const ComponentInfo& info) {
   return id;
 }
 
-}  // namespace detail
+}  // namespace internal
 
 const ComponentInfo& GetComponentInfo(ComponentId id) {
-  detail::Registry& registry = detail::TheRegistry();
+  internal::Registry& registry = internal::TheRegistry();
 #ifndef NDEBUG
   base::LockGuard lock(registry.mutex);
   assert(id < registry.count && "unregistered component id");
@@ -70,11 +70,11 @@ World::~World() = default;
 namespace {
 // Structural ops charge their heap traffic (records, signatures, archetype
 // bookkeeping) to the ecs category; component chunks show up under chunk-pool.
-const mem::Category kEcsCategory = mem::RegisterCategory("ecs");
+const MemoryCategory kEcsCategory = RegisterMemoryCategory("ecs");
 }  // namespace
 
 Entity World::Create() {
-  mem::CategoryScope scope(kEcsCategory);
+  MemoryCategoryScope scope(kEcsCategory);
   u32 index;
   if (!free_indices_.empty()) {
     index = free_indices_.back();
@@ -117,7 +117,7 @@ void* EntityBatch::Column(ComponentId id, u32 row, u32* run) const {
 }
 
 EntityBatch World::BeginBatch(const Signature& signature, u32 count) {
-  mem::CategoryScope scope(kEcsCategory);
+  MemoryCategoryScope scope(kEcsCategory);
   EntityBatch batch;
   if (count == 0) return batch;
 
@@ -151,7 +151,7 @@ EntityBatch World::BeginBatch(const Signature& signature, u32 count) {
 }
 
 void World::Destroy(Entity entity) {
-  mem::CategoryScope scope(kEcsCategory);
+  MemoryCategoryScope scope(kEcsCategory);
   if (!IsAlive(entity)) return;
   EntityRecord& record = records_[entity.index];
   Entity moved = record.archetype->SwapRemoveRow(record.row);
@@ -169,7 +169,7 @@ bool World::IsAlive(Entity entity) const {
 }
 
 void* World::AddRaw(Entity entity, ComponentId id) {
-  mem::CategoryScope scope(kEcsCategory);
+  MemoryCategoryScope scope(kEcsCategory);
   EntityRecord& record = records_[entity.index];
   if (void* existing = record.archetype->ComponentAt(id, record.row)) {
     GetComponentInfo(id).destruct(existing);
@@ -182,7 +182,7 @@ void* World::AddRaw(Entity entity, ComponentId id) {
 }
 
 void World::RemoveRaw(Entity entity, ComponentId id) {
-  mem::CategoryScope scope(kEcsCategory);
+  MemoryCategoryScope scope(kEcsCategory);
   EntityRecord& record = records_[entity.index];
   if (!SignatureContains(record.archetype->signature(), id)) return;
   Signature signature = record.archetype->signature();

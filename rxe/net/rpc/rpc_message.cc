@@ -7,7 +7,7 @@
 
 #include <string.h>
 
-namespace rx::rpc {
+namespace rx::net {
 namespace {
 
 // Wire magic 'RPC1' (FourCc is little-endian, so on disk this reads R, P, C, 1).
@@ -193,4 +193,4 @@ base::Optional<RpcCall> DecodeCall(const u8* data, size_t size) {
   return call;
 }
 
-}  // namespace rx::rpc
+}  // namespace rx::net
