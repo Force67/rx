@@ -1,6 +1,6 @@
 #include "render/gi/restir_di.h"
 
-#include "core/log.h"
+#include "foundation/logging/log.h"
 #include "shaders/restir_di_spatial_cs_hlsl.h"
 #include "shaders/restir_di_temporal_cs_hlsl.h"
 

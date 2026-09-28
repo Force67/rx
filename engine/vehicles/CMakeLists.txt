@@ -13,4 +13,4 @@ rx_add_module(vehicles
   aux_synth.cc
   vehicle_audio.cc
 )
-target_link_libraries(rx_vehicles PUBLIC rx::physics rx::audio rx::asset rx::core)
+target_link_libraries(rx_vehicles PUBLIC rx::physics rx::audio rx::asset rx::foundation)

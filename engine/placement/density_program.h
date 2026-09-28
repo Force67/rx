@@ -5,8 +5,8 @@
 #include <base/containers/vector.h>
 
 #include "base/containers/span.h"
-#include "core/export.h"
-#include "core/types.h"
+#include "foundation/build_config/export.h"
+#include "foundation/build_config/types.h"
 
 namespace rx::placement {
 

@@ -15,7 +15,7 @@
 // the domain, lava solving first so water sees B + C + d_lava as its bed. The
 // solver core produces the fields; a separate surface renderer draws them.
 
-#include "core/math.h"
+#include "foundation/math/math.h"
 #include "render/core/render_graph.h"
 #include "render/rhi/device.h"
 

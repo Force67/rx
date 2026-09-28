@@ -5,8 +5,8 @@
 
 #include "base/containers/span.h"
 #include "base/memory/mem_ops.h"
-#include "core/log.h"
-#include "core/scalar.h"
+#include "foundation/logging/log.h"
+#include "foundation/math/scalar.h"
 #include "shaders/water_field_cs_hlsl.h"
 
 namespace rx::render {

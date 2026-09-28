@@ -8,8 +8,8 @@
 #include "base/memory/mem_ops.h"
 #include "base/memory/move.h"
 #include "base/threading/lock_guard.h"
-#include "core/log.h"
-#include "core/scalar.h"
+#include "foundation/logging/log.h"
+#include "foundation/math/scalar.h"
 
 namespace rx::render {
 namespace {

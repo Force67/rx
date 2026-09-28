@@ -1,7 +1,7 @@
 #ifndef RX_RENDER_RHI_TYPES_H_
 #define RX_RENDER_RHI_TYPES_H_
 
-#include "core/types.h"
+#include "foundation/build_config/types.h"
 
 // Backend-agnostic value types shared by the whole RHI. Nothing in this header
 // (or any rhi/ header) may name a Vulkan, D3D12 or console type: the renderer

@@ -1,7 +1,7 @@
 #include "viewer_input.h"
 
-#include "core/input.h"
-#include "core/input_bindings.h"
+#include "ui/events/input.h"
+#include "ui/events/input_bindings.h"
 
 // The viewer's input policy: the action/axis names that round-trip to
 // controls.ini, the digital->analog movement folds, and the built-in

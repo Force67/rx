@@ -5,7 +5,7 @@
 
 #include "base/algorithm.h"
 #include "base/memory/move.h"
-#include "core/memory/chunk_pool.h"
+#include "foundation/memory/chunk_pool.h"
 
 namespace rx::ecs {
 

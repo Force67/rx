@@ -1,9 +1,9 @@
 #include "authoring/command_bridge.h"
 
 #include "base/strings/xstring.h"
-#include "core/format.h"
-#include "core/log.h"
 #include "ecs/entity.h"
+#include "foundation/logging/log.h"
+#include "foundation/strings/format.h"
 #include "script/handler_context.h"
 #include "script/handler_registry.h"
 #include "script/script_string.h"

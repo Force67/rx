@@ -11,4 +11,4 @@ rx_add_module(weather
   weather.cc
   thunder_synth.cc
 )
-target_link_libraries(rx_weather PUBLIC rx::core rx::render rx::audio)
+target_link_libraries(rx_weather PUBLIC rx::foundation rx::render rx::audio)

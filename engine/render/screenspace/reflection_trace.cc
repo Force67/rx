@@ -3,7 +3,7 @@
 #include <string.h>
 
 #include "base/memory/mem_ops.h"
-#include "core/log.h"
+#include "foundation/logging/log.h"
 #include "render/gi/raytracing.h"
 #include "render/rhi/device.h"
 #include "shaders/reflection_trace_cs_hlsl.h"

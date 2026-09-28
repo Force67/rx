@@ -3,7 +3,7 @@
 #include <math.h>
 #include <string.h>
 
-#include "core/log.h"
+#include "foundation/logging/log.h"
 #include "render/rhi/bindings.h"
 
 #include "base/memory/mem_ops.h"

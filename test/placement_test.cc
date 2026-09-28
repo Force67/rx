@@ -9,7 +9,7 @@
 #include <string.h>
 
 #include "base/memory/mem_ops.h"
-#include "core/scalar.h"
+#include "foundation/math/scalar.h"
 #include "placement/density_program.h"
 #include "placement/ecotope.h"
 #include "placement/placement.h"

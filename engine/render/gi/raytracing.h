@@ -6,8 +6,8 @@
 #include <base/containers/vector.h>
 
 #include "base/memory/unique_pointer.h"
-#include "core/math.h"
-#include "core/types.h"
+#include "foundation/build_config/types.h"
+#include "foundation/math/math.h"
 #include "render/gi/rt_slot_tracker.h"
 #include "render/rhi/command_list.h"
 #include "render/rhi/resources.h"

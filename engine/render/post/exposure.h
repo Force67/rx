@@ -1,7 +1,7 @@
 #ifndef RX_RENDER_EXPOSURE_H_
 #define RX_RENDER_EXPOSURE_H_
 
-#include "core/types.h"
+#include "foundation/build_config/types.h"
 #include "render/core/render_graph.h"
 #include "render/rhi/resources.h"
 

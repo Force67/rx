@@ -1,7 +1,7 @@
 #ifndef RX_RENDER_CLOUDSCAPE_H_
 #define RX_RENDER_CLOUDSCAPE_H_
 
-#include "core/math.h"
+#include "foundation/math/math.h"
 #include "render/atmosphere/cloudscape_textures.h"
 #include "render/atmosphere/cloudscape_types.h"
 #include "render/core/render_graph.h"

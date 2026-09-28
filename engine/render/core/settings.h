@@ -1,8 +1,8 @@
 #ifndef RX_RENDER_SETTINGS_H_
 #define RX_RENDER_SETTINGS_H_
 
-#include "core/math.h"
-#include "core/types.h"
+#include "foundation/build_config/types.h"
+#include "foundation/math/math.h"
 #include "render/atmosphere/cloudscape_types.h"
 #include "render/post/antialiasing.h"
 #include "render/post/upscaler.h"

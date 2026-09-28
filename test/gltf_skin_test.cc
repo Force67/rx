@@ -2,7 +2,7 @@
 #include <stdio.h>
 
 #include "base/strings/xstring.h"
-#include "core/file_system.h"
+#include "foundation/files/file_system.h"
 #include "importers/gltf/gltf_loader.h"
 
 namespace {

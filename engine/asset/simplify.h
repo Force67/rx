@@ -9,9 +9,9 @@
 
 
 #include "base/containers/vector.h"
-#include "core/export.h"
-#include "core/math.h"
-#include "core/types.h"
+#include "foundation/build_config/export.h"
+#include "foundation/build_config/types.h"
+#include "foundation/math/math.h"
 
 namespace rx::asset {
 

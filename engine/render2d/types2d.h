@@ -1,10 +1,10 @@
 #ifndef RX_RENDER2D_TYPES2D_H_
 #define RX_RENDER2D_TYPES2D_H_
 
-#include "core/math.h"
+#include "foundation/math/math.h"
 
 #include <math.h>
-#include "core/types.h"
+#include "foundation/build_config/types.h"
 
 // Small value types shared across the 2D renderer. Kept header-only and free of
 // any GPU / RHI type so gameplay code and unit tests can use them without a

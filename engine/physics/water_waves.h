@@ -3,8 +3,8 @@
 
 #include <math.h>
 
-#include "core/math.h"
-#include "core/types.h"
+#include "foundation/build_config/types.h"
+#include "foundation/math/math.h"
 
 // CPU port of the analytic Gerstner wave field: the wave PROXY behind
 // PhysicsWorld::set_water_height, so buoyant bodies ride the swell and drift

@@ -6,13 +6,13 @@
 #include "base/memory/mem_ops.h"
 #include "base/memory/move.h"
 #include "base/strings/xstring.h"
-#include "core/file_system.h"
-#include "core/log.h"
-#include "core/scalar.h"
-#include "core/text_reader.h"
+#include "foundation/algorithm/sort.h"
+#include "foundation/files/file_system.h"
+#include "foundation/logging/log.h"
+#include "foundation/math/scalar.h"
+#include "foundation/strings/text_reader.h"
 #include "shaders/gsplat_ps_hlsl.h"
 #include "shaders/gsplat_vs_hlsl.h"
-#include "core/sort.h"
 
 namespace rx::render {
 namespace {

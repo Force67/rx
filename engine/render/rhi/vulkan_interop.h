@@ -12,7 +12,7 @@
 
 #include <vk_mem_alloc.h>
 
-#include "core/export.h"
+#include "foundation/build_config/export.h"
 #include "render/rhi/command_list.h"
 #include "render/rhi/device.h"
 

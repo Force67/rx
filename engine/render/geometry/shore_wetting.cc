@@ -2,7 +2,7 @@
 
 #include <math.h>
 
-#include "core/log.h"
+#include "foundation/logging/log.h"
 #include "shaders/shore_wetting_cs_hlsl.h"
 
 namespace rx::render {

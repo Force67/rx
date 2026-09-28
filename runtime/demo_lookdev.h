@@ -4,12 +4,12 @@
 #include "asset/material.h"
 #include "base/containers/span.h"
 #include "base/memory/unique_pointer.h"
-#include "core/input.h"
-#include "core/input_actions.h"
-#include "core/math.h"
 #include "engine_context.h"
+#include "foundation/math/math.h"
 #include "render/core/renderer.h"
 #include "render/pipeline/human_material.h"
+#include "ui/events/input.h"
+#include "ui/events/input_actions.h"
 
 namespace rx {
 

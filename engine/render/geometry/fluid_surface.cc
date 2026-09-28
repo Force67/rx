@@ -1,8 +1,8 @@
 #include "render/geometry/fluid_surface.h"
 
 #include "base/memory/unique_pointer.h"
-#include "core/log.h"
-#include "core/scalar.h"
+#include "foundation/logging/log.h"
+#include "foundation/math/scalar.h"
 #include "render/pipeline/mesh_pipeline.h"
 #include "shaders/fluid_surface_ps_hlsl.h"
 #include "shaders/fluid_surface_vs_hlsl.h"

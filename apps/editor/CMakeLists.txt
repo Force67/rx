@@ -12,7 +12,7 @@ add_executable(rx_editor
 rx_stage_content(rx_editor LOOSE_ENGINE_CONFIG)
 
 target_link_libraries(rx_editor PRIVATE
-  rx::app rx::ui rx::edit rx::terrain rx::render rx::anim rx::gltf rx::usd rx::blend rx::asset rx::scene rx::ecs rx::core
+  rx::app rx::ui rx::edit rx::terrain rx::render rx::anim rx::gltf rx::usd rx::blend rx::asset rx::scene rx::ecs rx::window rx::events rx::foundation
   # Bake World: the same cook rxworld runs, so an archive from either is the same bytes.
   rx::world)
 

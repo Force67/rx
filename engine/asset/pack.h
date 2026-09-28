@@ -12,8 +12,8 @@
 #include "base/strings/string_ref.h"
 #include "base/strings/xstring.h"
 #include "base/threading/mutex.h"
-#include "core/export.h"
-#include "core/types.h"
+#include "foundation/build_config/export.h"
+#include "foundation/build_config/types.h"
 
 namespace rx::asset {
 

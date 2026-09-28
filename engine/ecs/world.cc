@@ -7,8 +7,8 @@
 #include "base/algorithm.h"
 #include "base/threading/lock_guard.h"
 #include "base/threading/mutex.h"
-#include "core/memory/memory_tracker.h"
-#include "core/scalar.h"
+#include "foundation/math/scalar.h"
+#include "foundation/memory/memory_tracker.h"
 
 namespace rx::ecs {
 

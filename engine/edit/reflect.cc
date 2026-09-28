@@ -11,7 +11,7 @@
 #include "base/strings/xstring.h"
 #include "base/threading/lock_guard.h"
 #include "base/threading/mutex.h"
-#include "core/log.h"
+#include "foundation/logging/log.h"
 #include "scene/components.h"
 
 namespace rx::edit {

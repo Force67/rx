@@ -1,5 +1,5 @@
 rx_add_module(usd usd_loader.cc)
-target_link_libraries(rx_usd PUBLIC rx::asset rx::core)
+target_link_libraries(rx_usd PUBLIC rx::asset rx::foundation)
 target_link_libraries(rx_usd PRIVATE $<BUILD_INTERFACE:rx::stb_impl>)
 
 # usd_loader.cc keeps compiling without tinyusdz (LoadUsdScene then reports the

@@ -2,7 +2,7 @@
 
 #include "asset/mesh.h"
 #include "base/functional/function.h"
-#include "core/log.h"
+#include "foundation/logging/log.h"
 #include "render/gi/shadow.h"
 #include "shaders/overdraw_ps_hlsl.h"
 #include "shaders/shadow_instance_vs_hlsl.h"

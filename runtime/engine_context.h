@@ -9,16 +9,16 @@
 #include "asset/vfs.h"
 #include "audio/audio_system.h"
 #include "base/strings/xstring.h"
-#include "core/input_actions.h"
-#include "core/math.h"
 #include "debug_ui.h"
 #include "ecs/scheduler.h"
 #include "ecs/world.h"
+#include "foundation/math/math.h"
 #include "importers/usd/usd_loader.h"
 #include "physics/physics_world.h"
 #include "render/core/presets.h"
 #include "render/core/renderer.h"
 #include "scene/fly_camera.h"
+#include "ui/events/input_actions.h"
 #include "viewer_input.h"
 
 namespace rx {

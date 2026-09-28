@@ -1,4 +1,4 @@
-#include "core/scalar.h"
+#include "foundation/math/scalar.h"
 #include "vehicles/kite.h"
 
 #include <math.h>

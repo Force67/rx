@@ -10,7 +10,7 @@
 #include <stdio.h>
 
 #include "base/strings/xstring.h"
-#include "core/file_system.h"
+#include "foundation/files/file_system.h"
 #include "importers/materialx/materialx.h"
 
 namespace {

@@ -1,6 +1,6 @@
 #include "base/memory/move.h"
 #include "base/strings/xstring.h"
-#include "core/scalar.h"
+#include "foundation/math/scalar.h"
 #include "showcase_camera.h"
 
 namespace rx {

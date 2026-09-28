@@ -3,8 +3,8 @@
 
 #include <base/containers/vector.h>
 
-#include "core/math.h"
 #include "engine_context.h"
+#include "foundation/math/math.h"
 #include "physics/physics_world.h"
 #include "render/core/renderer.h"
 

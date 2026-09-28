@@ -5,8 +5,8 @@
 
 #include "base/memory/mem_ops.h"
 #include "base/memory/unique_pointer.h"
-#include "core/log.h"
-#include "core/scalar.h"
+#include "foundation/logging/log.h"
+#include "foundation/math/scalar.h"
 #include "render/gi/raytracing.h"
 #include "shaders/ddgi_blend_cs_hlsl.h"
 #include "shaders/ddgi_border_cs_hlsl.h"

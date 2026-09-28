@@ -1,7 +1,7 @@
 #ifndef RX_ECS_ENTITY_H_
 #define RX_ECS_ENTITY_H_
 
-#include "core/types.h"
+#include "foundation/build_config/types.h"
 
 namespace rx::ecs {
 

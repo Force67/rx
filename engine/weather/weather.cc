@@ -4,7 +4,7 @@
 
 #include "base/algorithm.h"
 #include "base/memory/move.h"
-#include "core/scalar.h"
+#include "foundation/math/scalar.h"
 #include "render/atmosphere/lightning_envelope.h"
 
 namespace rx::weather {

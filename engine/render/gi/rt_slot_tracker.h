@@ -1,7 +1,7 @@
 #ifndef RX_RENDER_RT_SLOT_TRACKER_H_
 #define RX_RENDER_RT_SLOT_TRACKER_H_
 
-#include "core/types.h"
+#include "foundation/build_config/types.h"
 
 namespace rx::render {
 

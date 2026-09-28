@@ -11,8 +11,8 @@
 #include "base/containers/span.h"
 #include "base/optional.h"
 #include "base/strings/xstring.h"
-#include "core/export.h"
-#include "core/math.h"
+#include "foundation/build_config/export.h"
+#include "foundation/math/math.h"
 #include "scene/world_streaming.h"
 
 namespace rx::terrain {

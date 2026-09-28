@@ -3,8 +3,8 @@
 
 #include <math.h>
 
-#include "core/math.h"
-#include "core/types.h"
+#include "foundation/build_config/types.h"
+#include "foundation/math/math.h"
 
 // Deterministic helpers shared between the CPU reference path and the GPU
 // pipeline. Every function here mirrors placement_common.hlsli op for op:

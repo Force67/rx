@@ -9,13 +9,13 @@
 #include "base/functional/function.h"
 #include "base/memory/unique_pointer.h"
 #include "base/strings/xstring.h"
-#include "core/types.h"
-#include "core/window.h"
+#include "foundation/build_config/types.h"
 #include "render/rhi/bindings.h"
 #include "render/rhi/command_list.h"
 #include "render/rhi/pipeline.h"
 #include "render/rhi/resources.h"
 #include "render/rhi/types.h"
+#include "ui/window/window.h"
 
 namespace rx::render {
 

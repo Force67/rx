@@ -8,11 +8,11 @@
 #include "combat/damage.h"
 #include "combat/events.h"
 #include "combat/weapon.h"
-#include "core/input.h"
-#include "core/input_actions.h"
-#include "core/math.h"
 #include "engine_context.h"
+#include "foundation/math/math.h"
 #include "render/core/renderer.h"
+#include "ui/events/input.h"
+#include "ui/events/input_actions.h"
 
 namespace rx {
 

@@ -5,7 +5,7 @@
 #include <base/containers/vector.h>
 
 #include "base/strings/xstring.h"
-#include "core/types.h"
+#include "foundation/build_config/types.h"
 #include "placement/density_program.h"
 
 namespace rx::placement {

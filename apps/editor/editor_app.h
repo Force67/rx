@@ -9,8 +9,8 @@
 #include "app/application.h"
 #include "asset/asset_database.h"
 #include "asset/mesh.h"
-#include "core/input.h"
-#include "core/math.h"
+#include "foundation/math/math.h"
+#include "ui/events/input.h"
 
 #include "base/containers/map.h"
 #include "base/containers/pair.h"
@@ -36,7 +36,7 @@
 
 namespace rx::editor {
 
-// rx::core has no 2D vector type; the editor only needs one for screen-space
+// rx::foundation has no 2D vector type; the editor only needs one for screen-space
 // (gizmo projection, cursor math), so define a small local one.
 struct Vec2 {
   f32 x = 0;

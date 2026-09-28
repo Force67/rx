@@ -7,8 +7,8 @@
 
 #include "base/containers/pair.h"
 #include "base/time/time.h"
-#include "core/feature_registry.h"
-#include "core/math.h"
+#include "foundation/features/feature_registry.h"
+#include "foundation/math/math.h"
 #include "physics/physics_world.h"
 
 using namespace rx;

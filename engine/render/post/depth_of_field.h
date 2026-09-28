@@ -5,7 +5,7 @@
 // readback), a half-res 48-tap golden-spiral gather, and a full-res
 // composite. Runs on the AA-resolved color, before motion blur.
 
-#include "core/math.h"
+#include "foundation/math/math.h"
 #include "render/core/render_graph.h"
 #include "render/rhi/device.h"
 

@@ -6,10 +6,10 @@
 
 #include <base/option.h>
 
-#include "core/file_system.h"
-#include "core/format.h"
-#include "core/log.h"
-#include "core/text_reader.h"
+#include "foundation/files/file_system.h"
+#include "foundation/logging/log.h"
+#include "foundation/strings/format.h"
+#include "foundation/strings/text_reader.h"
 #include "render/core/settings.h"
 #include "render/core/settings_ini.h"
 

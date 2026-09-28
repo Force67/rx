@@ -3,8 +3,8 @@
 
 #include <base/containers/unordered_map.h>
 
-#include "core/export.h"
-#include "core/types.h"
+#include "foundation/build_config/export.h"
+#include "foundation/build_config/types.h"
 
 // Weapon definitions and the game-owned table they live in. A definition is
 // immutable tuning data; everything mutable (ammo, heat of the moment) lives in

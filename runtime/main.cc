@@ -6,8 +6,9 @@
 
 #include "app/host.h"
 #include "base/strings/xstring.h"
-#include "core/log.h"
 #include "edit/reflect.h"
+#include "foundation/files/file_system.h"
+#include "foundation/logging/log.h"
 #include "material_palette.h"
 #include "scene/scene_handlers.h"
 #include "scene_authoring.h"
@@ -15,7 +16,6 @@
 #include "script/handler_registry.h"
 #include "script/script_value.h"
 #include "viewer.h"
-#include "core/file_system.h"
 
 namespace {
 

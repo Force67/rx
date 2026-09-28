@@ -6,7 +6,7 @@
 #include "anim/pose.h"
 #include "base/functional/function.h"
 #include "base/memory/unique_pointer.h"
-#include "core/math.h"
+#include "foundation/math/math.h"
 
 namespace rx::anim {
 

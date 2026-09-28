@@ -3,9 +3,9 @@
 
 #include <base/containers/vector.h>
 
-#include "core/export.h"
-#include "core/math.h"
 #include "ecs/entity.h"
+#include "foundation/build_config/export.h"
+#include "foundation/math/math.h"
 
 namespace rx::ecs {
 class World;

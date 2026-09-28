@@ -16,7 +16,7 @@
 
 #include <base/containers/vector.h>
 
-#include "core/export.h"
+#include "foundation/build_config/export.h"
 #include "nav/navmesh.h"
 
 namespace rx::nav {

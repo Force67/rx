@@ -3,9 +3,9 @@
 
 #include <base/containers/vector.h>
 
-#include "core/math.h"
 #include "ecs/entity.h"
 #include "engine_context.h"
+#include "foundation/math/math.h"
 #include "nav/agent.h"
 #include "nav/navmesh.h"
 #include "render/core/renderer.h"

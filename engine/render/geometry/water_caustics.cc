@@ -1,6 +1,6 @@
 #include "render/geometry/water_caustics.h"
 
-#include "core/log.h"
+#include "foundation/logging/log.h"
 #include "shaders/water_caustics_cs_hlsl.h"
 
 namespace rx::render {

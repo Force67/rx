@@ -2,8 +2,8 @@
 
 #include <math.h>
 
-#include "core/log.h"
-#include "core/scalar.h"
+#include "foundation/logging/log.h"
+#include "foundation/math/scalar.h"
 #include "shaders/cloudscape_base_noise_cs_hlsl.h"
 #include "shaders/cloudscape_curl_cs_hlsl.h"
 #include "shaders/cloudscape_detail_noise_cs_hlsl.h"

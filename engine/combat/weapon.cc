@@ -6,8 +6,8 @@
 #include <base/containers/vector.h>
 
 #include "combat/projectile.h"
-#include "core/scalar.h"
 #include "ecs/world.h"
+#include "foundation/math/scalar.h"
 
 namespace rx::combat {
 namespace {

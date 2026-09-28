@@ -7,8 +7,8 @@
 #include "base/containers/span.h"
 #include "base/memory/move.h"
 #include "base/strings/xstring.h"
-#include "core/format.h"
-#include "core/log.h"
+#include "foundation/logging/log.h"
+#include "foundation/strings/format.h"
 #include "scene/components.h"
 #include "world/world_bake.h"
 

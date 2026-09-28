@@ -11,4 +11,4 @@ rx_add_module(locomotion
   rig.cc
   whole_body.cc
 )
-target_link_libraries(rx_locomotion PUBLIC rx::core rx::physics)
+target_link_libraries(rx_locomotion PUBLIC rx::foundation rx::physics)

@@ -3,7 +3,7 @@
 
 
 #include "base/containers/vector.h"
-#include "core/types.h"
+#include "foundation/build_config/types.h"
 #include "inventory/item_catalog.h"
 
 namespace rx::inventory {

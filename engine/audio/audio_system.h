@@ -10,9 +10,9 @@
 #include "base/memory/unique_pointer.h"
 #include "base/strings/string_ref.h"
 #include "base/strings/xstring.h"
-#include "core/export.h"
-#include "core/math.h"
-#include "core/types.h"
+#include "foundation/build_config/export.h"
+#include "foundation/build_config/types.h"
+#include "foundation/math/math.h"
 
 namespace rx::asset {
 class Vfs;

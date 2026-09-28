@@ -2,8 +2,8 @@
 #define RX_VEHICLES_ENGINE_SYNTH_H_
 
 #include "audio/synth_voice.h"
-#include "core/export.h"
-#include "core/types.h"
+#include "foundation/build_config/export.h"
+#include "foundation/build_config/types.h"
 
 namespace rx::audio {
 

@@ -4,8 +4,8 @@
 #include <stdio.h>
 #include <stdlib.h>
 
-#include "core/scalar.h"
 #include "ecs/world.h"
+#include "foundation/math/scalar.h"
 #include "physics/physics_world.h"
 #include "scene/camera.h"
 #include "scene/camera_rig.h"

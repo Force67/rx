@@ -2,7 +2,7 @@
 
 #include "asset/mesh.h"
 #include "base/memory/unique_pointer.h"
-#include "core/log.h"
+#include "foundation/logging/log.h"
 #include "render/pipeline/mesh_pipeline.h"
 #include "shaders/copy_cs_hlsl.h"
 #include "shaders/mesh_vs_hlsl.h"

@@ -5,8 +5,8 @@
 
 #include "combat/components.h"
 #include "combat/events.h"
-#include "core/export.h"
 #include "ecs/entity.h"
+#include "foundation/build_config/export.h"
 #include "physics/physics_world.h"
 
 namespace rx::ecs {

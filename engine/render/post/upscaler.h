@@ -3,7 +3,7 @@
 
 
 #include "base/memory/unique_pointer.h"
-#include "core/types.h"
+#include "foundation/build_config/types.h"
 #include "render/core/render_graph.h"
 
 namespace rx::render {

@@ -6,8 +6,8 @@
 
 #include "base/memory/move.h"
 #include "base/meta/traits.h"
-#include "core/export.h"
-#include "core/types.h"
+#include "foundation/build_config/export.h"
+#include "foundation/build_config/types.h"
 
 namespace rx::ecs {
 

@@ -3,7 +3,7 @@
 #include <math.h>
 
 #include "base/containers/span.h"
-#include "core/scalar.h"
+#include "foundation/math/scalar.h"
 #include "placement/placement_math.h"
 #include "placement/world_data.h"
 

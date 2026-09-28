@@ -4,8 +4,8 @@
 #include <base/containers/unordered_map.h>
 #include <base/containers/vector.h>
 
-#include "core/job_system.h"
-#include "core/types.h"
+#include "foundation/build_config/types.h"
+#include "foundation/tasks/job_system.h"
 #include "render/rhi/device.h"
 #include "render/rhi/resources.h"
 

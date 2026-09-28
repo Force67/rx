@@ -3,7 +3,7 @@
 
 
 #include "base/strings/xstring.h"
-#include "core/types.h"
+#include "foundation/build_config/types.h"
 #include "render/core/render_graph.h"
 #include "render/rhi/device.h"
 

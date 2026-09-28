@@ -1,6 +1,6 @@
-#include "core/scalar.h"
+#include "foundation/algorithm/sort.h"
+#include "foundation/math/scalar.h"
 #include "world/world_claim.h"
-#include "core/sort.h"
 
 
 namespace rx::world {

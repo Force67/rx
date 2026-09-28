@@ -1,6 +1,6 @@
 #include "render/atmosphere/precipitation.h"
 
-#include "core/log.h"
+#include "foundation/logging/log.h"
 #include "render/rhi/device.h"
 #include "shaders/precipitation_cs_hlsl.h"
 

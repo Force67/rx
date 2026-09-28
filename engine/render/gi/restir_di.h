@@ -9,7 +9,7 @@
 // both the analytic cluster evaluation and the local shadow atlas for those
 // lights with per-pixel ray-traced visibility.
 
-#include "core/math.h"
+#include "foundation/math/math.h"
 #include "render/core/render_graph.h"
 #include "render/gi/raytracing.h"
 #include "render/rhi/device.h"

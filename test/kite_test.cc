@@ -13,8 +13,8 @@
 #include <math.h>
 #include <stdio.h>
 
-#include "core/math.h"
-#include "core/scalar.h"
+#include "foundation/math/math.h"
+#include "foundation/math/scalar.h"
 #include "physics/physics_world.h"
 #include "vehicles/kite.h"
 

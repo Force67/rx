@@ -8,7 +8,7 @@
 
 #include <base/containers/vector.h>
 
-#include "core/export.h"
+#include "foundation/build_config/export.h"
 #include "nav/agent.h"
 #include "nav/path.h"
 #include "render/core/renderer.h"

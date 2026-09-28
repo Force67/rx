@@ -3,7 +3,7 @@
 
 #include "asset/mesh.h"
 #include "asset/skeleton.h"
-#include "core/export.h"
+#include "foundation/build_config/export.h"
 
 namespace rx::asset {
 

@@ -3,19 +3,19 @@
 #include <math.h>
 #include <string.h>
 
-#include "core/log.h"
+#include "foundation/logging/log.h"
 #include "render/rhi/bindings.h"
 
 #include "base/memory/mem_ops.h"
 #include "base/memory/move.h"
-#include "core/scalar.h"
-#include "shaders/sprite_vs_hlsl.h"
-#include "shaders/sprite_ps_hlsl.h"
-#include "shaders/light2d_vs_hlsl.h"
-#include "shaders/light2d_ps_hlsl.h"
-#include "shaders/composite_vs_hlsl.h"
+#include "foundation/algorithm/sort.h"
+#include "foundation/math/scalar.h"
 #include "shaders/composite_ps_hlsl.h"
-#include "core/sort.h"
+#include "shaders/composite_vs_hlsl.h"
+#include "shaders/light2d_ps_hlsl.h"
+#include "shaders/light2d_vs_hlsl.h"
+#include "shaders/sprite_ps_hlsl.h"
+#include "shaders/sprite_vs_hlsl.h"
 
 namespace rx::render2d {
 

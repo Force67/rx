@@ -1,5 +1,5 @@
 #include "combat/weapon_def.h"
-#include "core/scalar.h"
+#include "foundation/math/scalar.h"
 
 namespace rx::combat {
 

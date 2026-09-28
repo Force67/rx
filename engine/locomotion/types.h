@@ -11,8 +11,8 @@
 // facing yaw 0 looks down -Z. Metres, m/s, kg, radians, N·m. All state is
 // sampled/advanced only in the fixed physics step.
 
-#include "core/math.h"
-#include "core/types.h"
+#include "foundation/build_config/types.h"
+#include "foundation/math/math.h"
 
 namespace rx::locomotion {
 

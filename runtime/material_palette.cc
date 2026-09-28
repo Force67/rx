@@ -4,19 +4,19 @@
 
 #include "asset/asset_database.h"
 #include "asset/vfs.h"
+#include "base/algorithm.h"
 #include "base/containers/vector.h"
 #include "base/memory/move.h"
 #include "base/memory/unique_pointer.h"
 #include "base/strings/string_ref.h"
 #include "base/strings/xstring.h"
-#include "core/log.h"
 #include "ecs/world.h"
 #include "edit/reflect.h"
 #include "edit/scene_io.h"
+#include "foundation/files/file_system.h"
+#include "foundation/logging/log.h"
+#include "foundation/strings/text_reader.h"
 #include "scene_authoring.h"
-#include "base/algorithm.h"
-#include "core/file_system.h"
-#include "core/text_reader.h"
 
 namespace rx {
 namespace {

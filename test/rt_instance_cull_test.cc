@@ -5,7 +5,7 @@
 
 #include <stdio.h>
 
-#include "core/math.h"
+#include "foundation/math/math.h"
 
 using namespace rx;
 using namespace rx::render;

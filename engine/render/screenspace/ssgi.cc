@@ -1,6 +1,6 @@
 #include "render/screenspace/ssgi.h"
 
-#include "core/log.h"
+#include "foundation/logging/log.h"
 #include "render/rhi/device.h"
 #include "shaders/ssgi_cs_hlsl.h"
 

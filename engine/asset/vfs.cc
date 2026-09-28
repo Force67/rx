@@ -11,7 +11,7 @@
 #include "base/strings/xstring.h"
 #include "base/threading/lock_guard.h"
 #include "base/threading/mutex.h"
-#include "core/file_system.h"
+#include "foundation/files/file_system.h"
 
 namespace rx::asset {
 

@@ -4,7 +4,7 @@
 #include <string.h>
 
 #include "base/containers/vector.h"
-#include "core/scalar.h"
+#include "foundation/math/scalar.h"
 #include "render/atmosphere/clouds.h"
 #include "render/rhi/device.h"
 

@@ -13,14 +13,14 @@
 #include "base/algorithm.h"
 #include "base/strings/string_ref.h"
 #include "base/strings/xstring.h"
-#include "core/file_system.h"
-#include "core/math.h"
 #include "ecs/world.h"
 #include "edit/hierarchy.h"
 #include "edit/reflect.h"
 #include "edit/scene_io.h"
 #include "edit/selection.h"
 #include "edit/undo.h"
+#include "foundation/files/file_system.h"
+#include "foundation/math/math.h"
 #include "scene/components.h"
 
 using namespace rx;

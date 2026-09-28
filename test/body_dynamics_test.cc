@@ -4,7 +4,7 @@
 #include "anim/body_dynamics.h"
 #include "asset/asset_id.h"
 #include "base/memory/move.h"
-#include "core/scalar.h"
+#include "foundation/math/scalar.h"
 
 namespace {
 

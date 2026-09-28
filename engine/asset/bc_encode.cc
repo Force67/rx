@@ -1,7 +1,7 @@
 #include "asset/bc_encode.h"
 #include "base/algorithm.h"
 #include "base/memory/mem_ops.h"
-#include "core/scalar.h"
+#include "foundation/math/scalar.h"
 
 #include <math.h>
 #include <stdlib.h>

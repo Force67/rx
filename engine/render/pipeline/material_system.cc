@@ -10,9 +10,9 @@
 #include "base/memory/move.h"
 #include "base/memory/unique_pointer.h"
 #include "base/numeric_limits.h"
-#include "core/log.h"
-#include "core/memory/small_vector.h"
-#include "core/scalar.h"
+#include "foundation/logging/log.h"
+#include "foundation/math/scalar.h"
+#include "foundation/memory/small_vector.h"
 
 namespace rx::render {
 namespace {

@@ -21,7 +21,7 @@ who the app is; the host mounts the install layout (`rxe://` for the engine,
 tier's platform config from those three (render settings, memory plan,
 options). See [docs/CONFIG.md](../../docs/CONFIG.md).
 
-On a Steam Deck (`core/platform.h`, `RX_STEAMDECK=0/1` to override) the host
+On a Steam Deck (`foundation/system/platform.h`, `RX_STEAMDECK=0/1` to override) the host
 opens fullscreen (its memory plan comes from `rxe://config/steamdeck.ini`); under
 any gamescope session it opens fullscreen too (`RX_FULLSCREEN` overrides).
 `RX_FRAME_STATS=<seconds>` logs fps and p99/max frame time per window. While the

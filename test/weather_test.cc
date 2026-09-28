@@ -4,7 +4,7 @@
 // lightning integrals it writes into the two renderer value structs. No GPU, no
 // device: everything here runs on plain scalars and the module's own PRNG.
 
-#include "core/scalar.h"
+#include "foundation/math/scalar.h"
 #include "weather/weather.h"
 
 #include <float.h>

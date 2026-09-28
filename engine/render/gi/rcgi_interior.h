@@ -3,7 +3,7 @@
 
 #include <math.h>
 
-#include "core/math.h"
+#include "foundation/math/math.h"
 
 // Pure-logic helpers for RCGI leak & occlusion hardening (Phase 3):
 //   - interior-volume classification (point-in-box), the CPU mirror of the

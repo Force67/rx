@@ -4,7 +4,7 @@
 #include "anim/procedural_gait.h"
 #include "asset/asset_id.h"
 #include "base/strings/xstring.h"
-#include "core/scalar.h"
+#include "foundation/math/scalar.h"
 
 namespace {
 

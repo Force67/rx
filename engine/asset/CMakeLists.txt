@@ -15,7 +15,7 @@ rx_add_module(asset
   ${PROJECT_SOURCE_DIR}/third_party/miniz/miniz.c
 )
 
-target_link_libraries(rx_asset PUBLIC rx::core)
+target_link_libraries(rx_asset PUBLIC rx::foundation)
 # Header-only, PRIVATE: only needed to compile rx_asset itself. Wrapped in
 # BUILD_INTERFACE so they never reach the installed export (find_package
 # consumers neither include nor link them).

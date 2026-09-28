@@ -345,7 +345,7 @@ once per process has to live in exactly one DSO:
 
 | where | problem | fix |
 |---|---|---|
-| `engine/core` | grab-bag | split, see Foundation |
+| `engine/core` | grab-bag | done (3): `foundation/`, `engine/ui/window`, `engine/ui/events`, and `world_clock` into `app` |
 | `nav/nav_debug` | debug drawing needs the renderer | already its own target (`rx_nav_viz`); becomes `plugins/nav/nav_debug` |
 | `net/bubble_debug` | debug drawing needs the renderer and Vulkan interop | already its own target (`rx_net_viz`); becomes `replication_debug` |
 | `net/session`, `replication`, `bubble` | the net module knew the entity world | done (2a): split into `rx_net` and `rx_replication` |
@@ -379,6 +379,8 @@ and after.
    `asset`, one `FlyCamera`, and the `ProceduralGait` rename. The rest of the
    table lands in the phase named in its row.
 3. **Foundation.** Split `core` into `foundation/*`, `ui/window`, `ui/events`.
+   Done: `foundation/` already sits at its final place, `rx::window` and
+   `rx::events` wait in `engine/ui/` for phase 4.
 4. **Move the tree** one top-level folder per commit: `git mv` plus a scripted
    include rewrite. Tests move next to their code. `render/util` dissolves
    into `gpu/rhi`, `asset` and `ui/imgui`. The lint becomes an error.
@@ -390,9 +392,11 @@ and after.
 7. **Renderer features.** A separate design note for `RenderFeature`, then split
    `renderer.cc`.
 
-Out-of-tree consumers (recreation, anyvoxel) break at phases 3 and 4 because
-include paths change. Phase 4 ships the include rewrite script so they can
-migrate in one command.
+Out-of-tree consumers (recreation, anyvoxel) break whenever a header moves.
+`tools/rewrite_includes/renames.txt` records every include and symbol rename
+since phase 2; after bumping rx they run
+`tools/rewrite_includes/rewrite_includes.py <their source dirs>` once. Each phase
+that moves a header appends to that file.
 
 ## Namespaces
 

@@ -4,8 +4,8 @@
 #include <string.h>
 
 #include "base/memory/mem_ops.h"
-#include "core/log.h"
-#include "core/scalar.h"
+#include "foundation/logging/log.h"
+#include "foundation/math/scalar.h"
 #include "render/gi/raytracing.h"
 #include "shaders/precip_splash_ps_hlsl.h"
 #include "shaders/precip_splash_vs_hlsl.h"

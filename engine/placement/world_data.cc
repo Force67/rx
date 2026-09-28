@@ -1,7 +1,7 @@
 #include "base/containers/span.h"
 #include "base/memory/move.h"
 #include "base/strings/xstring.h"
-#include "core/scalar.h"
+#include "foundation/math/scalar.h"
 #include "placement/world_data.h"
 
 #include <math.h>

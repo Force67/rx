@@ -6,12 +6,12 @@
 
 #include "asset/vfs.h"
 #include "base/optional.h"
-#include "core/export.h"
-#include "core/types.h"
-#include "core/window.h"
+#include "foundation/build_config/export.h"
+#include "foundation/build_config/types.h"
 #include "render/core/renderer.h"
 #include "ui/ugui_backend.h"
 #include "ui/ugui_platform.h"
+#include "ui/window/window.h"
 
 namespace rx::ui {
 

@@ -15,9 +15,9 @@
 
 #include "character/character.h"
 #include "character/jetpack.h"
-#include "core/math.h"
-#include "core/scalar.h"
 #include "ecs/world.h"
+#include "foundation/math/math.h"
+#include "foundation/math/scalar.h"
 #include "physics/physics_world.h"
 #include "scene/components.h"
 

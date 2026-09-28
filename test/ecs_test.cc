@@ -8,10 +8,10 @@
 #include "base/containers/vector.h"
 #include "base/memory/move.h"
 #include "base/strings/xstring.h"
-#include "core/format.h"
-#include "core/memory/chunk_pool.h"
-#include "core/scalar.h"
 #include "ecs/world.h"
+#include "foundation/math/scalar.h"
+#include "foundation/memory/chunk_pool.h"
+#include "foundation/strings/format.h"
 
 namespace {
 

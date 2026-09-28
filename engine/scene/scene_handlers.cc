@@ -9,9 +9,9 @@
 
 #include "base/memory/move.h"
 #include "base/strings/xstring.h"
-#include "core/math.h"
 #include "ecs/entity.h"
 #include "ecs/world.h"
+#include "foundation/math/math.h"
 #include "scene/components.h"
 #include "script/handler_context.h"
 #include "script/handler_registry.h"

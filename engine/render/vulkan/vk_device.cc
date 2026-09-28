@@ -11,12 +11,12 @@
 #include "base/memory/unique_pointer.h"
 #include "base/strings/xstring.h"
 #include "base/threading/lock_guard.h"
-#include "core/app_identity.h"
-#include "core/format.h"
-#include "core/file_system.h"
-#include "core/log.h"
-#include "core/memory/small_vector.h"
-#include "core/scalar.h"
+#include "foundation/files/file_system.h"
+#include "foundation/logging/log.h"
+#include "foundation/math/scalar.h"
+#include "foundation/memory/small_vector.h"
+#include "foundation/strings/format.h"
+#include "foundation/system/app_identity.h"
 #include "render/vulkan/vk_backend.h"
 
 #if defined(RX_HAS_DLSS)

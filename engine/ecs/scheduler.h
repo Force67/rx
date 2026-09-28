@@ -5,8 +5,8 @@
 #include <base/containers/vector.h>
 #include <base/strings/xstring.h>
 
-#include "core/types.h"
 #include "ecs/world.h"
+#include "foundation/build_config/types.h"
 
 namespace rx::ecs {
 

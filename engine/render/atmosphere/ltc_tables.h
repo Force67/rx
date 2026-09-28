@@ -7,7 +7,7 @@
 // entries; table 2 holds (magnitude, fresnel, 0, horizon-clipping sphere
 // factor). Converted from ltc_code/fit/results/ltc_{1,2}.dds (MIT).
 
-#include "core/types.h"
+#include "foundation/build_config/types.h"
 
 namespace rx::render {
 

@@ -1,6 +1,6 @@
 #include "render/post/vrs_rate.h"
 
-#include "core/log.h"
+#include "foundation/logging/log.h"
 #include "shaders/vrs_rate_cs_hlsl.h"
 
 namespace rx::render {

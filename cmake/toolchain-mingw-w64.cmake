@@ -4,7 +4,7 @@
 # dxc/glslang stay the host tools:
 #   cmake -B build/mingw -G Ninja \
 #     -DCMAKE_TOOLCHAIN_FILE=cmake/toolchain-mingw-w64.cmake \
-#     -DRX_MODULES=core\;asset\;render -DRX_RHI_VULKAN=OFF -DRX_RHI_D3D12=ON \
+#     -DRX_MODULES=ui/events\;ui/window\;asset\;render -DRX_RHI_VULKAN=OFF -DRX_RHI_D3D12=ON \
 #     -DRX_BUILD_TESTS=ON -DRX_BUILD_RUNTIME=OFF
 # The MINGW_CC/MINGW_MCF paths can be overridden with -DRX_MINGW_CC=... /
 # -DRX_MINGW_MCF=... when the store paths differ.

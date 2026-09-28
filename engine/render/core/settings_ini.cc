@@ -1,9 +1,9 @@
+#include "base/containers/unordered_map.h"
 #include "base/strings/string_ref.h"
 #include "base/strings/xstring.h"
-#include "base/containers/unordered_map.h"
-#include "core/file_system.h"
-#include "core/text_reader.h"
-#include "core/text_writer.h"
+#include "foundation/files/file_system.h"
+#include "foundation/strings/text_reader.h"
+#include "foundation/strings/text_writer.h"
 #include "render/core/settings_ini.h"
 
 #include <ctype.h>

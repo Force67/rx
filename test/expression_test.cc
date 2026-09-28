@@ -16,7 +16,7 @@
 #include "anim/expression.h"
 #include "asset/asset_id.h"
 #include "base/memory/mem_ops.h"
-#include "core/scalar.h"
+#include "foundation/math/scalar.h"
 
 using namespace rx;
 

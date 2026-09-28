@@ -1,7 +1,7 @@
 #ifndef RX_RENDER_ADAPTIVE_WATER_H_
 #define RX_RENDER_ADAPTIVE_WATER_H_
 
-#include "core/math.h"
+#include "foundation/math/math.h"
 #include "render/rhi/device.h"
 
 namespace rx::render {

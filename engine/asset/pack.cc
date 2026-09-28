@@ -12,8 +12,8 @@
 #include "base/strings/string_ref.h"
 #include "base/strings/xstring.h"
 #include "base/threading/lock_guard.h"
-#include "core/file_system.h"
-#include "core/scalar.h"
+#include "foundation/files/file_system.h"
+#include "foundation/math/scalar.h"
 
 namespace rx::asset {
 

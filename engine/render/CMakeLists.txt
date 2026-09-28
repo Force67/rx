@@ -163,7 +163,7 @@ endif()
 # Under RX_SHARED volk is compiled hidden (see the top-level CMakeLists), so each
 # DSO that links it gets a private, non-interposing copy it initializes itself.
 target_link_libraries(rx_render
-  PUBLIC rx::core rx::asset
+  PUBLIC rx::foundation rx::window rx::asset
          $<BUILD_INTERFACE:volk> $<BUILD_INTERFACE:GPUOpen::VulkanMemoryAllocator>)
 target_link_libraries(rx_render PRIVATE $<BUILD_INTERFACE:rx::stb_impl>)
 

@@ -3,12 +3,12 @@
 
 #include <base/containers/vector.h>
 
-#include "core/input.h"
-#include "core/math.h"
 #include "ecs/entity.h"
 #include "engine_context.h"
+#include "foundation/math/math.h"
 #include "locomotion/controller.h"
 #include "render/core/renderer.h"
+#include "ui/events/input.h"
 
 namespace rx {
 

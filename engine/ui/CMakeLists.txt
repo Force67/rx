@@ -45,7 +45,7 @@ rx_add_module(ui
 # it as an imported archive instead (cmake/rxConfig.cmake.in), the same way
 # rx::anim treats kinema.
 target_link_libraries(rx_ui PUBLIC
-  rx::core rx::asset rx::render $<BUILD_INTERFACE:ultragui>)
+  rx::foundation rx::window rx::asset rx::render $<BUILD_INTERFACE:ultragui>)
 
 # ugui pipeline shaders (SDF quads, glyphs, frosted glass), hlsl -> embedded spirv.
 rx_embed_shaders(rx_ui

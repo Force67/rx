@@ -6,9 +6,9 @@
 #include <base/containers/vector.h>
 
 #include "base/functional/function.h"
-#include "core/export.h"
-#include "core/types.h"
 #include "ecs/world.h"
+#include "foundation/build_config/export.h"
+#include "foundation/build_config/types.h"
 #include "net/protocol.h"
 #include "scene/components.h"
 

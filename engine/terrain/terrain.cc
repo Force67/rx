@@ -3,7 +3,7 @@
 #include "base/memory/move.h"
 #include "base/numeric_limits.h"
 #include "base/optional.h"
-#include "core/scalar.h"
+#include "foundation/math/scalar.h"
 #include "terrain/terrain.h"
 
 #include <float.h>

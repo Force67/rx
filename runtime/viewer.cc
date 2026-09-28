@@ -11,8 +11,8 @@
 #include "anim/morph.h"
 #include "asset/asset_database.h"
 #include "asset/primitives.h"
-#include "core/log.h"
 #include "edit/scene_io.h"
+#include "foundation/logging/log.h"
 #include "importers/gltf/gltf_loader.h"
 #include "scene/scene_handlers.h"
 
@@ -28,11 +28,11 @@
 #include "base/memory/unique_pointer.h"
 #include "base/strings/string_ref.h"
 #include "base/strings/xstring.h"
-#include "core/scalar.h"
 #include "demo_scenes.h"
+#include "foundation/algorithm/sort.h"
+#include "foundation/math/scalar.h"
+#include "foundation/strings/text_reader.h"
 #include "scene_authoring.h"
-#include "core/text_reader.h"
-#include "core/sort.h"
 
 // Viewer lifecycle and per-frame policy: the front-door content dispatch
 // (glTF scene or builtin demo), the day/night sun, the debug overlay and the

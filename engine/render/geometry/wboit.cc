@@ -4,7 +4,7 @@
 
 #include "asset/primitives.h"
 #include "base/memory/mem_ops.h"
-#include "core/log.h"
+#include "foundation/logging/log.h"
 #include "render/rhi/device.h"
 #include "shaders/fullscreen_vs_slang.h"
 #include "shaders/wboit_ps_hlsl.h"

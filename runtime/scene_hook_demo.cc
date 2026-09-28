@@ -2,7 +2,7 @@
 
 #include <string.h>
 
-#include "core/log.h"
+#include "foundation/logging/log.h"
 #include "render/rhi/vulkan_interop.h"
 #include "render/util/shader_util.h"
 

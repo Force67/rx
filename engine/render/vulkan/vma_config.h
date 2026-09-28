@@ -12,8 +12,8 @@
 
 #include "base/atomic.h"
 #include "base/threading/mutex.h"
-#include "core/scalar.h"
-#include "core/sort.h"
+#include "foundation/algorithm/sort.h"
+#include "foundation/math/scalar.h"
 
 class RxVmaMutex {
  public:

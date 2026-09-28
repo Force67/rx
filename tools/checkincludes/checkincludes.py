@@ -20,7 +20,7 @@ INCLUDE = re.compile(r'^\s*#\s*include\s+"([^"]+)"')
 BASELINE = os.path.join(os.path.dirname(os.path.abspath(__file__)), "baseline.txt")
 
 # Modules that work on their own handles and must not know the entity world.
-ENTITY_FREE = {"core", "ui", "asset", "audio", "net", "http", "rpc", "physics",
+ENTITY_FREE = {"foundation", "events", "window", "ui", "asset", "audio", "net", "http", "rpc", "physics",
                "anim", "render", "render2d"}
 ENTITY_WORLD = {"ecs", "scene", "script", "world", "edit", "authoring", "app"}
 # Optional modules a game opts into (plugins/ after the move).
@@ -32,7 +32,7 @@ EDITOR_ONLY = {"engine/edit/hierarchy.h", "engine/edit/selection.h",
                "engine/edit/undo.h", "engine/world/world_bake.h"}
 HEADER_EXTS = (".h", ".hpp", ".inl", ".def")
 SOURCE_EXTS = (".cc", ".cpp", ".c") + HEADER_EXTS
-CODE_DIRS = ("engine", "runtime", "apps", "tools", "test", "examples")
+CODE_DIRS = ("foundation", "engine", "runtime", "apps", "tools", "test", "examples")
 
 
 def unwrap(item):
@@ -147,12 +147,12 @@ class Graph:
 def check(graph):
   rel = lambda p: os.path.relpath(p, graph.root)
   violations = {}  # key -> first path:line
-  # The layering rules bind engine modules. An app's own library (the viewer's
+  # The layering rules bind foundation and engine modules. An app's own library (the viewer's
   # scene authoring) answers only to the link check, like the app.
-  engine_dir = os.path.join(graph.root, "engine") + os.sep
+  module_dirs = tuple(os.path.join(graph.root, d) + os.sep for d in ("foundation", "engine"))
   def module_rules_of(target):
     if (target in graph.libraries and
-        (graph.targets[target]["source_dir"] + os.sep).startswith(engine_dir)):
+        (graph.targets[target]["source_dir"] + os.sep).startswith(module_dirs)):
       return module_of(target)
     return None
   visible_of = {t: graph.visible(t) for t in graph.targets}

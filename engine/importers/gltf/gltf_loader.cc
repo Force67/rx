@@ -7,16 +7,16 @@
 
 #include "asset/asset_id.h"
 #include "asset/texture_compress.h"
-#include "base/memory/mem_ops.h"
 #include "base/algorithm.h"
+#include "base/memory/mem_ops.h"
 #include "base/memory/move.h"
 #include "base/strings/string_ref.h"
 #include "base/strings/xstring.h"
-#include "core/format.h"
-#include "core/file_system.h"
-#include "core/log.h"
-#include "core/memory/memory_tracker.h"
-#include "core/scalar.h"
+#include "foundation/files/file_system.h"
+#include "foundation/logging/log.h"
+#include "foundation/math/scalar.h"
+#include "foundation/memory/memory_tracker.h"
+#include "foundation/strings/format.h"
 
 #define CGLTF_IMPLEMENTATION
 #include <cgltf.h>

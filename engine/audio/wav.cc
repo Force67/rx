@@ -4,8 +4,8 @@
 
 #include "base/containers/vector.h"
 #include "base/memory/mem_ops.h"
-#include "core/log.h"
-#include "core/types.h"
+#include "foundation/build_config/types.h"
+#include "foundation/logging/log.h"
 
 // Native RIFF/WAVE decoder. WAV is the one game audio container with no licensed
 // codec behind it, so it is decoded here from first principles rather than handed

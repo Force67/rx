@@ -2,7 +2,7 @@
 
 #include <string.h>
 
-#include "core/log.h"
+#include "foundation/logging/log.h"
 #include "render/rhi/device.h"
 #include "shaders/exposure_resolve_cs_hlsl.h"
 #include "shaders/histogram_cs_hlsl.h"

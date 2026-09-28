@@ -3,7 +3,7 @@
 
 #include <base/containers/vector.h>
 
-#include "core/math.h"
+#include "foundation/math/math.h"
 #include "render/core/renderer.h"
 #include "render/rhi/resources.h"
 

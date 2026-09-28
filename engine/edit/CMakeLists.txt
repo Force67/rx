@@ -9,4 +9,4 @@ rx_add_module(edit
 # Editor foundations: reflection, hierarchy, serialization, undo and selection.
 # Depends on the data modules only; deliberately NOT on rx::render (the editor
 # UI links render separately and drives it through the FrameView contract).
-target_link_libraries(rx_edit PUBLIC rx::core rx::ecs rx::scene rx::asset)
+target_link_libraries(rx_edit PUBLIC rx::foundation rx::ecs rx::scene rx::asset)

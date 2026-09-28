@@ -8,12 +8,12 @@
 
 #include "base/memory/move.h"
 #include "base/strings/xstring.h"
-#include "core/log.h"
-#include "core/math.h"
-#include "core/scalar.h"
 #include "demo_scenes.h"
+#include "foundation/files/file_system.h"
+#include "foundation/logging/log.h"
+#include "foundation/math/math.h"
+#include "foundation/math/scalar.h"
 #include "scene/components.h"
-#include "core/file_system.h"
 #include <string.h>
 #include <errno.h>
 

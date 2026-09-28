@@ -1,6 +1,6 @@
-#include "core/scalar.h"
+#include "foundation/algorithm/sort.h"
+#include "foundation/math/scalar.h"
 #include "nav/navmesh.h"
-#include "core/sort.h"
 
 #include <math.h>
 #include <stdlib.h>

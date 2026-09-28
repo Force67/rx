@@ -1,8 +1,8 @@
 #ifndef RX_RENDER_CLOUDSCAPE_TYPES_H_
 #define RX_RENDER_CLOUDSCAPE_TYPES_H_
 
-#include "core/math.h"
-#include "core/types.h"
+#include "foundation/build_config/types.h"
+#include "foundation/math/math.h"
 
 namespace rx::render {
 

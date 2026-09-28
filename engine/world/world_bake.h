@@ -6,11 +6,11 @@
 
 #include "base/strings/string_ref.h"
 #include "base/strings/xstring.h"
-#include "core/export.h"
-#include "core/math.h"
-#include "core/types.h"
 #include "ecs/entity.h"
 #include "ecs/world.h"
+#include "foundation/build_config/export.h"
+#include "foundation/build_config/types.h"
+#include "foundation/math/math.h"
 
 // The cook: an authored .rxscene in, a streamable .rxp out. One function shared
 // by the tool and the editor, so there is one answer to what a world is. The

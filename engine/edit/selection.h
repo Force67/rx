@@ -4,8 +4,8 @@
 
 #include "base/containers/span.h"
 #include "base/containers/vector.h"
-#include "core/export.h"
 #include "ecs/entity.h"
+#include "foundation/build_config/export.h"
 
 namespace rx::edit {
 

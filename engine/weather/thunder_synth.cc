@@ -1,5 +1,5 @@
 #include "base/memory/unique_pointer.h"
-#include "core/scalar.h"
+#include "foundation/math/scalar.h"
 #include "weather/thunder_synth.h"
 
 #include <math.h>

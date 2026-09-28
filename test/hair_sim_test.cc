@@ -8,7 +8,7 @@
 
 #include <base/containers/vector.h>
 
-#include "core/math.h"
+#include "foundation/math/math.h"
 #include "physics/physics_world.h"
 #include "render/geometry/hair_groom.h"
 

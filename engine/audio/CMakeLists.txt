@@ -13,7 +13,7 @@ rx_add_module(audio
 # native backend, a headless server) audio_device.cc compiles to a silent stub
 # and the rest of the module is unchanged.
 target_link_libraries(rx_audio PUBLIC
-  rx::core rx::asset)
+  rx::foundation rx::asset)
 
 if(SDL3_FOUND)
   target_link_libraries(rx_audio PUBLIC SDL3::SDL3)

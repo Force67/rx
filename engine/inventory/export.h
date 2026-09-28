@@ -5,10 +5,10 @@
 // physics-free core (rx_inventory) and the world-drop half that pulls physics
 // (rx_inventory_world). Each gets its own cross-DSO export macro. Both resolve
 // through core/export.h's RX_DSO_EXPORT/RX_DSO_IMPORT, so this header defines
-// them locally instead of editing the shared engine/core/export.h (which a
+// them locally instead of editing the shared foundation/build_config/export.h (which a
 // second agent is touching in parallel).
 
-#include "core/export.h"
+#include "foundation/build_config/export.h"
 
 #if defined(RX_INVENTORY_IMPLEMENTATION)
 #  define RX_INVENTORY_EXPORT RX_DSO_EXPORT

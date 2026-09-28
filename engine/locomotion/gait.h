@@ -12,8 +12,8 @@
 // radians, cycles/second. Pure deterministic math: no allocation, no statics,
 // no global reads; every output stays finite for dt = 0.
 
-#include "core/export.h"
-#include "core/types.h"
+#include "foundation/build_config/export.h"
+#include "foundation/build_config/types.h"
 #include "locomotion/types.h"
 
 namespace rx::locomotion {

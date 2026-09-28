@@ -8,7 +8,7 @@ rx_add_module(nav
   query.cc
   agent.cc
 )
-target_link_libraries(rx_nav PUBLIC rx::core rx::ecs rx::scene)
+target_link_libraries(rx_nav PUBLIC rx::foundation rx::ecs rx::scene)
 
 # Debug-line builders live in their own target so a dedicated server links
 # rx::nav without dragging the renderer in (same split as rx::net_viz).

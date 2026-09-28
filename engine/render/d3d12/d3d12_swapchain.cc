@@ -13,7 +13,7 @@
 #include "render/d3d12/d3d12_backend.h"
 
 #include "base/memory/unique_pointer.h"
-#include "core/log.h"
+#include "foundation/logging/log.h"
 
 namespace rx::render::d3d12 {
 

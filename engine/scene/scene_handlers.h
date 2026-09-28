@@ -1,7 +1,7 @@
 #ifndef RX_SCENE_SCENE_HANDLERS_H_
 #define RX_SCENE_SCENE_HANDLERS_H_
 
-#include "core/export.h"
+#include "foundation/build_config/export.h"
 
 namespace rx::script {
 class HandlerRegistry;

@@ -1,6 +1,6 @@
 #include "render/post/depth_of_field.h"
 
-#include "core/log.h"
+#include "foundation/logging/log.h"
 #include "shaders/dof_coc_cs_hlsl.h"
 #include "shaders/dof_composite_cs_hlsl.h"
 #include "shaders/dof_focus_cs_hlsl.h"

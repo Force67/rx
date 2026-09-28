@@ -5,10 +5,10 @@
 #include "base/containers/vector.h"
 #include "base/memory/unique_pointer.h"
 #include "base/strings/xstring.h"
-#include "core/export.h"
 #include "ecs/entity.h"
 #include "ecs/world.h"
 #include "edit/reflect.h"
+#include "foundation/build_config/export.h"
 
 // Undo/redo built on reversible Commands. Commands identify their target
 // entities by Guid, not by ecs handle, so a target destroyed and recreated by

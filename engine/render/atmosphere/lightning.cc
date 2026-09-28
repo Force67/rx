@@ -2,8 +2,8 @@
 
 #include <math.h>
 
-#include "core/log.h"
-#include "core/scalar.h"
+#include "foundation/logging/log.h"
+#include "foundation/math/scalar.h"
 #include "render/core/settings.h"
 #include "render/pipeline/mesh_pipeline.h"
 #include "shaders/lightning_bolt_ps_hlsl.h"

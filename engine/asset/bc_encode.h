@@ -1,8 +1,8 @@
 #ifndef RX_ASSET_BC_ENCODE_H_
 #define RX_ASSET_BC_ENCODE_H_
 
-#include "core/export.h"
-#include "core/types.h"
+#include "foundation/build_config/export.h"
+#include "foundation/build_config/types.h"
 
 namespace rx::asset {
 

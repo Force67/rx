@@ -1,7 +1,7 @@
 #ifndef RX_RENDER_AMBIENT_OCCLUSION_H_
 #define RX_RENDER_AMBIENT_OCCLUSION_H_
 
-#include "core/math.h"
+#include "foundation/math/math.h"
 #include "render/core/render_graph.h"
 #include "render/rhi/resources.h"
 

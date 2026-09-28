@@ -13,9 +13,9 @@
 // SetJointTarget() composes the two, so nothing outside rig.cc touches
 // constraint space.
 
-#include "core/export.h"
-#include "core/math.h"
-#include "core/types.h"
+#include "foundation/build_config/export.h"
+#include "foundation/build_config/types.h"
+#include "foundation/math/math.h"
 #include "locomotion/types.h"
 #include "physics/physics_world.h"
 

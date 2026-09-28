@@ -8,4 +8,4 @@ rx_add_module(scene
 
 # scene depends on the script substrate (not the reverse): its handlers call
 # ecs::World and the scene components directly, so no gateway indirection.
-target_link_libraries(rx_scene PUBLIC rx::core rx::asset rx::ecs rx::script)
+target_link_libraries(rx_scene PUBLIC rx::foundation rx::events rx::asset rx::ecs rx::script)

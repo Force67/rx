@@ -7,8 +7,8 @@
 #include <stdint.h>
 #include <stdio.h>
 
-#include "core/scalar.h"
 #include "ecs/world.h"
+#include "foundation/math/scalar.h"
 
 namespace {
 

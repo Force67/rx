@@ -5,7 +5,7 @@
 #include "asset/shape_desc.h"
 #include "base/containers/unordered_map.h"
 #include "base/memory/unique_pointer.h"
-#include "core/types.h"
+#include "foundation/build_config/types.h"
 #include "inventory/export.h"
 
 namespace rx::inventory {

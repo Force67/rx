@@ -8,7 +8,7 @@
 #include <math.h>
 #include <stdio.h>
 
-#include "core/math.h"
+#include "foundation/math/math.h"
 #include "physics/physics_world.h"
 #include "physics/water_waves.h"
 #include "vehicles/boat.h"

@@ -33,7 +33,7 @@
 
 #include "asset/mesh.h"
 #include "base/containers/span.h"
-#include "core/math.h"
+#include "foundation/math/math.h"
 #include "render/core/render_graph.h"
 #include "render/rhi/device.h"
 

@@ -6,8 +6,8 @@
 #include "base/containers/array.h"
 #include "base/containers/span.h"
 #include "base/numeric_limits.h"
-#include "core/math.h"
-#include "core/scalar.h"
+#include "foundation/math/math.h"
+#include "foundation/math/scalar.h"
 #include "render/core/render_graph.h"
 #include "render/rhi/device.h"
 

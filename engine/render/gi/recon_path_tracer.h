@@ -1,7 +1,7 @@
 #ifndef RX_RENDER_RECON_PATH_TRACER_H_
 #define RX_RENDER_RECON_PATH_TRACER_H_
 
-#include "core/math.h"
+#include "foundation/math/math.h"
 #include "render/core/render_graph.h"
 #include "render/rhi/resources.h"
 

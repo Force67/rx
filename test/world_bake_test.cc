@@ -14,10 +14,10 @@
 #include "base/memory/move.h"
 #include "base/strings/xstring.h"
 #include "ecs/world.h"
+#include "foundation/files/file_system.h"
 #include "scene/components.h"
 #include "world/world_map.h"
 #include "world/world_stream.h"
-#include "core/file_system.h"
 
 namespace {
 

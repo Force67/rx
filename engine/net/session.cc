@@ -6,7 +6,7 @@
 #include "base/containers/vector.h"
 #include "base/memory/move.h"
 #include "base/memory/unique_pointer.h"
-#include "core/log.h"
+#include "foundation/logging/log.h"
 #include "net/rpc_channel.h"
 #include "net/znet_util.h"
 #include "scene/components.h"

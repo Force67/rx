@@ -1,6 +1,6 @@
 #include "render/screenspace/ambient_occlusion.h"
 
-#include "core/log.h"
+#include "foundation/logging/log.h"
 #include "render/gi/raytracing.h"
 #include "render/rhi/device.h"
 #include "shaders/rtao_cs_hlsl.h"

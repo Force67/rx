@@ -1,8 +1,8 @@
 #ifndef RX_RENDER_LIGHTNING_H_
 #define RX_RENDER_LIGHTNING_H_
 
-#include "core/export.h"
-#include "core/math.h"
+#include "foundation/build_config/export.h"
+#include "foundation/math/math.h"
 #include "render/atmosphere/lightning_envelope.h"
 #include "render/core/render_graph.h"
 #include "render/rhi/device.h"

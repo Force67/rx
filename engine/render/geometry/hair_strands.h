@@ -11,7 +11,7 @@
 
 #include <base/containers/vector.h>
 
-#include "core/math.h"
+#include "foundation/math/math.h"
 #include "render/core/render_graph.h"
 #include "render/geometry/hair_groom.h"
 #include "render/pipeline/hair_material.h"

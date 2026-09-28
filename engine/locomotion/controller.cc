@@ -19,7 +19,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 
-#include "core/scalar.h"
+#include "foundation/math/scalar.h"
 #include "locomotion/internal_math.h"
 #include "locomotion/whole_body.h"
 #include "physics/physics_world.h"

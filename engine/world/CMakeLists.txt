@@ -11,4 +11,4 @@ rx_add_module(world
   world_overlay.cc
   world_stream.cc
 )
-target_link_libraries(rx_world PUBLIC rx::core rx::ecs rx::asset rx::scene rx::edit)
+target_link_libraries(rx_world PUBLIC rx::foundation rx::ecs rx::asset rx::scene rx::edit)

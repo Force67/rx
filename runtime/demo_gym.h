@@ -7,13 +7,13 @@
 #include "base/strings/xstring.h"
 #include "character/character.h"
 #include "character/jetpack.h"
-#include "core/input.h"
-#include "core/input_actions.h"
-#include "core/math.h"
 #include "engine_context.h"
+#include "foundation/math/math.h"
 #include "inventory/item_catalog.h"
 #include "inventory/world_item.h"
 #include "render/core/renderer.h"
+#include "ui/events/input.h"
+#include "ui/events/input_actions.h"
 #include "vehicles/vehicle_audio.h"
 
 namespace rx {

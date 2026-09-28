@@ -7,7 +7,7 @@ rx_add_module(inventory
   inventory.cc
   serialize.cc
 )
-target_link_libraries(rx_inventory PUBLIC rx::core rx::ecs rx::scene rx::asset)
+target_link_libraries(rx_inventory PUBLIC rx::foundation rx::ecs rx::scene rx::asset)
 
 # World-item half: dropping items into the 3D world as physics bodies, the
 # hibernation store, and world-item persistence. Split into its own target (the

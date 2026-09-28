@@ -14,7 +14,7 @@
 // height, modulating direct sun. The map is stateless (rebuilt fully each
 // frame), so no ping-pong or history is needed. See WATER_SHADING.md.
 
-#include "core/math.h"
+#include "foundation/math/math.h"
 #include "render/core/render_graph.h"
 #include "render/rhi/device.h"
 

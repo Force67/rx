@@ -4,7 +4,7 @@
 
 #include "asset/scene_import.h"
 #include "base/strings/xstring.h"
-#include "core/export.h"
+#include "foundation/build_config/export.h"
 
 namespace rx::asset {
 

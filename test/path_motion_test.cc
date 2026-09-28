@@ -12,7 +12,7 @@
 #ifdef RX_HAS_NRD
 #include "base/algorithm.h"
 #include "base/memory/mem_ops.h"
-#include "core/scalar.h"
+#include "foundation/math/scalar.h"
 #include "shaders/path_motion_nrd_cs_hlsl.h"
 #endif
 

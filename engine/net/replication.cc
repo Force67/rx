@@ -6,7 +6,7 @@
 
 #include "asset/asset_id.h"
 #include "base/atomic.h"
-#include "core/log.h"
+#include "foundation/logging/log.h"
 
 namespace rx::net {
 namespace {

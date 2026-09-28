@@ -5,7 +5,7 @@
 #include <base/containers/vector.h>
 
 #include "asset/mesh.h"
-#include "core/math.h"
+#include "foundation/math/math.h"
 #include "render/geometry/particles.h"
 
 namespace rx::render {

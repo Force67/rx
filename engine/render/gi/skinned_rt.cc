@@ -1,7 +1,7 @@
 #include "render/gi/skinned_rt.h"
 
 #include "asset/mesh.h"
-#include "core/log.h"
+#include "foundation/logging/log.h"
 #include "render/core/bindless.h"
 #include "render/gi/raytracing.h"
 #include "render/pipeline/material_system.h"

@@ -1,6 +1,6 @@
 #include "render/post/motion_blur.h"
 
-#include "core/log.h"
+#include "foundation/logging/log.h"
 #include "shaders/motion_blur_cs_hlsl.h"
 #include "shaders/motion_tilemax_cs_hlsl.h"
 

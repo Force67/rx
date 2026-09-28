@@ -1,7 +1,7 @@
 #ifndef RX_RENDER_RHI_SWAPCHAIN_H_
 #define RX_RENDER_RHI_SWAPCHAIN_H_
 
-#include "core/types.h"
+#include "foundation/build_config/types.h"
 #include "render/rhi/resources.h"
 #include "render/rhi/types.h"
 

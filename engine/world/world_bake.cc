@@ -15,14 +15,14 @@
 #include "base/optional.h"
 #include "base/strings/string_ref.h"
 #include "base/strings/xstring.h"
-#include "core/format.h"
-#include "core/scalar.h"
 #include "edit/reflect.h"
 #include "edit/scene_io.h"
+#include "foundation/algorithm/sort.h"
+#include "foundation/math/scalar.h"
+#include "foundation/strings/format.h"
 #include "scene/components.h"
 #include "world/world_format.h"
 #include "world/world_stream.h"
-#include "core/sort.h"
 
 namespace rx::world {
 namespace {

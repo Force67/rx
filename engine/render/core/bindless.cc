@@ -5,7 +5,7 @@
 #include "base/algorithm.h"
 #include "base/memory/mem_ops.h"
 #include "base/memory/unique_pointer.h"
-#include "core/log.h"
+#include "foundation/logging/log.h"
 
 namespace rx::render {
 

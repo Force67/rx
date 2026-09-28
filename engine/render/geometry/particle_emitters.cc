@@ -4,8 +4,8 @@
 #include <stdlib.h>
 
 #include "base/memory/move.h"
-#include "core/log.h"
-#include "core/scalar.h"
+#include "foundation/logging/log.h"
+#include "foundation/math/scalar.h"
 
 namespace rx::render {
 namespace {

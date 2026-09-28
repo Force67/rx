@@ -6,7 +6,7 @@
 #include "asset/vfs.h"
 #include "base/strings/string_ref.h"
 #include "base/strings/xstring.h"
-#include "core/export.h"
+#include "foundation/build_config/export.h"
 #include "scene/world_streaming.h"
 #include "world/world_format.h"
 

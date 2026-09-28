@@ -6,7 +6,7 @@
 #include "base/algorithm.h"
 #include "base/containers/vector.h"
 #include "base/memory/mem_ops.h"
-#include "core/scalar.h"
+#include "foundation/math/scalar.h"
 #include "render/post/post.h"
 
 using namespace rx;

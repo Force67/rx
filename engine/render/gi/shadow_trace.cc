@@ -2,7 +2,7 @@
 
 #include <math.h>
 
-#include "core/log.h"
+#include "foundation/logging/log.h"
 #include "render/gi/denoiser_nrd.h"
 #include "render/gi/raytracing.h"
 #include "render/rhi/device.h"
