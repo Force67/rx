@@ -1,6 +1,7 @@
 #ifndef RX_RENDER_HAIR_MATERIAL_H_
 #define RX_RENDER_HAIR_MATERIAL_H_
 
+#include "core/export.h"
 #include "core/types.h"
 
 namespace rx::render {
@@ -48,13 +49,13 @@ struct HairSurfaceParameters {
 
 // Eumelanin (brown/black) and pheomelanin (red/yellow) concentrations to
 // absorption. Chiang et al. 2016.
-void HairSigmaFromMelanin(f32 eumelanin, f32 pheomelanin, f32 out_sigma[3]);
+RX_RENDER_EXPORT void HairSigmaFromMelanin(f32 eumelanin, f32 pheomelanin, f32 out_sigma[3]);
 
 // Chiang's published colour inversion. Calibrated against FULL path-traced
 // multiple scattering, so it does NOT apply to this renderer's dual-scattering
 // transport - measured here, asking it for 0.45 renders as 0.77. Kept for a
 // path tracer and because the discrepancy is worth being able to reproduce.
-void HairSigmaFromColorPathTraced(const f32 color[3], f32 beta_n, f32 out_sigma[3]);
+RX_RENDER_EXPORT void HairSigmaFromColorPathTraced(const f32 color[3], f32 beta_n, f32 out_sigma[3]);
 
 // The inversion this renderer uses, fitted against its own transport:
 //   sigma = -ln(c) / (2.17 + 2.02 * reference_depth)
@@ -63,13 +64,13 @@ void HairSigmaFromColorPathTraced(const f32 color[3], f32 beta_n, f32 out_sigma[
 // c in [0.07, 0.85] and depth in [3, 10]. `reference_depth` is the fibre depth
 // at which the authored colour is exact; shallower reads lighter, deeper
 // darker, as hair does.
-void HairSigmaFromColor(const f32 color[3], f32 reference_depth, f32 out_sigma[3]);
+RX_RENDER_EXPORT void HairSigmaFromColor(const f32 color[3], f32 reference_depth, f32 out_sigma[3]);
 
 // Shipped starting points. Melanin concentrations from the ranges measured in
 // human hair; each preset's reasoning is in the .cc. Starting points, not
 // measurements - the look-dev bench exists so they can be replaced by fits.
 enum class HairPreset : u8 { kBlack, kBrown, kBlonde, kRed, kGrey, kWhite };
-HairSurfaceParameters HairPresetParams(HairPreset preset);
+RX_RENDER_EXPORT HairSurfaceParameters HairPresetParams(HairPreset preset);
 
 // Quality tiers, matching the character model's: a reduction of the same BSDF,
 // never a different one.
@@ -87,8 +88,8 @@ struct HairTierCaps {
 // Absorption for a fibre whose authored colour is `color`, honouring the
 // material's colour mode. Shared by the CPU mirror and (mirrored) by the
 // shader, so both derive it the same way.
-void HairResolveSigma(const HairSurfaceParameters& params, const f32 color[3], f32 out_sigma[3]);
-HairTierCaps HairTierApply(HairTier tier, HairSurfaceParameters& params);
+RX_RENDER_EXPORT void HairResolveSigma(const HairSurfaceParameters& params, const f32 color[3], f32 out_sigma[3]);
+RX_RENDER_EXPORT HairTierCaps HairTierApply(HairTier tier, HairSurfaceParameters& params);
 
 // Safe authoring ranges; the bench clamps to these and the docs publish them.
 struct HairRange {
@@ -100,7 +101,7 @@ struct HairRange {
 // [0,1]. Silently clamping is worse than refusing: color_reference_depth lives
 // in [1, 16], and a [0,1] clamp of it moves the colour inversion by a factor of
 // four while still looking like a valid number.
-HairRange HairSafeRange(const char* field);
+RX_RENDER_EXPORT HairRange HairSafeRange(const char* field);
 
 // CPU mirror of hair_bsdf.hlsli
 // Kept equivalent to the shader by construction. hair_bsdf_test diffs its
@@ -110,18 +111,18 @@ HairRange HairSafeRange(const char* field);
 // without the cosine, like the shader's HairEvaluate. NOT reciprocal - the
 // attenuations derive from the outgoing direction alone, as in the published
 // model. See the note in hair_bsdf.hlsli.
-void HairEvaluateCpu(const HairSurfaceParameters& p, const f32 wo[3], const f32 wi[3], f32 h,
-                     f32 out_rgb[3]);
+RX_RENDER_EXPORT void HairEvaluateCpu(const HairSurfaceParameters& p, const f32 wo[3], const f32 wi[3], f32 h,
+                                      f32 out_rgb[3]);
 
 // Cosine-weighted, with dual scattering, like the shader's HairShade.
-void HairShadeCpu(const HairSurfaceParameters& p, const f32 wo[3], const f32 wi[3], f32 h,
-                  f32 strand_count, f32 out_rgb[3]);
+RX_RENDER_EXPORT void HairShadeCpu(const HairSurfaceParameters& p, const f32 wo[3], const f32 wi[3], f32 h,
+                                   f32 strand_count, f32 out_rgb[3]);
 
 // White-furnace style check: integrates the single-scattering BSDF over the
 // sphere of outgoing directions for a fixed incoming one. A non-absorbing fibre
 // must come out at or below 1 (energy conserving) and close to 1 (not lossy).
-f32 HairAlbedoCpu(const HairSurfaceParameters& p, const f32 wo[3], u32 theta_steps,
-                  u32 phi_steps, int channel);
+RX_RENDER_EXPORT f32 HairAlbedoCpu(const HairSurfaceParameters& p, const f32 wo[3], u32 theta_steps,
+                                   u32 phi_steps, int channel);
 
 }  // namespace rx::render
 

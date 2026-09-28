@@ -326,10 +326,11 @@ if(NOT TARGET kinema)
   add_subdirectory(${RX_KINEMA_DIR} kinema)
 endif()
 
-# zetanet: the UDP transport rx::net's sessions ride, consumed as an optional
-# sibling checkout. A parent project may already provide the target; without
-# either, rx::net still builds its transport-free half (codec, replication,
-# interest bubbles) and only the sessions are absent. ZNET_USE_STL=OFF is
+# zetanet: the UDP transport rx::replication's sessions and rx::net's rpc channel
+# ride, consumed as an optional sibling checkout. A parent project may already
+# provide the target; without either, both still build their transport-free
+# halves (codec, replication, interest bubbles) and only the sessions and the
+# rpc channel are absent. ZNET_USE_STL=OFF is
 # zetanet's equilibrium configuration: it builds on base alone, without the STL
 # or exceptions, and reuses the equilibrium::base target vendored above rather
 # than compiling its own copy.
@@ -437,12 +438,12 @@ if(RX_BUILD_TESTS AND "render2d" IN_LIST RX_MODULES)
   add_test(NAME render2d_test COMMAND render2d_test)
 endif()
 
-# rx::net unit tests: pure logic (wire codec, per-peer delta streams, bubble
+# rx::net / rx::replication unit tests: pure logic (wire codec, per-peer delta streams, bubble
 # membership + ownership), no GPU, driver or transport needed, so plain
 # `ctest` runs them everywhere.
 if(RX_BUILD_TESTS AND "net" IN_LIST RX_MODULES)
   add_executable(net_test test/net_test.cc)
-  target_link_libraries(net_test PRIVATE rx::net rx::core)
+  target_link_libraries(net_test PRIVATE rx::replication rx::net rx::core)
   add_test(NAME net_test COMMAND net_test)
 endif()
 
@@ -735,16 +736,16 @@ if(RX_BUILD_TESTS)
   target_link_libraries(edit_test PRIVATE rx::edit rx::scene rx::ecs rx::asset rx::core)
   add_test(NAME edit_test COMMAND edit_test)
 
-  # The .rxscene authoring passes themselves (runtime/scene_authoring.cc, which
-  # is viewer policy rather than a module, so it is compiled in here rather than
-  # linked). `rx --validate` covers what a scene REFUSES; this covers what the
-  # numbers come out as, which no exit code can show. Null renderer throughout,
-  # so it needs no device even though it links rx::render for the signatures.
-  add_executable(scene_authoring_test test/scene_authoring_test.cc runtime/scene_authoring.cc)
-  target_include_directories(scene_authoring_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/runtime)
-  target_link_libraries(scene_authoring_test
-    PRIVATE rx::edit rx::scene rx::ecs rx::asset rx::render rx::core)
-  add_test(NAME scene_authoring_test COMMAND scene_authoring_test)
+  # The .rxscene authoring passes themselves (viewer_scene_authoring, the
+  # viewer's own library in runtime/). `rx --validate` covers what a scene
+  # REFUSES; this covers what the numbers come out as, which no exit code can
+  # show. Null renderer throughout, so it needs no device even though it links
+  # rx::render for the signatures.
+  if(TARGET viewer_scene_authoring)
+    add_executable(scene_authoring_test test/scene_authoring_test.cc)
+    target_link_libraries(scene_authoring_test PRIVATE viewer_scene_authoring)
+    add_test(NAME scene_authoring_test COMMAND scene_authoring_test)
+  endif()
 endif()
 
 if(RX_BUILD_TESTS)
@@ -862,30 +863,21 @@ if(RX_BUILD_TESTS)
     add_test(NAME placement_test COMMAND placement_test)
   endif()
 
-  add_executable(cloth_collision_test
-    test/cloth_collision_test.cc
-    engine/physics/cloth_collision.cc)
-  target_link_libraries(cloth_collision_test PRIVATE rx::core)
-  add_test(NAME cloth_collision_test COMMAND cloth_collision_test)
+  if("physics" IN_LIST RX_MODULES)
+    add_executable(cloth_collision_test test/cloth_collision_test.cc)
+    target_link_libraries(cloth_collision_test PRIVATE rx::physics rx::core)
+    add_test(NAME cloth_collision_test COMMAND cloth_collision_test)
+  endif()
 
-  add_executable(instance_store_test
-    test/instance_store_test.cc
-    engine/render/geometry/instance_store.cc)
-  target_include_directories(instance_store_test PRIVATE
-    ${CMAKE_CURRENT_SOURCE_DIR}/engine
-    ${CMAKE_CURRENT_SOURCE_DIR}/third_party/equilibrium)
-  target_link_libraries(instance_store_test PRIVATE rx::core)
-  add_test(NAME instance_store_test COMMAND instance_store_test)
+  if("render" IN_LIST RX_MODULES)
+    add_executable(instance_store_test test/instance_store_test.cc)
+    target_link_libraries(instance_store_test PRIVATE rx::render rx::core)
+    add_test(NAME instance_store_test COMMAND instance_store_test)
 
-  add_executable(settings_ini_test
-    test/settings_ini_test.cc
-    engine/render/core/settings_ini.cc)
-  target_include_directories(settings_ini_test PRIVATE
-    ${CMAKE_CURRENT_SOURCE_DIR}/engine
-    ${CMAKE_CURRENT_SOURCE_DIR}/third_party/equilibrium)
-  target_compile_definitions(settings_ini_test PRIVATE RX_RENDER_IMPLEMENTATION)
-  target_link_libraries(settings_ini_test PRIVATE rx::core)
-  add_test(NAME settings_ini_test COMMAND settings_ini_test)
+    add_executable(settings_ini_test test/settings_ini_test.cc)
+    target_link_libraries(settings_ini_test PRIVATE rx::render rx::core)
+    add_test(NAME settings_ini_test COMMAND settings_ini_test)
+  endif()
 
   # Platform config: include and section rules, every shipped tier in
   # rx/config resolving cleanly, and the android tier detection.
@@ -895,75 +887,48 @@ if(RX_BUILD_TESTS)
   target_link_libraries(platform_config_test PRIVATE rx::app)
   add_test(NAME platform_config_test COMMAND platform_config_test)
 
-  # Character surface model: the neutral-parity contract, control independence,
-  # terminator energy, tier monotonicity. Pure CPU (the mirror of
-  # human_brdf.hlsli), so plain `ctest` runs it everywhere.
-  add_executable(human_brdf_test
-    test/human_brdf_test.cc
-    engine/render/pipeline/human_material.cc)
-  target_include_directories(human_brdf_test PRIVATE
-    ${CMAKE_CURRENT_SOURCE_DIR}/engine
-    ${CMAKE_CURRENT_SOURCE_DIR}/third_party/equilibrium)
-  target_compile_definitions(human_brdf_test PRIVATE RX_RENDER_IMPLEMENTATION)
-  target_link_libraries(human_brdf_test PRIVATE rx::core)
-  add_test(NAME human_brdf_test COMMAND human_brdf_test)
+  if("render" IN_LIST RX_MODULES)
+    # Character surface model: the neutral-parity contract, control independence,
+    # terminator energy, tier monotonicity. Pure CPU (the mirror of
+    # human_brdf.hlsli), so plain `ctest` runs it everywhere.
+    add_executable(human_brdf_test test/human_brdf_test.cc)
+    target_link_libraries(human_brdf_test PRIVATE rx::render rx::core)
+    add_test(NAME human_brdf_test COMMAND human_brdf_test)
 
-  # Hair BSDF: energy over the sphere, reciprocity, pigment coupling, multiple
-  # scattering behaviour, tier monotonicity. Pure CPU (the mirror of
-  # hair_bsdf.hlsli), so plain `ctest` runs it everywhere.
-  add_executable(hair_bsdf_test
-    test/hair_bsdf_test.cc
-    engine/render/pipeline/hair_material.cc)
-  target_include_directories(hair_bsdf_test PRIVATE
-    ${CMAKE_CURRENT_SOURCE_DIR}/engine
-    ${CMAKE_CURRENT_SOURCE_DIR}/third_party/equilibrium)
-  target_compile_definitions(hair_bsdf_test PRIVATE RX_RENDER_IMPLEMENTATION)
-  target_link_libraries(hair_bsdf_test PRIVATE rx::core)
-  add_test(NAME hair_bsdf_test COMMAND hair_bsdf_test)
+    # Hair BSDF: energy over the sphere, reciprocity, pigment coupling, multiple
+    # scattering behaviour, tier monotonicity. Pure CPU (the mirror of
+    # hair_bsdf.hlsli), so plain `ctest` runs it everywhere.
+    add_executable(hair_bsdf_test test/hair_bsdf_test.cc)
+    target_link_libraries(hair_bsdf_test PRIVATE rx::render rx::core)
+    add_test(NAME hair_bsdf_test COMMAND hair_bsdf_test)
 
-  add_executable(procedural_grass_test test/procedural_grass_test.cc)
-  target_include_directories(procedural_grass_test PRIVATE
-    ${CMAKE_CURRENT_SOURCE_DIR}/engine
-    ${CMAKE_CURRENT_SOURCE_DIR}/third_party/equilibrium)
-  target_link_libraries(procedural_grass_test PRIVATE rx::core)
-  add_test(NAME procedural_grass_test COMMAND procedural_grass_test)
+    add_executable(procedural_grass_test test/procedural_grass_test.cc)
+    target_link_libraries(procedural_grass_test PRIVATE rx::render rx::core)
+    add_test(NAME procedural_grass_test COMMAND procedural_grass_test)
 
-  # Solid-angle TLAS instance culler: the distance/angle predicate, the
-  # time-sliced group sweep, teleport accept-all and generation invalidation.
-  # Pure CPU logic (no GPU), so it always runs under plain ctest.
-  add_executable(rt_instance_cull_test
-    test/rt_instance_cull_test.cc
-    engine/render/gi/rt_instance_cull.cc)
-  target_include_directories(rt_instance_cull_test PRIVATE
-    ${CMAKE_CURRENT_SOURCE_DIR}/engine
-    ${CMAKE_CURRENT_SOURCE_DIR}/third_party/equilibrium)
-  target_link_libraries(rt_instance_cull_test PRIVATE rx::core)
-  add_test(NAME rt_instance_cull_test COMMAND rt_instance_cull_test)
+    # Solid-angle TLAS instance culler: the distance/angle predicate, the
+    # time-sliced group sweep, teleport accept-all and generation invalidation.
+    # Pure CPU logic (no GPU), so it always runs under plain ctest.
+    add_executable(rt_instance_cull_test test/rt_instance_cull_test.cc)
+    target_link_libraries(rt_instance_cull_test PRIVATE rx::render rx::core)
+    add_test(NAME rt_instance_cull_test COMMAND rt_instance_cull_test)
 
-  # RCGI leak/occlusion hardening helpers: interior-volume classification and the
-  # probe-relocation offset packing round trip (header-only, mirrors the shader).
-  add_executable(rcgi_interior_test test/rcgi_interior_test.cc)
-  target_include_directories(rcgi_interior_test PRIVATE
-    ${CMAKE_CURRENT_SOURCE_DIR}/engine
-    ${CMAKE_CURRENT_SOURCE_DIR}/third_party/equilibrium)
-  target_link_libraries(rcgi_interior_test PRIVATE rx::core)
-  add_test(NAME rcgi_interior_test COMMAND rcgi_interior_test)
+    # RCGI leak/occlusion hardening helpers: interior-volume classification and the
+    # probe-relocation offset packing round trip (header-only, mirrors the shader).
+    add_executable(rcgi_interior_test test/rcgi_interior_test.cc)
+    target_link_libraries(rcgi_interior_test PRIVATE rx::render rx::core)
+    add_test(NAME rcgi_interior_test COMMAND rcgi_interior_test)
 
-  add_executable(rcgi_history_test test/rcgi_history_test.cc)
-  target_include_directories(rcgi_history_test PRIVATE
-    ${CMAKE_CURRENT_SOURCE_DIR}/engine
-    ${CMAKE_CURRENT_SOURCE_DIR}/third_party/equilibrium)
-  target_link_libraries(rcgi_history_test PRIVATE rx::core)
-  add_test(NAME rcgi_history_test COMMAND rcgi_history_test)
+    add_executable(rcgi_history_test test/rcgi_history_test.cc)
+    target_link_libraries(rcgi_history_test PRIVATE rx::render rx::core)
+    add_test(NAME rcgi_history_test COMMAND rcgi_history_test)
 
-  # Async-TLAS slot validity bookkeeping: build/read slot selection, unbuilt-slot
-  # fallback, and BLAS-revision invalidation. Header-only pure logic (no GPU).
-  add_executable(rt_slot_tracker_test test/rt_slot_tracker_test.cc)
-  target_include_directories(rt_slot_tracker_test PRIVATE
-    ${CMAKE_CURRENT_SOURCE_DIR}/engine
-    ${CMAKE_CURRENT_SOURCE_DIR}/third_party/equilibrium)
-  target_link_libraries(rt_slot_tracker_test PRIVATE rx::core)
-  add_test(NAME rt_slot_tracker_test COMMAND rt_slot_tracker_test)
+    # Async-TLAS slot validity bookkeeping: build/read slot selection, unbuilt-slot
+    # fallback, and BLAS-revision invalidation. Header-only pure logic (no GPU).
+    add_executable(rt_slot_tracker_test test/rt_slot_tracker_test.cc)
+    target_link_libraries(rt_slot_tracker_test PRIVATE rx::render rx::core)
+    add_test(NAME rt_slot_tracker_test COMMAND rt_slot_tracker_test)
+  endif()
 
 # CPU-side memory infrastructure test (tracker/arena/chunk pool/small vector/
 # config). rx_enable_mimalloc gives it the tracked new/delete override so the
@@ -986,10 +951,7 @@ endif()
 # so plain `ctest` passes and a real GPU run under vkrun proves the pixel path.
 if(RX_BUILD_TESTS AND (RX_RHI_VULKAN OR RX_RHI_D3D12))
   add_executable(adaptive_water_test test/adaptive_water_test.cc)
-  target_include_directories(adaptive_water_test PRIVATE
-    ${CMAKE_CURRENT_SOURCE_DIR}/engine
-    ${CMAKE_CURRENT_SOURCE_DIR}/third_party/equilibrium)
-  target_link_libraries(adaptive_water_test PRIVATE rx::core)
+  target_link_libraries(adaptive_water_test PRIVATE rx::render rx::core)
   add_test(NAME adaptive_water_test COMMAND adaptive_water_test)
 
   # Texture-space decal baking: bake a stamp into a receiver's tile, read the

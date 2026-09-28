@@ -3,6 +3,7 @@
 
 #include "base/containers/vector.h"
 #include "base/strings/xstring.h"
+#include "core/export.h"
 #include "core/types.h"
 
 namespace rx::rpc {
@@ -12,7 +13,7 @@ namespace rx::rpc {
 // what it expects and pulls typed values out with the as_* accessors. The value
 // holds exactly one of a small closed set of types (no nested containers), which
 // keeps the wire codec trivial and the decode path easy to bound.
-class RpcValue {
+class RX_RPC_EXPORT RpcValue {
  public:
   enum class Type : u8 { kNull, kBool, kInt, kFloat, kString, kBlob };
 

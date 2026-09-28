@@ -2,11 +2,11 @@
 #define RX_INVENTORY_ITEM_CATALOG_H_
 
 #include "asset/asset_id.h"
+#include "asset/shape_desc.h"
 #include "base/containers/unordered_map.h"
 #include "base/memory/unique_pointer.h"
 #include "core/types.h"
 #include "inventory/export.h"
-#include "physics/shape_desc.h"
 
 namespace rx::inventory {
 
@@ -26,7 +26,7 @@ constexpr ItemDefId kInvalidItemDef = 0;
 struct ItemDef {
   u64 name_hash = 0;          // game string hash (display / debug / identity)
   asset::AssetId world_mesh;  // renderable attached when dropped; 0 => game attaches visuals
-  physics::ShapeDesc shape;   // collision shape for the dropped rigid body
+  asset::ShapeDesc shape;   // collision shape for the dropped rigid body
   f32 mass = 1.0f;            // kg, for the dropped dynamic body
   f32 friction = 0.5f;
   f32 restitution = 0.0f;

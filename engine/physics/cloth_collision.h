@@ -3,6 +3,7 @@
 
 #include <base/containers/vector.h>
 
+#include "core/export.h"
 #include "core/math.h"
 #include "core/types.h"
 
@@ -23,9 +24,9 @@ struct ClothTopology {
 // Validates a welded, consistently indexed triangle mesh and builds the static
 // topology used by the runtime collision pass. Open and closed meshes and
 // disconnected panels are accepted; non-manifold and degenerate input is not.
-bool BuildClothTopology(const Vec3* positions, u32 vertex_count,
-                        const u32* indices, u32 index_count,
-                        ClothTopology* out);
+RX_PHYSICS_EXPORT bool BuildClothTopology(const Vec3* positions, u32 vertex_count,
+                                          const u32* indices, u32 index_count,
+                                          ClothTopology* out);
 
 struct ClothSelfCollisionConfig {
   f32 distance = 0;
@@ -56,12 +57,12 @@ struct ClothSelfCollisionScratch {
 // Applies velocity corrections for contacts in the predicted state. Jolt then
 // integrates those velocities and solves its native structural constraints.
 // Returns the total number of projected vertex/triangle and edge/edge contacts.
-u32 SolveClothSelfCollision(const ClothTopology& topology,
-                            const ClothSelfCollisionConfig& config,
-                            const base::Vector<Vec3>& positions,
-                            base::Vector<Vec3>* velocities,
-                            const base::Vector<f32>& inverse_masses, f32 dt,
-                            ClothSelfCollisionScratch* scratch);
+RX_PHYSICS_EXPORT u32 SolveClothSelfCollision(const ClothTopology& topology,
+                                              const ClothSelfCollisionConfig& config,
+                                              const base::Vector<Vec3>& positions,
+                                              base::Vector<Vec3>* velocities,
+                                              const base::Vector<f32>& inverse_masses, f32 dt,
+                                              ClothSelfCollisionScratch* scratch);
 
 }  // namespace rx::physics::detail
 

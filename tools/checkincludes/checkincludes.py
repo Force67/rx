@@ -26,7 +26,7 @@ ENTITY_WORLD = {"ecs", "scene", "script", "world", "edit", "authoring", "app"}
 # Optional modules a game opts into (plugins/ after the move).
 PLUGINS = {"character", "combat", "inventory", "inventory_world", "locomotion",
            "placement", "placement_gpu", "terrain", "nav", "nav_viz", "net_viz",
-           "weather"}
+           "replication", "weather"}
 # Headers only the editor and tools may use; a shipping game never links them.
 EDITOR_ONLY = {"engine/edit/hierarchy.h", "engine/edit/selection.h",
                "engine/edit/undo.h", "engine/world/world_bake.h"}
@@ -88,9 +88,10 @@ class Graph:
     """Maps every rx source and header to the targets it belongs to.
 
     A source belongs to the targets that compile it, libraries first (a test
-    that compiles an engine .cc does not own it). A header belongs to the
-    library compiling its .cc twin, otherwise to the closest target whose
-    directory contains it.
+    that compiles an engine .cc does not own it). A header belongs to whatever
+    compiles its .cc twin, by the same rule; otherwise to the module named
+    after the closest directory holding targets, or to all of that directory's
+    targets when none is.
     """
     compiled = {}
     for name, t in self.targets.items():
@@ -115,16 +116,14 @@ class Graph:
         stem = os.path.splitext(path)[0]
         twins = set()
         for ext in (".cc", ".cpp", ".c"):
-          twins |= compiled.get(stem + ext, set()) & self.libraries
+          twins |= compiled.get(stem + ext, set())
         if twins:
-          owners[path] = twins
+          owners[path] = (twins & self.libraries) or twins
           continue
         d = dirpath
         while d != self.root:
           names = by_dir.get(d)
           if names:
-            libs = names & self.libraries
-            names = libs or names
             named = {n for n in names if n == "rx_" + os.path.basename(d)}
             owners[path] = named or names
             break
@@ -148,46 +147,56 @@ class Graph:
 def check(graph):
   rel = lambda p: os.path.relpath(p, graph.root)
   violations = {}  # key -> first path:line
-  files_of = {}
-  for path, names in graph.owners.items():
-    if path.endswith(SOURCE_EXTS):
-      for n in names:
-        files_of.setdefault(n, set()).add(path)
-  for target, files in sorted(files_of.items()):
-    visible = graph.visible(target)
-    mod = module_of(target) if target in graph.libraries else None
-    for path in sorted(files):
-      if not os.path.isfile(path):
+  # The layering rules bind engine modules. An app's own library (the viewer's
+  # scene authoring) answers only to the link check, like the app.
+  engine_dir = os.path.join(graph.root, "engine") + os.sep
+  def module_rules_of(target):
+    if (target in graph.libraries and
+        (graph.targets[target]["source_dir"] + os.sep).startswith(engine_dir)):
+      return module_of(target)
+    return None
+  visible_of = {t: graph.visible(t) for t in graph.targets}
+  for path, owners in sorted(graph.owners.items()):
+    if not path.endswith(SOURCE_EXTS) or not os.path.isfile(path):
+      continue
+    # A header shared by several targets (no .cc twin) may include what any
+    # of them can see.
+    visible = set().union(*(visible_of[o] for o in owners))
+    mods = {module_rules_of(o) for o in owners} - {None}
+    with open(path, errors="replace") as f:
+      lines = f.readlines()
+    for lineno, line in enumerate(lines, 1):
+      m = INCLUDE.match(line)
+      if not m:
         continue
-      with open(path, errors="replace") as f:
-        lines = f.readlines()
-      for lineno, line in enumerate(lines, 1):
-        m = INCLUDE.match(line)
-        if not m:
-          continue
-        dep = graph.resolve(target, path, m.group(1))
-        if dep is None or dep.startswith(os.path.join(graph.root, "third_party")):
-          continue
-        dep_owners = graph.owners.get(dep)
-        if not dep_owners or target in dep_owners:
-          continue
-        dep_mods = {module_of(o) for o in dep_owners if o in graph.libraries}
-        found = []
-        if not dep_owners & visible:
-          found.append(("undeclared", "%s does not link %s" % (
-              target, " or ".join(sorted(dep_owners)))))
+      dep = None
+      for o in sorted(owners):
+        dep = graph.resolve(o, path, m.group(1))
+        if dep:
+          break
+      if dep is None or dep.startswith(os.path.join(graph.root, "third_party")):
+        continue
+      dep_owners = graph.owners.get(dep)
+      if not dep_owners or owners & dep_owners:
+        continue
+      dep_mods = {module_of(o) for o in dep_owners if o in graph.libraries} - {None}
+      found = []
+      if not dep_owners & visible:
+        found.append(("undeclared", "%s does not link %s" % (
+            " or ".join(sorted(owners)), " or ".join(sorted(dep_owners)))))
+      for mod in sorted(mods):
         if mod in ENTITY_FREE and dep_mods & ENTITY_WORLD:
           found.append(("entity-free", "%s may not know the entity world" % mod))
-        if mod is not None and "app" in dep_mods:
+        if "app" in dep_mods:
           found.append(("host", "only apps may depend on the host"))
-        if mod is not None and rel(dep) in EDITOR_ONLY:
+        if rel(dep) in EDITOR_ONLY:
           found.append(("editor-only", "a library may not use editor-only code"))
-        if mod is not None and mod not in PLUGINS and dep_mods & PLUGINS:
+        if mod not in PLUGINS and dep_mods & PLUGINS:
           found.append(("plugin", "engine module %s may not depend on a plugin" % mod))
-        for rule, why in found:
-          key = "%s %s %s" % (rule, rel(path), rel(dep))
-          violations.setdefault(key, "%s:%d: %s: includes %s (%s)" % (
-              rel(path), lineno, rule, rel(dep), why))
+      for rule, why in found:
+        key = "%s %s %s" % (rule, rel(path), rel(dep))
+        violations.setdefault(key, "%s:%d: %s: includes %s (%s)" % (
+            rel(path), lineno, rule, rel(dep), why))
   return violations
 
 

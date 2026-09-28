@@ -7,7 +7,6 @@ set(RX_RUNTIME_SOURCES
   camera_input.cc
   viewer_input.cc
   demo_scenes.cc
-  scene_authoring.cc
   scene_validate.cc
   material_palette.cc
   demo_grass.cc
@@ -48,6 +47,7 @@ set(RX_RUNTIME_MODULES
   rx::anim
   rx::locomotion
   rx::net
+  rx::replication
   rx::net_viz
   rx::nav
   rx::nav_viz
@@ -113,7 +113,17 @@ if(NOT RX_BUILD_ID)
   endif()
 endif()
 
+# The .rxscene authoring passes: viewer policy rather than an engine module, but
+# a library of their own so scene_authoring_test links the same code the viewer
+# runs.
+add_library(viewer_scene_authoring STATIC scene_authoring.cc)
+target_include_directories(viewer_scene_authoring PUBLIC ${CMAKE_CURRENT_SOURCE_DIR})
+target_link_libraries(viewer_scene_authoring PUBLIC
+  rx::edit rx::scene rx::ecs rx::asset rx::render rx::core)
+rx_set_warnings(viewer_scene_authoring)
+
 add_executable(rx main.cc ${RX_RUNTIME_SOURCES})
+target_link_libraries(rx PRIVATE viewer_scene_authoring)
 rx_stage_content(rx LOOSE_ENGINE_CONFIG)
 target_link_libraries(rx PRIVATE ${RX_RUNTIME_MODULES})
 # Radiance .hdr decode for imported UsdLux dome environment maps (viewer.cc).

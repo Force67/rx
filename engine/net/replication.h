@@ -22,7 +22,7 @@ struct NetworkId {
 
 // Server-side id source. Ids are never reused within a session; 0 means
 // "not replicated".
-RX_NET_EXPORT NetworkId AllocateNetworkId();
+RX_REPLICATION_EXPORT NetworkId AllocateNetworkId();
 
 // Client-side smoothing for remotely simulated transforms. Snapshots arrive
 // at a fraction of the render rate, so the visible transform blends from the
@@ -50,7 +50,7 @@ struct ReplicatedGait {
 // entity's Transform. Runs on clients in the pre-render stage. Where an
 // entity also carries ReplicatedGait, fills it from the planar velocity of
 // the active interpolation segment so the game can animate walking actors.
-RX_NET_EXPORT void TickInterpolation(ecs::World& world, f32 dt);
+RX_REPLICATION_EXPORT void TickInterpolation(ecs::World& world, f32 dt);
 
 // The game's per-entity payload seam. The engine replicates transform + mesh;
 // everything else a game addresses entities by travels in the opaque
@@ -81,7 +81,7 @@ struct InterestSet {
 // walks entities carrying NetworkId + Transform out of the archetype storage
 // and captures their EntityState records once, so per-peer work is pure
 // delta bookkeeping.
-class RX_NET_EXPORT WorldCapture {
+class RX_REPLICATION_EXPORT WorldCapture {
  public:
   void Capture(ecs::World& world, u64 server_tick, const ReplicationHooks& hooks);
 
@@ -99,7 +99,7 @@ class RX_NET_EXPORT WorldCapture {
 // reconcile despawns it may have missed on the unreliable channel. An entity
 // that leaves the stream's interest set despawns on that client just like a
 // destroyed one, freeing the client's memory and this stream's cache.
-class RX_NET_EXPORT PeerStream {
+class RX_REPLICATION_EXPORT PeerStream {
  public:
   // Fills `out` from the capture. `interest` limits the stream to the ids it
   // contains; null replicates everything (interest management off). Returns
@@ -124,7 +124,7 @@ class RX_NET_EXPORT PeerStream {
 // Client side: maps net ids onto local entities, spawning and despawning as
 // snapshots dictate, and feeds InterpolatedTransform instead of writing
 // transforms directly.
-class RX_NET_EXPORT SnapshotApplier {
+class RX_REPLICATION_EXPORT SnapshotApplier {
  public:
   // Applies a decoded snapshot. `lerp_duration` is the expected gap between
   // snapshots. Returns false when the snapshot is stale (out-of-order

@@ -5,6 +5,7 @@
 #include <base/containers/vector.h>
 
 #include "base/containers/span.h"
+#include "core/export.h"
 #include "core/math.h"
 #include "core/types.h"
 
@@ -24,7 +25,7 @@ namespace rx::render {
 // safe: on a large camera jump every group falls back to accept-all and the
 // sweep re-converges within a second. Realtime-only: path tracer / reference
 // modes keep the full instance set.
-class RtInstanceCuller {
+class RX_RENDER_EXPORT RtInstanceCuller {
  public:
   // Frames a full per-group sweep is spread across (~1 s at 60 fps).
   static constexpr u32 kSweepFrames = 60;

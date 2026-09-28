@@ -418,8 +418,8 @@ void GymDemo::BuildContent() {
     const Quat q = QuatFromAxisAngle({1, 0, 0}, -ang);  // tilt up toward -Z
     const Vec3 center{x, ::sinf(ang) * run * 0.5f + 0.05f, z - ::cosf(ang) * run * 0.5f};
     AddRotatedBox(st, center, {w * 0.5f, thick * 0.5f, run * 0.5f}, q, 1.0f);
-    physics::ShapeDesc box;
-    box.kind = physics::ShapeDesc::Kind::kBox;
+    asset::ShapeDesc box;
+    box.kind = asset::ShapeDesc::Kind::kBox;
     box.half_extents = {w * 0.5f, thick * 0.5f, run * 0.5f};
     const f32 rot[4] = {q.x, q.y, q.z, q.w};
     phys.AddStaticShape(box, center, rot, 1.0f);
@@ -500,7 +500,7 @@ void GymDemo::BuildContent() {
     inventory::ItemDef def;
     def.name_hash = asset::MakeAssetId("gym.crate").hash;
     def.world_mesh = crate.mesh.id;
-    def.shape.kind = physics::ShapeDesc::Kind::kBox;
+    def.shape.kind = asset::ShapeDesc::Kind::kBox;
     def.shape.half_extents = {0.125f, 0.125f, 0.125f};
     def.mass = 6.0f;
     def.friction = 0.6f;

@@ -1,18 +1,19 @@
-#ifndef RX_PHYSICS_SHAPE_DESC_H_
-#define RX_PHYSICS_SHAPE_DESC_H_
+#ifndef RX_ASSET_SHAPE_DESC_H_
+#define RX_ASSET_SHAPE_DESC_H_
 
 // Engine-neutral collision shape description: a tree of primitives,
 // convex hulls and placed children that PhysicsWorld lowers into Jolt
 // shapes. Producers include the Havok .hkx decoder (e.g. authored game
 // collision/ragdolls) and, eventually, NIF bhk blocks; nothing in here is
-// format-specific.
+// format-specific. Plain data with no physics behind it, so it lives with the
+// other asset formats: an item catalog can carry one without linking Jolt.
 
 
 #include "base/containers/vector.h"
 #include "core/math.h"
 #include "core/types.h"
 
-namespace rx::physics {
+namespace rx::asset {
 
 struct ShapeDesc {
   enum class Kind { kSphere, kCapsule, kBox, kConvexHull, kCompound, kPlaced, kInvalid };
@@ -26,6 +27,6 @@ struct ShapeDesc {
   f32 transform[16] = {};
 };
 
-}  // namespace rx::physics
+}  // namespace rx::asset
 
-#endif  // RX_PHYSICS_SHAPE_DESC_H_
+#endif  // RX_ASSET_SHAPE_DESC_H_

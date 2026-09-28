@@ -55,7 +55,7 @@ rxe/                  the engine (Chromium: content/)
     ugui/             libultragui integration + the splash plate
     imgui/            imgui renderer + theme
   storage/            vfs, .rxp archives, the install layout mounts
-  asset/              asset database and the runtime formats: mesh, texture, material, skeleton
+  asset/              asset database and the runtime formats: mesh, texture, material, skeleton, collision shape
   importers/
     gltf/  usd/  materialx/  blend/
   audio/              device, mixer, codecs, spatialization, synth voices
@@ -212,8 +212,8 @@ Paths on the right are under `rxe/` unless they start with `plugins/` or `apps/`
 | `audio/thunder_synth` | `plugins/weather` |
 | `physics/aircraft`, `boat`, `boat_profiles`, `vehicle_profiles`, `kite` | `plugins/vehicles` |
 | rest of `physics` | `physics` |
-| `net/session`, `protocol`, `wire.h`, `rpc_channel`, `znet_util.h` | `net/transport` |
-| `net/bubble`, `replication` | `plugins/replication/replication` |
+| `net/protocol`, `wire.h`, `rpc_channel`, `znet_util.h` (target `rx_net`) | `net/transport` |
+| `net/bubble`, `replication`, `session` (target `rx_replication`) | `plugins/replication/replication` |
 | `net/bubble_debug` | `plugins/replication/replication_debug` |
 | `http` | `net/http` |
 | `rpc` | `net/rpc` |
@@ -348,9 +348,11 @@ once per process has to live in exactly one DSO:
 | where | problem | fix |
 |---|---|---|
 | `engine/core` | grab-bag | split, see Foundation |
-| `nav/nav_debug.h` | the navmesh includes `render/core/renderer.h` | `plugins/nav/nav_debug` module |
-| `net/bubble_debug` | the net layer includes the renderer and Vulkan interop | `replication_debug` module |
-| `weather/weather.h` | includes render atmosphere internals | the types it needs become public render headers; weather is a plugin that depends on render |
+| `nav/nav_debug` | debug drawing needs the renderer | already its own target (`rx_nav_viz`); becomes `plugins/nav/nav_debug` |
+| `net/bubble_debug` | debug drawing needs the renderer and Vulkan interop | already its own target (`rx_net_viz`); becomes `replication_debug` |
+| `net/session`, `replication`, `bubble` | the net module knew the entity world | done (2a): split into `rx_net` and `rx_replication` |
+| `physics/shape_desc.h` | inventory, physics-free by design, used it without linking physics | done (2a): plain data, moved to `asset/shape_desc.h` |
+| `weather/weather.h` | used render's value headers without linking render | done (2a): links `rx::render`. Splitting render's value types into a light module waits for phase 7. |
 | `audio/*_synth`, `vehicle_audio` | game audio inside the audio module | move to plugins |
 | `physics/aircraft` etc. | vehicles inside the physics module | `plugins/vehicles` |
 | `asset/usd_loader` etc. | every asset user links tinyusdz | `importers/` |
@@ -373,6 +375,9 @@ and after.
    sit in `tools/checkincludes/baseline.txt`; the ctest fails on a new one and
    on a baseline line that was fixed but not deleted. Done.
 2. **Fix the violations** in the table above, without moving directories.
+   2a empties the lint baseline: the `net`/`replication` split, `ShapeDesc`
+   into `asset`, weather linking render, and CPU tests linking the module they
+   test instead of compiling its sources in. 2b takes the rest of the table.
 3. **Foundation.** Split `core` into `foundation/*`, `ui/window`, `ui/events`.
 4. **Move the tree** one top-level folder per commit: `git mv` plus a scripted
    include rewrite. Tests move next to their code. The lint becomes an error.

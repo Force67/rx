@@ -993,9 +993,9 @@ JPH::Quat QuatFromColumns(const f32* t) {
 // Lowers a ShapeDesc tree into a Jolt shape, scaling all metrics into
 // meters. Returns null on unconvertible input (empty hulls, degenerate
 // primitives), which callers surface as a failed body.
-JPH::Ref<JPH::Shape> BuildShape(const rx::physics::ShapeDesc& desc, f32 scale,
+JPH::Ref<JPH::Shape> BuildShape(const rx::asset::ShapeDesc& desc, f32 scale,
                                 const JPH::PhysicsMaterial* material = nullptr) {
-  using Kind = rx::physics::ShapeDesc::Kind;
+  using Kind = rx::asset::ShapeDesc::Kind;
   switch (desc.kind) {
     case Kind::kSphere: {
       if (desc.radius * scale < 1e-4f) return nullptr;
@@ -1077,7 +1077,7 @@ JPH::Ref<JPH::Shape> BuildShape(const rx::physics::ShapeDesc& desc, f32 scale,
 
 }  // namespace
 
-BodyId PhysicsWorld::AddStaticShape(const ShapeDesc& desc, const Vec3& position,
+BodyId PhysicsWorld::AddStaticShape(const asset::ShapeDesc& desc, const Vec3& position,
                                     const f32 rotation[4], f32 scale, SurfaceType surface) {
   if (!impl_) return 0;
   JPH::Ref<JPH::Shape> shape = BuildShape(desc, scale, impl_->material_for(surface));
@@ -1111,7 +1111,7 @@ void PhysicsWorld::ReleaseBodyFilterGroup(i32 group) {
   impl_->filter_groups[group] = nullptr;
 }
 
-BodyId PhysicsWorld::AddDynamicShape(const ShapeDesc& desc, const Vec3& position,
+BodyId PhysicsWorld::AddDynamicShape(const asset::ShapeDesc& desc, const Vec3& position,
                                      const f32 rotation[4], f32 scale, f32 mass, f32 friction,
                                      f32 restitution, i32 filter_group, u32 subgroup) {
   if (!impl_) return 0;
