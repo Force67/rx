@@ -5,6 +5,7 @@
 #include "base/containers/vector.h"
 #include "base/optional.h"
 #include "base/strings/xstring.h"
+#include "core/export.h"
 #include "core/types.h"
 #include "rpc/rpc_value.h"
 
@@ -20,13 +21,13 @@ struct RpcCall {
 
 // Serializes a call to the little-endian wire form (see rpc_message.cc for the
 // exact byte layout). Always succeeds for in-memory calls under the wire limits.
-base::Vector<u8> EncodeCall(const RpcCall& call);
+RX_RPC_EXPORT base::Vector<u8> EncodeCall(const RpcCall& call);
 
 // Decodes a call from a raw byte buffer that arrived over the network. The input
 // is treated as hostile: every field is bounds-checked, the structural limits
 // are enforced, and any malformed, truncated, oversized, or trailing-garbage
 // input yields base::nullopt rather than a partial or out-of-range result.
-base::Optional<RpcCall> DecodeCall(const u8* data, size_t size);
+RX_RPC_EXPORT base::Optional<RpcCall> DecodeCall(const u8* data, size_t size);
 
 }  // namespace rx::rpc
 

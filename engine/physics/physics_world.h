@@ -3,6 +3,7 @@
 
 
 #include "asset/mesh.h"
+#include "asset/shape_desc.h"
 #include "base/functional/function.h"
 #include "base/memory/move.h"
 #include "base/memory/unique_pointer.h"
@@ -10,7 +11,6 @@
 #include "core/math.h"
 #include "core/types.h"
 #include "physics/cloth.h"
-#include "physics/shape_desc.h"
 
 namespace rx::physics {
 
@@ -161,12 +161,12 @@ class RX_PHYSICS_EXPORT PhysicsWorld {
   // the content's unit->metre scale, e.g. a game-unit scale). Dynamic bodies
   // take an explicit
   // mass in kg; 0 falls back to Jolt's density-derived mass.
-  BodyId AddStaticShape(const ShapeDesc& desc, const Vec3& position, const f32 rotation[4],
+  BodyId AddStaticShape(const asset::ShapeDesc& desc, const Vec3& position, const f32 rotation[4],
                         f32 scale, SurfaceType surface = SurfaceType::kAsphalt);
   // filter_group/subgroup: bodies sharing a filter group collide unless the
   // pair of subgroups was disabled - how a ragdoll's jointed limbs overlap
   // at the hips/shoulders without fighting their constraints.
-  BodyId AddDynamicShape(const ShapeDesc& desc, const Vec3& position, const f32 rotation[4],
+  BodyId AddDynamicShape(const asset::ShapeDesc& desc, const Vec3& position, const f32 rotation[4],
                          f32 scale, f32 mass, f32 friction, f32 restitution,
                          i32 filter_group = -1, u32 subgroup = 0);
   i32 CreateBodyFilterGroup(u32 subgroup_count);

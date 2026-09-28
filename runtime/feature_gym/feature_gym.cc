@@ -28,7 +28,7 @@
 #include "physics/aircraft.h"
 #include "physics/boat.h"
 #include "physics/boat_profiles.h"
-#include "physics/shape_desc.h"
+#include "asset/shape_desc.h"
 #include "physics/water_waves.h"
 #include "render/geometry/hair_groom.h"
 #include "render/geometry/imposters.h"
@@ -1706,13 +1706,13 @@ void FeatureGym::Impl::CreatePhysics() {
     if (body) ctx.physics_entities->push_back({body, entity});
   }
 
-  physics::ShapeDesc compound;
-  compound.kind = physics::ShapeDesc::Kind::kCompound;
-  physics::ShapeDesc compound_box;
-  compound_box.kind = physics::ShapeDesc::Kind::kBox;
+  asset::ShapeDesc compound;
+  compound.kind = asset::ShapeDesc::Kind::kCompound;
+  asset::ShapeDesc compound_box;
+  compound_box.kind = asset::ShapeDesc::Kind::kBox;
   compound_box.half_extents = {0.8f, 0.25f, 0.35f};
-  physics::ShapeDesc compound_sphere;
-  compound_sphere.kind = physics::ShapeDesc::Kind::kSphere;
+  asset::ShapeDesc compound_sphere;
+  compound_sphere.kind = asset::ShapeDesc::Kind::kSphere;
   compound_sphere.radius = 0.42f;
   compound.children.push_back(compound_box);
   compound.children.push_back(compound_sphere);

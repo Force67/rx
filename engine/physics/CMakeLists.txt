@@ -23,6 +23,7 @@ else()
   # a no-Jolt build still links every consumer (e.g. demo_drive.cc).
   rx_add_module(physics
     physics_world_stub.cc
+    cloth_collision.cc
     vehicle_profiles.cc
     boat.cc
     boat_profiles.cc

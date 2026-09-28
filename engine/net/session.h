@@ -64,7 +64,7 @@ struct NetStats {
 // The server simulates, clients render what snapshots tell them. One process
 // can run both (listen server) since sessions only touch the world through
 // the ECS.
-class RX_NET_EXPORT Session {
+class RX_REPLICATION_EXPORT Session {
  public:
   virtual ~Session() = default;
 
@@ -72,7 +72,7 @@ class RX_NET_EXPORT Session {
   virtual void Tick(ecs::World& world, f32 dt) = 0;
 };
 
-class RX_NET_EXPORT ServerSession : public Session {
+class RX_REPLICATION_EXPORT ServerSession : public Session {
  public:
   explicit ServerSession(SessionConfig config);
   ~ServerSession() override;
@@ -187,7 +187,7 @@ class RX_NET_EXPORT ServerSession : public Session {
   bool started_ = false;
 };
 
-class RX_NET_EXPORT ClientSession : public Session {
+class RX_REPLICATION_EXPORT ClientSession : public Session {
  public:
   explicit ClientSession(SessionConfig config);
   ~ClientSession() override;

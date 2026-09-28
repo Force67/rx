@@ -3,7 +3,7 @@
 #include <math.h>
 
 #include "core/scalar.h"
-#include "physics/shape_desc.h"
+#include "asset/shape_desc.h"
 
 namespace rx::physics {
 
@@ -70,8 +70,8 @@ Aircraft::Aircraft(PhysicsWorld& world, const AircraftDesc& desc, const Vec3& po
   // Fuselage collision box, spawned yawed about +Y. The box carries only the
   // fuselage (not the wings), so Jolt's derived inertia is small; the aero
   // model supplies its own rotational damping to compensate.
-  ShapeDesc box;
-  box.kind = ShapeDesc::Kind::kBox;
+  asset::ShapeDesc box;
+  box.kind = asset::ShapeDesc::Kind::kBox;
   box.half_extents = desc_.fuselage_half_extent;
 
   const Quat q = QuatFromAxisAngle(Vec3{0, 1, 0}, yaw_radians);

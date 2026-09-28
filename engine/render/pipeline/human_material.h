@@ -2,6 +2,7 @@
 #define RX_RENDER_HUMAN_MATERIAL_H_
 
 #include "asset/material.h"
+#include "core/export.h"
 #include "core/types.h"
 
 namespace rx::render {
@@ -77,11 +78,11 @@ struct HumanSurfaceParameters {
 
 // The neutral set: identical output to the stock Lambert + GGX path. Anything
 // that breaks this is a regression (human_brdf_test.cc asserts it).
-HumanSurfaceParameters HumanNeutral();
+RX_RENDER_EXPORT HumanSurfaceParameters HumanNeutral();
 
 // Fitted starting points per anatomical region. Each is a hypothesis to be
 // re-fitted against project reference, and each one's rationale is in the .cc.
-HumanSurfaceParameters HumanPreset(HumanRegion region);
+RX_RENDER_EXPORT HumanSurfaceParameters HumanPreset(HumanRegion region);
 
 // Quality tiers. Hero is the full model; Standard drops the second GGX lobe and
 // halves transport cost; Distant collapses to the neutral model with prebaked
@@ -100,11 +101,11 @@ struct HumanTierCaps {
   bool residual = true;
   bool full_sss = true;  // false = half-res / simplified diffusion
 };
-HumanTierCaps HumanTierApply(HumanTier tier, HumanSurfaceParameters& params);
+RX_RENDER_EXPORT HumanTierCaps HumanTierApply(HumanTier tier, HumanSurfaceParameters& params);
 
 // Screen-height (in pixels) thresholds the renderer uses to pick a tier for a
 // character. Hysteresis is the caller's job; these are the nominal edges.
-HumanTier HumanTierForScreenHeight(f32 pixels);
+RX_RENDER_EXPORT HumanTier HumanTierForScreenHeight(f32 pixels);
 
 // Safe authoring ranges. The lookdev UI clamps to these and
 // docs/CHARACTER_RENDERING.md publishes them; outside them the model stops
@@ -118,7 +119,7 @@ struct HumanRange {
 // [0,1]: the callers drive sliders and a fitting search off this, and silently
 // clamping mean_free_path to [0,1] would hand back numbers that look fine and
 // are wrong by four orders of magnitude.
-HumanRange HumanSafeRange(const char* field);
+RX_RENDER_EXPORT HumanRange HumanSafeRange(const char* field);
 
 // Resolves an authored asset material into the GPU parameter block. It is a
 // straight field copy and deliberately does NOT fold in the region preset: the
@@ -127,12 +128,12 @@ HumanRange HumanSafeRange(const char* field);
 // asset::Material::HumanParams). A preset is a starting point an author applies
 // through the lookdev tool, which writes the result back with HumanStore; it is
 // not something the upload path substitutes behind their back.
-HumanSurfaceParameters HumanResolve(const asset::Material::HumanParams& authored);
+RX_RENDER_EXPORT HumanSurfaceParameters HumanResolve(const asset::Material::HumanParams& authored);
 
 // The inverse: writes a resolved parameter block back onto an authored material
 // (the look-dev tool edits the resolved form and has to hand it back). Texture
 // references on the authored side are left alone.
-void HumanStore(const HumanSurfaceParameters& params, asset::Material::HumanParams& authored);
+RX_RENDER_EXPORT void HumanStore(const HumanSurfaceParameters& params, asset::Material::HumanParams& authored);
 
 // CPU mirror of human_brdf.hlsli
 // Used by the neutral-parity test and by the offline fitting experiments. Keep
@@ -147,22 +148,22 @@ struct HumanBrdfSample {
 // n/l/v are unit vectors in the same space; nd/ns are the diffuse and specular
 // shading normals (pass n for both when they are not split). solid_angle in
 // steradians (0 = punctual). thickness in metres (0 = opaque).
-HumanBrdfSample HumanEvaluateCpu(const HumanSurfaceParameters& p, const f32 base_color[3],
-                                 f32 roughness, const f32 f0[3], const f32 geometric_n[3],
-                                 const f32 nd[3], const f32 ns[3], const f32 v[3],
-                                 const f32 l[3], f32 solid_angle, f32 thickness);
+RX_RENDER_EXPORT HumanBrdfSample HumanEvaluateCpu(const HumanSurfaceParameters& p, const f32 base_color[3],
+                                                  f32 roughness, const f32 f0[3], const f32 geometric_n[3],
+                                                  const f32 nd[3], const f32 ns[3], const f32 v[3],
+                                                  const f32 l[3], f32 solid_angle, f32 thickness);
 
 // The stock Lambert + GGX the neutral set must reproduce.
-HumanBrdfSample StockBrdfCpu(const f32 base_color[3], f32 roughness, const f32 f0[3],
-                             const f32 n[3], const f32 v[3], const f32 l[3]);
+RX_RENDER_EXPORT HumanBrdfSample StockBrdfCpu(const f32 base_color[3], f32 roughness, const f32 f0[3],
+                                              const f32 n[3], const f32 v[3], const f32 l[3]);
 
 // The multiplier HumanEvaluatePreintegrated applies to an LTC diffuse integral
 // to carry the terminator control onto area lights. Mirrors the shader. It is
 // its own entry point because it is the one part of the model that is a RATIO:
 // an unbounded one puts a blown-out ring on every area-lit face, so the bound
 // is a contract the test pins rather than an implementation detail.
-f32 HumanTerminatorMultiplierCpu(const HumanSurfaceParameters& p, const f32 geometric_n[3],
-                                 const f32 nd[3], const f32 rep_dir[3]);
+RX_RENDER_EXPORT f32 HumanTerminatorMultiplierCpu(const HumanSurfaceParameters& p, const f32 geometric_n[3],
+                                                  const f32 nd[3], const f32 rep_dir[3]);
 
 }  // namespace rx::render
 

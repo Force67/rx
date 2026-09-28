@@ -220,8 +220,8 @@ bool BipedRig::Build(physics::PhysicsWorld& physics, const ControllerParameters&
   out->filter_group = group;
 
   auto capsule_y = [](f32 half_len, f32 radius) {
-    physics::ShapeDesc d;
-    d.kind = physics::ShapeDesc::Kind::kCapsule;
+    asset::ShapeDesc d;
+    d.kind = asset::ShapeDesc::Kind::kCapsule;
     d.a = {0, -half_len, 0};
     d.b = {0, +half_len, 0};
     d.radius = radius;
@@ -230,23 +230,23 @@ bool BipedRig::Build(physics::PhysicsWorld& physics, const ControllerParameters&
 
   struct BodySpec {
     BodyPart part;
-    physics::ShapeDesc shape;
+    asset::ShapeDesc shape;
     Vec3 local_origin;
     f32 friction;
   };
 
-  physics::ShapeDesc pelvis_shape;
-  pelvis_shape.kind = physics::ShapeDesc::Kind::kCapsule;  // lateral (local X) axis
+  asset::ShapeDesc pelvis_shape;
+  pelvis_shape.kind = asset::ShapeDesc::Kind::kCapsule;  // lateral (local X) axis
   pelvis_shape.a = {-half_w, 0, 0};
   pelvis_shape.b = {+half_w, 0, 0};
   pelvis_shape.radius = r_pelvis;
 
-  physics::ShapeDesc head_shape;
-  head_shape.kind = physics::ShapeDesc::Kind::kSphere;
+  asset::ShapeDesc head_shape;
+  head_shape.kind = asset::ShapeDesc::Kind::kSphere;
   head_shape.radius = r_head;
 
-  physics::ShapeDesc foot_shape;
-  foot_shape.kind = physics::ShapeDesc::Kind::kBox;
+  asset::ShapeDesc foot_shape;
+  foot_shape.kind = asset::ShapeDesc::Kind::kBox;
   foot_shape.half_extents = {foot_hw, foot_h * 0.5f, foot_len * 0.5f};
 
   const BodySpec specs[kBodyPartCount] = {

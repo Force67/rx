@@ -48,7 +48,7 @@ struct InterestConfig {
 // bubble holds it. A player's own avatar is always owned by its peer. The
 // game decides what ownership gates (interaction rights, simulation
 // islands, update priority) through OwnerOf and the changed-sink.
-class RX_NET_EXPORT InterestMap {
+class RX_REPLICATION_EXPORT InterestMap {
  public:
   void Configure(const InterestConfig& config) { config_ = config; }
 
@@ -107,7 +107,7 @@ class RX_NET_EXPORT InterestMap {
 // A stable debug color for a peer's bubble (golden-angle hue walk, packed
 // 0xRRGGBB). Shared by the visualizer and any HUD/tint consumer so peer N is
 // the same color everywhere.
-RX_NET_EXPORT u32 PeerColor(u32 peer);
+RX_REPLICATION_EXPORT u32 PeerColor(u32 peer);
 
 }  // namespace rx::net
 

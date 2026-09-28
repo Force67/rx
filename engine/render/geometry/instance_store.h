@@ -5,6 +5,7 @@
 
 
 #include "base/containers/span.h"
+#include "core/export.h"
 #include "core/math.h"
 #include "render/rhi/device.h"
 
@@ -20,7 +21,7 @@ struct InstanceGroupHandle {
   explicit operator bool() const { return index != ~0u; }
 };
 
-class InstanceStore {
+class RX_RENDER_EXPORT InstanceStore {
  public:
   struct Group {
     u64 mesh = 0;

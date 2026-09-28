@@ -24,7 +24,7 @@ BodyId PhysicsWorld::AddStaticMeshInstance(u64, const Vec3&, const f32[4], f32, 
   return 0;
 }
 BodyId PhysicsWorld::AddDynamicBox(const Vec3&, const Vec3&, f32, const Vec3&) { return 0; }
-BodyId PhysicsWorld::AddStaticShape(const ShapeDesc&, const Vec3&, const f32[4], f32, SurfaceType) {
+BodyId PhysicsWorld::AddStaticShape(const asset::ShapeDesc&, const Vec3&, const f32[4], f32, SurfaceType) {
   return 0;
 }
 bool PhysicsWorld::SampleWater(const Vec3&, f32*, Vec3*) const { return false; }
@@ -39,7 +39,7 @@ f32 PhysicsWorld::GetBodyMass(BodyId) const { return 0; }
 void PhysicsWorld::SetBodyInertia(BodyId, const Vec3&) {}
 void PhysicsWorld::SetBodyMass(BodyId, f32) {}
 void PhysicsWorld::InstallVehicleFriction(u32) {}
-BodyId PhysicsWorld::AddDynamicShape(const ShapeDesc&, const Vec3&, const f32[4], f32, f32, f32,
+BodyId PhysicsWorld::AddDynamicShape(const asset::ShapeDesc&, const Vec3&, const f32[4], f32, f32, f32,
                                      f32, i32, u32) {
   return 0;
 }
