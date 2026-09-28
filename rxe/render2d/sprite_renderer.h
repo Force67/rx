@@ -126,17 +126,17 @@ class RX_RENDER2D_EXPORT SpriteRenderer {
 
  private:
   struct Texture {
-    render::GpuImage image;
+    gpu::GpuImage image;
     bool valid = false;
   };
   struct FrameSlot {
-    render::GpuBuffer sprites;  // host-visible structured buffer of GpuSprite
-    render::GpuBuffer lights;   // host-visible structured buffer of GpuLight
+    gpu::GpuBuffer sprites;  // host-visible structured buffer of GpuSprite
+    gpu::GpuBuffer lights;   // host-visible structured buffer of GpuLight
     u32 sprite_cap = 0;
     u32 light_cap = 0;
-    render::GpuImage albedo;  // lit path, sized to the render extent
-    render::GpuImage light_target;
-    render::Extent2D lit_extent{};
+    gpu::GpuImage albedo;  // lit path, sized to the render extent
+    gpu::GpuImage light_target;
+    gpu::Extent2D lit_extent{};
   };
   struct QueuedSprite {
     GpuSprite gpu;
@@ -151,18 +151,18 @@ class RX_RENDER2D_EXPORT SpriteRenderer {
   void RecordLit(const render::HdrOverlayContext& ctx, FrameSlot& slot);
   bool EnsureSprites(FrameSlot& slot, u32 count);
   bool EnsureLights(FrameSlot& slot, u32 count);
-  bool EnsureLitTargets(FrameSlot& slot, render::Extent2D extent);
+  bool EnsureLitTargets(FrameSlot& slot, gpu::Extent2D extent);
   u32 UploadSprites(FrameSlot& slot);  // sorts + writes; returns count
-  void DrawSpriteRuns(render::CommandList& cmd, FrameSlot& slot, u32 count);
+  void DrawSpriteRuns(gpu::CommandList& cmd, FrameSlot& slot, u32 count);
 
   render::Renderer* renderer_ = nullptr;
-  render::Device* device_ = nullptr;
+  gpu::Device* device_ = nullptr;
   bool ready_ = false;
 
-  render::PipelineHandle sprite_pipeline_;
-  render::PipelineHandle light_pipeline_;
-  render::PipelineHandle composite_pipeline_;
-  render::SamplerHandle sampler_;
+  gpu::PipelineHandle sprite_pipeline_;
+  gpu::PipelineHandle light_pipeline_;
+  gpu::PipelineHandle composite_pipeline_;
+  gpu::SamplerHandle sampler_;
   SamplingMode sampling_mode_ = SamplingMode::kLinear;
 
   base::Vector<Texture> textures_;  // index 0 unused, 1 = white
@@ -175,7 +175,7 @@ class RX_RENDER2D_EXPORT SpriteRenderer {
   bool clear_scene_ = false;
   Color scene_clear_ = Color::Black();
 
-  FrameSlot slots_[render::Device::kMaxFramesInFlight];
+  FrameSlot slots_[gpu::Device::kMaxFramesInFlight];
 };
 
 }  // namespace rx::render2d

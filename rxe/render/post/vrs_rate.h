@@ -15,27 +15,27 @@ namespace rx::render {
 
 class VrsRatePass {
  public:
-  bool Initialize(Device& device);
-  void Destroy(Device& device);
+  bool Initialize(gpu::Device& device);
+  void Destroy(gpu::Device& device);
   // (Re)creates the rate image for a render resolution. Safe to call every
   // resize; no-ops when the size is unchanged.
-  bool Resize(Device& device, Extent2D render_extent);
+  bool Resize(gpu::Device& device, gpu::Extent2D render_extent);
   bool available() const { return static_cast<bool>(pipeline_) && static_cast<bool>(rate_); }
 
   // Records the rate rebuild from this frame's lit color + motion. The rate
   // image leaves the pass back in kShadingRate for next frame's scene pass.
   void AddToGraph(RenderGraph& graph, ResourceHandle lit, ResourceHandle motion,
-                  Extent2D render_extent, f32 threshold, f32 motion_scale);
+                  gpu::Extent2D render_extent, f32 threshold, f32 motion_scale);
 
   // Attachment for RenderingInfo::shading_rate (always in kShadingRate
   // outside AddToGraph's pass).
-  TextureView rate_view() const { return rate_.view; }
+  gpu::TextureView rate_view() const { return rate_.view; }
 
  private:
-  PipelineHandle pipeline_;
-  GpuImage rate_;
-  SamplerHandle sampler_;
-  Extent2D render_extent_ = {0, 0};
+  gpu::PipelineHandle pipeline_;
+  gpu::GpuImage rate_;
+  gpu::SamplerHandle sampler_;
+  gpu::Extent2D render_extent_ = {0, 0};
   u32 texel_size_ = 16;
   bool allow_coarse_ = false;
 };

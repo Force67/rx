@@ -32,7 +32,7 @@ NVSDK_NGX_PerfQuality_Value QualityFromRatio(u32 render_width, u32 output_width)
 
 class DlssUpscaler final : public Upscaler {
  public:
-  explicit DlssUpscaler(Device& device) : device_(device) {}
+  explicit DlssUpscaler(gpu::Device& device) : device_(device) {}
   ~DlssUpscaler() override { Destroy(); }
 
   bool Initialize(const UpscalerDesc& desc) override {
@@ -72,7 +72,7 @@ class DlssUpscaler final : public Upscaler {
     // Feature creation records into a command buffer; reuse the device's one
     // shot submit, the same way the fsr3 backend primes its shared resources.
     bool created = false;
-    device_.ImmediateSubmit([&](CommandList& cmd) {
+    device_.ImmediateSubmit([&](gpu::CommandList& cmd) {
       NVSDK_NGX_DLSS_Create_Params create{};
       create.Feature.InWidth = desc.render_width;
       create.Feature.InHeight = desc.render_height;
@@ -86,7 +86,7 @@ class DlssUpscaler final : public Upscaler {
                                     NVSDK_NGX_DLSS_Feature_Flags_DepthInverted |
                                     NVSDK_NGX_DLSS_Feature_Flags_AutoExposure;
       NVSDK_NGX_Result cr =
-          NGX_VULKAN_CREATE_DLSS_EXT(GetVkCommandBuffer(cmd), 1, 1, &handle_, params_, &create);
+          NGX_VULKAN_CREATE_DLSS_EXT(gpu::GetVkCommandBuffer(cmd), 1, 1, &handle_, params_, &create);
       created = cr == NVSDK_NGX_Result_Success;
       if (!created) RX_ERROR("dlss: feature creation failed ({:#x})", static_cast<u32>(cr));
     });
@@ -99,7 +99,7 @@ class DlssUpscaler final : public Upscaler {
 
   ResourceHandle AddToGraph(RenderGraph& graph, const UpscalerInputs& inputs) override {
     ResourceHandle output = graph.CreateTexture({.name = "dlss_output",
-                                                 .format = Format::kRGBA16Float,
+                                                 .format = gpu::Format::kRGBA16Float,
                                                  .width = desc_.output_width,
                                                  .height = desc_.output_height});
     graph.AddPass(
@@ -118,18 +118,18 @@ class DlssUpscaler final : public Upscaler {
 
  private:
   void Dispatch(PassContext& ctx, const UpscalerInputs& inputs, ResourceHandle output) {
-    const GpuImage& color = ctx.graph->image(inputs.color);
-    const GpuImage& depth = ctx.graph->image(inputs.depth);
-    const GpuImage& motion = ctx.graph->image(inputs.motion_vectors);
-    const GpuImage& out = ctx.graph->image(output);
+    const gpu::GpuImage& color = ctx.graph->image(inputs.color);
+    const gpu::GpuImage& depth = ctx.graph->image(inputs.depth);
+    const gpu::GpuImage& motion = ctx.graph->image(inputs.motion_vectors);
+    const gpu::GpuImage& out = ctx.graph->image(output);
 
     // depth_export is an R32_SFLOAT color image, so every input uses the color
     // aspect; the graph leaves reads in SHADER_READ_ONLY and the output in
     // GENERAL, which is what NGX expects.
     VkImageSubresourceRange range{VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 1};
-    auto wrap = [&](const GpuImage& image, bool read_write) {
+    auto wrap = [&](const gpu::GpuImage& image, bool read_write) {
       return NVSDK_NGX_Create_ImageView_Resource_VK(
-          GetVkImageView(image.view), GetVkImage(image), range, GetVkFormat(image.format),
+          gpu::GetVkImageView(image.view), gpu::GetVkImage(image), range, gpu::GetVkFormat(image.format),
           image.extent.width, image.extent.height, read_write);
     };
     NVSDK_NGX_Resource_VK color_res = wrap(color, false);
@@ -153,7 +153,7 @@ class DlssUpscaler final : public Upscaler {
     eval.InMVScaleY = static_cast<f32>(desc_.render_height);
 
     NVSDK_NGX_Result er =
-        NGX_VULKAN_EVALUATE_DLSS_EXT(GetVkCommandBuffer(*ctx.cmd), handle_, params_, &eval);
+        NGX_VULKAN_EVALUATE_DLSS_EXT(gpu::GetVkCommandBuffer(*ctx.cmd), handle_, params_, &eval);
     if (er != NVSDK_NGX_Result_Success) {
       has_history_ = false;
       RX_ERROR("dlss: evaluate failed ({:#x})", static_cast<u32>(er));
@@ -179,7 +179,7 @@ class DlssUpscaler final : public Upscaler {
     }
   }
 
-  Device& device_;
+  gpu::Device& device_;
   UpscalerDesc desc_;
   u32 previous_frame_ = 0;
   bool has_history_ = false;
@@ -190,7 +190,7 @@ class DlssUpscaler final : public Upscaler {
 
 }  // namespace
 
-base::UniquePointer<Upscaler> CreateDlssUpscaler(const UpscalerDesc& desc, Device& device) {
+base::UniquePointer<Upscaler> CreateDlssUpscaler(const UpscalerDesc& desc, gpu::Device& device) {
   auto upscaler = base::MakeUnique<DlssUpscaler>(device);
   if (!upscaler->Initialize(desc)) return nullptr;
   return upscaler;

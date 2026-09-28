@@ -30,27 +30,27 @@ VirtualTexture::PageState& VirtualTexture::Page(const PageKey& key) {
   return pages_[key.mip][PageIndex(key)];
 }
 
-bool VirtualTexture::Initialize(Device& device) {
+bool VirtualTexture::Initialize(gpu::Device& device) {
   device_ = &device;
-  atlas_ = device.CreateImage2D(Format::kRGBA8Unorm, {kAtlasTexels, kAtlasTexels},
-                                kTextureUsageSampled | kTextureUsageTransferDst);
-  indirection_ = device.CreateImage2D(Format::kRGBA8Unorm, {kVirtualPages, kVirtualPages},
-                                      kTextureUsageSampled | kTextureUsageTransferDst, kMips);
+  atlas_ = device.CreateImage2D(gpu::Format::kRGBA8Unorm, {kAtlasTexels, kAtlasTexels},
+                                gpu::kTextureUsageSampled | gpu::kTextureUsageTransferDst);
+  indirection_ = device.CreateImage2D(gpu::Format::kRGBA8Unorm, {kVirtualPages, kVirtualPages},
+                                      gpu::kTextureUsageSampled | gpu::kTextureUsageTransferDst, kMips);
   feedback_ = device.CreateBuffer((1 + kFeedbackCapacity) * sizeof(u32),
-                                  kBufferUsageStorage | kBufferUsageTransferSrc |
-                                      kBufferUsageTransferDst,
+                                  gpu::kBufferUsageStorage | gpu::kBufferUsageTransferSrc |
+                                      gpu::kBufferUsageTransferDst,
                                   false);
-  for (GpuBuffer& rb : readback_) {
+  for (gpu::GpuBuffer& rb : readback_) {
     rb = device.CreateBuffer((1 + kFeedbackCapacity) * sizeof(u32),
-                             kBufferUsageTransferDst, true);
+                             gpu::kBufferUsageTransferDst, true);
   }
   upload_staging_ =
-      device.CreateBuffer(kPageBytes * kMaxUploadsPerFrame, kBufferUsageTransferSrc, true);
+      device.CreateBuffer(kPageBytes * kMaxUploadsPerFrame, gpu::kBufferUsageTransferSrc, true);
   u64 pyramid_bytes = 0;
   for (u32 m = 0; m < kMips; ++m) {
     pyramid_bytes += static_cast<u64>(PagesAt(m)) * PagesAt(m) * 4;
   }
-  indirection_staging_ = device.CreateBuffer(pyramid_bytes, kBufferUsageTransferSrc, true);
+  indirection_staging_ = device.CreateBuffer(pyramid_bytes, gpu::kBufferUsageTransferSrc, true);
   if (!atlas_ || !indirection_ || !feedback_ || !readback_[0].mapped || !upload_staging_.mapped ||
       !indirection_staging_.mapped) {
     RX_WARN("virtual texture allocation failed");
@@ -62,13 +62,13 @@ bool VirtualTexture::Initialize(Device& device) {
     pages_[m].assign(static_cast<size_t>(PagesAt(m)) * PagesAt(m), PageState{});
     indirection_cpu_[m].assign(static_cast<size_t>(PagesAt(m)) * PagesAt(m) * 4, 0);
   }
-  for (GpuBuffer& rb : readback_) base::MemSet(rb.mapped, 0, sizeof(u32));
+  for (gpu::GpuBuffer& rb : readback_) base::MemSet(rb.mapped, 0, sizeof(u32));
 
-  device.ImmediateSubmit([this](CommandList& cmd) {
-    TextureBarrier init[2] = {
-        Transition(atlas_, ResourceState::kUndefined, ResourceState::kShaderReadFragment),
-        Transition(indirection_, ResourceState::kUndefined,
-                   ResourceState::kShaderReadFragment)};
+  device.ImmediateSubmit([this](gpu::CommandList& cmd) {
+    gpu::TextureBarrier init[2] = {
+        gpu::Transition(atlas_, gpu::ResourceState::kUndefined, gpu::ResourceState::kShaderReadFragment),
+        gpu::Transition(indirection_, gpu::ResourceState::kUndefined,
+                   gpu::ResourceState::kShaderReadFragment)};
     cmd.TextureBarriers(init);
     cmd.FillBuffer(feedback_, 0, sizeof(u32), 0);
   });
@@ -101,7 +101,7 @@ bool VirtualTexture::Initialize(Device& device) {
   return true;
 }
 
-void VirtualTexture::Destroy(Device& device) {
+void VirtualTexture::Destroy(gpu::Device& device) {
   if (worker_) {
     {
       base::LockGuard lock(queue_mutex_);
@@ -116,7 +116,7 @@ void VirtualTexture::Destroy(Device& device) {
   if (indirection_) device.DestroyImage(indirection_);
   indirection_ = {};
   if (feedback_) device.DestroyBuffer(feedback_);
-  for (GpuBuffer& rb : readback_) {
+  for (gpu::GpuBuffer& rb : readback_) {
     if (rb) device.DestroyBuffer(rb);
   }
   if (upload_staging_) device.DestroyBuffer(upload_staging_);
@@ -233,7 +233,7 @@ void VirtualTexture::AddToGraph(RenderGraph& graph, u64 frame_index) {
 
   // 1) Parse the oldest readback slot (written kReadbackRing-1 frames ago,
   // safely past the fence) and turn misses into generation requests.
-  const GpuBuffer& rb = readback_[frame_index % kReadbackRing];
+  const gpu::GpuBuffer& rb = readback_[frame_index % kReadbackRing];
   const u32* data = static_cast<const u32*>(rb.mapped);
   u32 count = rx::Min(data[0], kFeedbackCapacity);
   base::UnorderedSet<u32> seen;
@@ -303,12 +303,12 @@ void VirtualTexture::AddToGraph(RenderGraph& graph, u64 frame_index) {
         "vt_upload", [](RenderGraph::PassBuilder&) {},
         [this, uploads = base::move(uploads), upload_indirection](PassContext& ctx) {
           if (!uploads.empty()) {
-            TextureBarrier to_copy[1] = {Transition(atlas_, ResourceState::kShaderReadFragment,
-                                                    ResourceState::kCopyDst)};
+            gpu::TextureBarrier to_copy[1] = {gpu::Transition(atlas_, gpu::ResourceState::kShaderReadFragment,
+                                                    gpu::ResourceState::kCopyDst)};
             ctx.cmd->TextureBarriers(to_copy);
-            base::Vector<BufferTextureCopy> regions;
+            base::Vector<gpu::BufferTextureCopy> regions;
             for (size_t i = 0; i < uploads.size(); ++i) {
-              BufferTextureCopy copy;
+              gpu::BufferTextureCopy copy;
               copy.buffer_offset = i * kPageBytes;
               copy.offset[0] = static_cast<i32>((uploads[i].slot % kAtlasPages) * kPageStored);
               copy.offset[1] = static_cast<i32>((uploads[i].slot / kAtlasPages) * kPageStored);
@@ -317,18 +317,18 @@ void VirtualTexture::AddToGraph(RenderGraph& graph, u64 frame_index) {
             }
             ctx.cmd->CopyBufferToTexture(upload_staging_, atlas_,
                                          base::Span(regions.data(), regions.size()));
-            TextureBarrier to_read[1] = {
-                Transition(atlas_, ResourceState::kCopyDst, ResourceState::kShaderReadFragment)};
+            gpu::TextureBarrier to_read[1] = {
+                gpu::Transition(atlas_, gpu::ResourceState::kCopyDst, gpu::ResourceState::kShaderReadFragment)};
             ctx.cmd->TextureBarriers(to_read);
           }
           if (upload_indirection) {
-            TextureBarrier to_copy[1] = {Transition(
-                indirection_, ResourceState::kShaderReadFragment, ResourceState::kCopyDst)};
+            gpu::TextureBarrier to_copy[1] = {gpu::Transition(
+                indirection_, gpu::ResourceState::kShaderReadFragment, gpu::ResourceState::kCopyDst)};
             ctx.cmd->TextureBarriers(to_copy);
-            base::Vector<BufferTextureCopy> regions;
+            base::Vector<gpu::BufferTextureCopy> regions;
             u64 offset = 0;
             for (u32 m = 0; m < kMips; ++m) {
-              BufferTextureCopy copy;
+              gpu::BufferTextureCopy copy;
               copy.buffer_offset = offset;
               copy.mip = m;
               regions.push_back(copy);
@@ -336,8 +336,8 @@ void VirtualTexture::AddToGraph(RenderGraph& graph, u64 frame_index) {
             }
             ctx.cmd->CopyBufferToTexture(indirection_staging_, indirection_,
                                          base::Span(regions.data(), regions.size()));
-            TextureBarrier to_read[1] = {Transition(indirection_, ResourceState::kCopyDst,
-                                                    ResourceState::kShaderReadFragment)};
+            gpu::TextureBarrier to_read[1] = {gpu::Transition(indirection_, gpu::ResourceState::kCopyDst,
+                                                    gpu::ResourceState::kShaderReadFragment)};
             ctx.cmd->TextureBarriers(to_read);
           }
         });
@@ -347,12 +347,12 @@ void VirtualTexture::AddToGraph(RenderGraph& graph, u64 frame_index) {
   graph.AddPass(
       "vt_feedback", [](RenderGraph::PassBuilder&) {},
       [this, frame_index](PassContext& ctx) {
-        ctx.cmd->MemoryBarrier(BarrierScope::kAllCommands, BarrierScope::kTransferRead);
+        ctx.cmd->MemoryBarrier(gpu::BarrierScope::kAllCommands, gpu::BarrierScope::kTransferRead);
         ctx.cmd->CopyBuffer(feedback_, 0, readback_[frame_index % kReadbackRing], 0,
                             (1 + kFeedbackCapacity) * sizeof(u32));
-        ctx.cmd->MemoryBarrier(BarrierScope::kTransferRead, BarrierScope::kTransferWrite);
+        ctx.cmd->MemoryBarrier(gpu::BarrierScope::kTransferRead, gpu::BarrierScope::kTransferWrite);
         ctx.cmd->FillBuffer(feedback_, 0, sizeof(u32), 0);
-        ctx.cmd->MemoryBarrier(BarrierScope::kTransferWrite, BarrierScope::kAllCommands);
+        ctx.cmd->MemoryBarrier(gpu::BarrierScope::kTransferWrite, gpu::BarrierScope::kAllCommands);
       });
 }
 

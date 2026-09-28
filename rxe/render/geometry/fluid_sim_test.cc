@@ -23,6 +23,7 @@
 #include "rxe/gpu/rhi/device.h"
 
 using namespace rx::render;
+namespace gpu = rx::gpu;
 
 namespace {
 
@@ -44,9 +45,9 @@ f32 BowlBed(u32 x, u32 y) {
 }  // namespace
 
 int main() {
-  DeviceDesc desc;
+  gpu::DeviceDesc desc;
   desc.request_raytracing = false;
-  base::UniquePointer<Device> device = Device::CreateOffscreen(desc);
+  base::UniquePointer<gpu::Device> device = gpu::Device::CreateOffscreen(desc);
   if (!device) return Fail("CreateOffscreen returned null");
   if (device->is_stub()) {
     ::printf("fluid_sim_test: no Vulkan driver, skipping (null backend)\n");
@@ -110,8 +111,8 @@ int main() {
   u32 frame_index = 0;
   auto run = [&](const FluidDomainDesc& d, u32 frames) -> bool {
     for (u32 f = 0; f < frames; ++f) {
-      const u32 slot = frame_index++ % Device::kMaxFramesInFlight;
-      CommandList* cmd = device->BeginFrame(slot);
+      const u32 slot = frame_index++ % gpu::Device::kMaxFramesInFlight;
+      gpu::CommandList* cmd = device->BeginFrame(slot);
       if (!cmd) return false;
       pool.BeginFrame();
       graph.Reset();
@@ -134,8 +135,8 @@ int main() {
 
   auto readback = [&](base::Vector<f32>& out) -> bool {
     out.assign(static_cast<size_t>(kRes) * kRes * 4, 0.0f);
-    const GpuImage& state = FluidSimProbe::state(sim);
-    return device->ReadbackImage(state, ResourceState::kGeneral, out.data(),
+    const gpu::GpuImage& state = FluidSimProbe::state(sim);
+    return device->ReadbackImage(state, gpu::ResourceState::kGeneral, out.data(),
                                  out.size() * sizeof(f32));
   };
 

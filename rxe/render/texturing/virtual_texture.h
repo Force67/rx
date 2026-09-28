@@ -39,8 +39,8 @@ class VirtualTexture {
   static constexpr u32 kFeedbackCapacity = 16384;             // entries
   static constexpr u32 kMaxUploadsPerFrame = 16;
 
-  bool Initialize(Device& device);
-  void Destroy(Device& device);
+  bool Initialize(gpu::Device& device);
+  void Destroy(gpu::Device& device);
   bool available() const { return static_cast<bool>(atlas_); }
 
   // Drains the oldest feedback readback, schedules page generation, and
@@ -48,9 +48,9 @@ class VirtualTexture {
   // this frame. Call once per frame before the graph executes.
   void AddToGraph(RenderGraph& graph, u64 frame_index);
 
-  TextureView atlas_view() const { return atlas_.view; }
-  TextureView indirection_view() const { return indirection_.view; }
-  const GpuBuffer& feedback_buffer() const { return feedback_; }
+  gpu::TextureView atlas_view() const { return atlas_.view; }
+  gpu::TextureView indirection_view() const { return indirection_.view; }
+  const gpu::GpuBuffer& feedback_buffer() const { return feedback_; }
   u32 resident_pages() const { return resident_count_; }
 
  private:
@@ -76,14 +76,14 @@ class VirtualTexture {
   void PropagateIndirection(const PageKey& key);
   u16 AcquireSlot(u64 frame_index);
 
-  Device* device_ = nullptr;
-  GpuImage atlas_;        // RGBA8 4096^2
-  GpuImage indirection_;  // RGBA8 256^2, kMips levels
-  GpuBuffer feedback_;    // [0] counter, then packed requests
+  gpu::Device* device_ = nullptr;
+  gpu::GpuImage atlas_;        // RGBA8 4096^2
+  gpu::GpuImage indirection_;  // RGBA8 256^2, kMips levels
+  gpu::GpuBuffer feedback_;    // [0] counter, then packed requests
   static constexpr u32 kReadbackRing = 3;
-  GpuBuffer readback_[kReadbackRing];
-  GpuBuffer upload_staging_;      // kMaxUploadsPerFrame pages
-  GpuBuffer indirection_staging_;  // full pyramid, re-uploaded when dirty
+  gpu::GpuBuffer readback_[kReadbackRing];
+  gpu::GpuBuffer upload_staging_;      // kMaxUploadsPerFrame pages
+  gpu::GpuBuffer indirection_staging_;  // full pyramid, re-uploaded when dirty
 
   // CPU residency state, indexed per mip then page.
   base::Vector<PageState> pages_[kMips];

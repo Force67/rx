@@ -5,9 +5,12 @@
 #include "rxe/render/core/render_graph.h"
 #include "rxe/gpu/rhi/resources.h"
 
+namespace rx::gpu {
+class Device;
+}  // namespace rx::gpu
+
 namespace rx::render {
 
-class Device;
 class RayTracingContext;
 
 // Screen-space sun-shadow ray trace: one ray per pixel toward the sun through
@@ -17,10 +20,10 @@ class RayTracingContext;
 // live NRD instance; the renderer only runs it then.
 class ShadowTracePass {
  public:
-  bool Initialize(Device& device);
+  bool Initialize(gpu::Device& device);
   bool available() const { return static_cast<bool>(pipeline_); }
-  void Resize(Device& device, Extent2D extent) { extent_ = extent; }
-  void Destroy(Device& device);
+  void Resize(gpu::Device& device, gpu::Extent2D extent) { extent_ = extent; }
+  void Destroy(gpu::Device& device);
 
   // Adds the trace pass and returns the packed penumbra (R16f). sun_direction is
   // the light's travel direction; angular_radius is the sun's half-angle (rad).
@@ -30,8 +33,8 @@ class ShadowTracePass {
                             f32 jitter_x, f32 jitter_y);
 
  private:
-  PipelineHandle pipeline_;
-  Extent2D extent_{};
+  gpu::PipelineHandle pipeline_;
+  gpu::Extent2D extent_{};
 };
 
 }  // namespace rx::render

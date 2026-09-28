@@ -56,19 +56,19 @@ void SortInstances(base::Vector<PlacedInstance>& instances) {
 }  // namespace
 
 int main() {
-  render::DeviceDesc desc;
+  gpu::DeviceDesc desc;
   const char* rhi = ::getenv("RX_RHI");
-  desc.backend = (rhi && ::strcmp(rhi, "d3d12") == 0) ? render::Backend::kD3D12
-                                                         : render::Backend::kVulkan;
+  desc.backend = (rhi && ::strcmp(rhi, "d3d12") == 0) ? gpu::Backend::kD3D12
+                                                         : gpu::Backend::kVulkan;
   desc.request_raytracing = false;
-  base::UniquePointer<render::Device> device = render::Device::CreateOffscreen(desc);
+  base::UniquePointer<gpu::Device> device = gpu::Device::CreateOffscreen(desc);
   if (!device) {
     ::fprintf(stderr, "placement_gpu_test: CreateOffscreen returned null\n");
     return 1;
   }
   if (device->is_stub()) {
     ::printf("placement_gpu_test: no %s driver, skipping (null backend)\n",
-                render::BackendName(desc.backend));
+                gpu::BackendName(desc.backend));
     return 0;
   }
   ::printf("placement_gpu_test: device '%s'\n", device->caps().adapter_name.c_str());

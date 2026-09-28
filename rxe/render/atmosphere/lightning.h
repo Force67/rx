@@ -7,9 +7,12 @@
 #include "rxe/render/core/render_graph.h"
 #include "rxe/gpu/rhi/device.h"
 
+namespace rx::gpu {
+class Device;
+}  // namespace rx::gpu
+
 namespace rx::render {
 
-class Device;
 struct PointLight;
 struct WeatherSettings;
 
@@ -45,8 +48,8 @@ class RX_RENDER_EXPORT LightningSystem {
   // demo/game-side schedulers that want the global flash to agree with the bolt.
   static f32 Envelope(f32 age, u32 seed);
 
-  bool Initialize(Device& device, Format color_format);
-  void Destroy(Device& device);
+  bool Initialize(gpu::Device& device, gpu::Format color_format);
+  void Destroy(gpu::Device& device);
   bool available() const { return static_cast<bool>(pipeline_); }
 
   // Appends the strike's positioned flash light (one point light at the
@@ -64,7 +67,7 @@ class RX_RENDER_EXPORT LightningSystem {
                   ResourceHandle motion, const Frame& frame);
 
  private:
-  PipelineHandle pipeline_;
+  gpu::PipelineHandle pipeline_;
 };
 
 }  // namespace rx::render

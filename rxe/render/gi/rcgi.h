@@ -68,8 +68,8 @@ class RcgiSystem {
   // hardware). When false, ONLY the software variants + the shared/probes-only
   // pipelines are created; a SPIR-V module declaring RayQuery can fail pipeline
   // creation on a non-ray-query device, so the hw pipelines are skipped entirely.
-  static base::UniquePointer<RcgiSystem> Create(Device& device, TextureView sky_view,
-                                            SamplerHandle sky_sampler, BindlessRegistry& bindless,
+  static base::UniquePointer<RcgiSystem> Create(gpu::Device& device, gpu::TextureView sky_view,
+                                            gpu::SamplerHandle sky_sampler, BindlessRegistry& bindless,
                                             bool rt_available);
   ~RcgiSystem();
 
@@ -89,7 +89,7 @@ class RcgiSystem {
   // clipmap earlier in the graph this frame. When `sdf` is null the hardware
   // (ray-query) path runs and `raytracing` must be valid.
   void AddToGraph(RenderGraph& graph, RayTracingContext* raytracing, u32 tlas_slot,
-                  const LightGrid& light_grid, const GpuBuffer& lights, const Vec3& camera,
+                  const LightGrid& light_grid, const gpu::GpuBuffer& lights, const Vec3& camera,
                   const Vec3& sun_direction, f32 sun_intensity, const Vec3& sun_color,
                   u32 frame_index, const FrameConfig& config, bool async = false,
                   const SdfClipmap* sdf = nullptr);
@@ -106,7 +106,7 @@ class RcgiSystem {
   // transient the forward pass reads (multiplied by `intensity`). Retained as the
   // `RX_RCGI_PROBES_ONLY=1` A/B fallback for the M2 gather chain.
   ResourceHandle AddResolvePass(RenderGraph& graph, ResourceHandle depth_export,
-                                ResourceHandle normals, Extent2D extent, const Mat4& inv_view_proj,
+                                ResourceHandle normals, gpu::Extent2D extent, const Mat4& inv_view_proj,
                                 const Vec3& camera, f32 intensity, u32 frame_index);
 
   // M2 screen side: half-res SH final gather -> separable bilateral denoise ->
@@ -117,7 +117,7 @@ class RcgiSystem {
   // history (first frame / resize / teleport).
   ResourceHandle AddGatherChain(RenderGraph& graph, RayTracingContext& raytracing, u32 tlas_slot,
                                 ResourceHandle depth_export, ResourceHandle normals,
-                                ResourceHandle motion, Extent2D extent, const Mat4& inv_view_proj,
+                                ResourceHandle motion, gpu::Extent2D extent, const Mat4& inv_view_proj,
                                 const Mat4& prev_view_proj, const Vec3& camera, f32 intensity,
                                 u32 frame_index, bool reset);
 
@@ -125,21 +125,21 @@ class RcgiSystem {
   // screen-cache history the next frame's gather samples. Record only when RCGI
   // is active (zero cost otherwise).
   void AddHistoryCopy(RenderGraph& graph, ResourceHandle lit_color, ResourceHandle depth_export,
-                      Extent2D extent);
+                      gpu::Extent2D extent);
 
   // (Re)create the render-resolution screen-side history images when the extent
   // changes. No-op if already sized. Must be called before AddGatherChain.
   // Returns false if (re)creation failed: in that case nothing is left imported
   // and the caller must skip the gather chain (fall back to the probes-only
   // resolve) for this frame; the cleared extent lets a later frame retry.
-  bool EnsureScreenResources(Extent2D extent);
+  bool EnsureScreenResources(gpu::Extent2D extent);
 
   // The gather's denoised per-pixel diffuse SH (3x RGBA16F: R,G,B channel SH
   // vectors, gather resolution), valid for the CURRENT frame's graph only after
   // AddGatherChain ran (not the probes-only AddResolvePass). Consumed by the
   // specular ray-skip (reflection_trace) to replace TLAS rays on rough /
   // off-mirror pixels. Returns false when no SH was produced this frame.
-  bool denoised_sh(ResourceHandle out_sh[3], Extent2D& extent) const {
+  bool denoised_sh(ResourceHandle out_sh[3], gpu::Extent2D& extent) const {
     if (!denoised_sh_valid_) return false;
     out_sh[0] = denoised_sh_[0];
     out_sh[1] = denoised_sh_[1];
@@ -156,12 +156,12 @@ class RcgiSystem {
   // globals UBO must be the one already uploaded for the current frame (the
   // reflection pass records after AddToGraph, so `frame_index % 2` is valid).
   struct IrradianceBinding {
-    TextureView irradiance{};
-    TextureView visibility{};
-    const GpuBuffer* globals = nullptr;
-    const GpuBuffer* probe_meta = nullptr;
-    const GpuBuffer* interior_vols = nullptr;
-    SamplerHandle sampler{};
+    gpu::TextureView irradiance{};
+    gpu::TextureView visibility{};
+    const gpu::GpuBuffer* globals = nullptr;
+    const gpu::GpuBuffer* probe_meta = nullptr;
+    const gpu::GpuBuffer* interior_vols = nullptr;
+    gpu::SamplerHandle sampler{};
     bool valid = false;
   };
   IrradianceBinding irradiance_binding(u32 frame_index) const {
@@ -211,47 +211,47 @@ class RcgiSystem {
     u32 gi_flags[4];                   // x feature bits, y volume count, z asuint(probe-AO bias), w pad
   };
 
-  explicit RcgiSystem(Device& device) : device_(device) {}
+  explicit RcgiSystem(gpu::Device& device) : device_(device) {}
   bool CreateResources();
   bool CreatePipelines(bool rt_available);
   void DestroyScreenResources();
   Vec3 SnapOrigin(const Vec3& camera, u32 cascade) const;
 
-  Device& device_;
+  gpu::Device& device_;
   Settings settings_;
-  SamplerHandle sampler_;        // nearest clamp (atlases / depth)
-  SamplerHandle linear_sampler_; // linear clamp (screen-cache colour)
-  TextureView sky_view_;
-  SamplerHandle sky_sampler_;
+  gpu::SamplerHandle sampler_;        // nearest clamp (atlases / depth)
+  gpu::SamplerHandle linear_sampler_; // linear clamp (screen-cache colour)
+  gpu::TextureView sky_view_;
+  gpu::SamplerHandle sky_sampler_;
   BindlessRegistry* bindless_ = nullptr;
 
-  GpuImage irradiance_;   // rgba16f cascade atlas (4 stacked slabs)
-  GpuImage visibility_;   // rgba16f moments atlas (rg = mean, mean^2)
-  GpuImage rays_;         // rgba16f: rgb sky (miss) / signed hit distance in a
-  GpuBuffer state_;       // hash slots: kEntryStride u32 each
-  GpuBuffer radiance_;    // packed rgba16f (uint2) per slot
-  GpuBuffer active_list_; // per-frame active hash indices
-  GpuBuffer active_meta_; // [0] = active count
-  GpuBuffer dispatch_args_;      // indirect args for cache shade
-  GpuBuffer globals_buffers_[2]; // host visible, ping-pong by frame parity
-  GpuBuffer gather_camera_[2];   // gather matrices, too big for the push block
-  GpuBuffer probe_meta_;         // uint2 per (cascade, probe): packed reloc offset + flags
-  GpuBuffer interior_volumes_[2];  // frame-parity: 2 float4 (min,max) per volume
+  gpu::GpuImage irradiance_;   // rgba16f cascade atlas (4 stacked slabs)
+  gpu::GpuImage visibility_;   // rgba16f moments atlas (rg = mean, mean^2)
+  gpu::GpuImage rays_;         // rgba16f: rgb sky (miss) / signed hit distance in a
+  gpu::GpuBuffer state_;       // hash slots: kEntryStride u32 each
+  gpu::GpuBuffer radiance_;    // packed rgba16f (uint2) per slot
+  gpu::GpuBuffer active_list_; // per-frame active hash indices
+  gpu::GpuBuffer active_meta_; // [0] = active count
+  gpu::GpuBuffer dispatch_args_;      // indirect args for cache shade
+  gpu::GpuBuffer globals_buffers_[2]; // host visible, ping-pong by frame parity
+  gpu::GpuBuffer gather_camera_[2];   // gather matrices, too big for the push block
+  gpu::GpuBuffer probe_meta_;         // uint2 per (cascade, probe): packed reloc offset + flags
+  gpu::GpuBuffer interior_volumes_[2];  // frame-parity: 2 float4 (min,max) per volume
   u32 interior_volume_count_ = 0;
 
-  PipelineHandle probe_trace_pipeline_;
-  PipelineHandle probe_trace_sw_pipeline_;   // SDF-clipmap software variant
-  PipelineHandle args_pipeline_;
-  PipelineHandle cache_shade_pipeline_;
-  PipelineHandle cache_shade_sw_pipeline_;   // SDF-clipmap software variant
-  PipelineHandle blend_pipeline_;
-  PipelineHandle border_pipeline_;
-  PipelineHandle probe_meta_pipeline_;  // per-probe relocation (Phase 3 item 10)
-  PipelineHandle resolve_pipeline_;
-  PipelineHandle gather_pipeline_;
-  PipelineHandle denoise_pipeline_;
-  PipelineHandle upscale_pipeline_;
-  PipelineHandle history_pipeline_;
+  gpu::PipelineHandle probe_trace_pipeline_;
+  gpu::PipelineHandle probe_trace_sw_pipeline_;   // SDF-clipmap software variant
+  gpu::PipelineHandle args_pipeline_;
+  gpu::PipelineHandle cache_shade_pipeline_;
+  gpu::PipelineHandle cache_shade_sw_pipeline_;   // SDF-clipmap software variant
+  gpu::PipelineHandle blend_pipeline_;
+  gpu::PipelineHandle border_pipeline_;
+  gpu::PipelineHandle probe_meta_pipeline_;  // per-probe relocation (Phase 3 item 10)
+  gpu::PipelineHandle resolve_pipeline_;
+  gpu::PipelineHandle gather_pipeline_;
+  gpu::PipelineHandle denoise_pipeline_;
+  gpu::PipelineHandle upscale_pipeline_;
+  gpu::PipelineHandle history_pipeline_;
 
   // M2 screen-side persistent images (render resolution). Screen-cache history is
   // written late (AddHistoryCopy) and read early next frame (gather); the
@@ -259,19 +259,19 @@ class RcgiSystem {
   static constexpr u32 kGatherDivisor = 2;  // default gather scale: half res
   u32 gather_divisor_ = kGatherDivisor;      // live scale (RX_RCGI_GATHER_SCALE: 2/4)
   bool denoise_mask_ = true;                  // material-id denoiser mask (RX_RCGI_DENOISE_MASK)
-  Extent2D screen_extent_{};
-  GpuImage screen_color_hist_;               // rgba16f lit HDR snapshot
-  GpuImage screen_depth_hist_;               // r32f depth snapshot
-  GpuImage irr_hist_[2];                     // rgba16f temporal irradiance history
-  ResourceState screen_color_state_ = ResourceState::kUndefined;
-  ResourceState screen_depth_state_ = ResourceState::kUndefined;
-  ResourceState irr_hist_state_[2] = {ResourceState::kUndefined, ResourceState::kUndefined};
+  gpu::Extent2D screen_extent_{};
+  gpu::GpuImage screen_color_hist_;               // rgba16f lit HDR snapshot
+  gpu::GpuImage screen_depth_hist_;               // r32f depth snapshot
+  gpu::GpuImage irr_hist_[2];                     // rgba16f temporal irradiance history
+  gpu::ResourceState screen_color_state_ = gpu::ResourceState::kUndefined;
+  gpu::ResourceState screen_depth_state_ = gpu::ResourceState::kUndefined;
+  gpu::ResourceState irr_hist_state_[2] = {gpu::ResourceState::kUndefined, gpu::ResourceState::kUndefined};
   // Handles imported this frame in AddGatherChain, reused by AddHistoryCopy.
   ResourceHandle screen_color_handle_{};
   ResourceHandle screen_depth_handle_{};
   // Denoised per-pixel SH triple exposed to the specular ray-skip (this frame).
   ResourceHandle denoised_sh_[3]{};
-  Extent2D denoised_sh_extent_{};
+  gpu::Extent2D denoised_sh_extent_{};
   bool denoised_sh_valid_ = false;
 
   bool rt_pipelines_ = false;  // hardware ray-query pipelines were created

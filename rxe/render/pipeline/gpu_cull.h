@@ -5,9 +5,12 @@
 #include "rxe/render/core/render_graph.h"
 #include "rxe/gpu/rhi/device.h"
 
+namespace rx::gpu {
+class Device;
+}  // namespace rx::gpu
+
 namespace rx::render {
 
-class Device;
 
 // GPU-driven frustum culling for the opaque passes. Each frame the renderer
 // fills a per-instance buffer (model + bounds) and a parallel indirect-command
@@ -46,18 +49,18 @@ class GpuCull {
   static constexpr u32 kMaxCommands = 1u << 18;   // 262144 opaque submeshes
   static constexpr u32 kMaxInstances = 1u << 17;  // 131072 draws
 
-  bool Initialize(Device& device, Format color_format);
-  void Destroy(Device& device);
+  bool Initialize(gpu::Device& device, gpu::Format color_format);
+  void Destroy(gpu::Device& device);
 
   // Begins filling the frame slot's buffers; returns mapped spans to append to.
   Instance* instances(u32 slot);
   Command* commands(u32 slot);
-  const GpuBuffer& command_buffer(u32 slot) const { return commands_[slot]; }
+  const gpu::GpuBuffer& command_buffer(u32 slot) const { return commands_[slot]; }
   static constexpr u32 kCommandStride = sizeof(Command);
 
   // (Re)creates the ping-pong depth snapshots and the hi-z reduce; call on init
   // and resize with the render resolution.
-  void ResizeDepth(Device& device, u32 width, u32 height);
+  void ResizeDepth(gpu::Device& device, u32 width, u32 height);
   // Reduces last frame's depth snapshot into a coarse farthest-depth hi-z that
   // the cull tests against this frame. Returns the hi-z handle (kInvalidResource
   // until ResizeDepth has run).
@@ -86,23 +89,23 @@ class GpuCull {
 
  private:
   static constexpr u32 kFramesInFlight = 2;
-  bool CreateBoundsPipeline(Device& device, Format color_format);
+  bool CreateBoundsPipeline(gpu::Device& device, gpu::Format color_format);
 
-  PipelineHandle pipeline_;
-  PipelineHandle bounds_pipeline_;
-  GpuBuffer instances_[kFramesInFlight];
-  GpuBuffer commands_[kFramesInFlight];
-  GpuBuffer counts_[kFramesInFlight];
+  gpu::PipelineHandle pipeline_;
+  gpu::PipelineHandle bounds_pipeline_;
+  gpu::GpuBuffer instances_[kFramesInFlight];
+  gpu::GpuBuffer commands_[kFramesInFlight];
+  gpu::GpuBuffer counts_[kFramesInFlight];
   // prev_view_proj: the frustum planes leave no room for it in the push block.
-  GpuBuffer reproject_[kFramesInFlight];
+  gpu::GpuBuffer reproject_[kFramesInFlight];
 
   // Occlusion culling: ping-pong full-res depth snapshots + a coarse hi-z reduce.
   static constexpr u32 kHizDownsample = 8;
-  GpuImage prev_depth_[kFramesInFlight];
-  ResourceState prev_depth_state_[kFramesInFlight] = {ResourceState::kUndefined,
-                                                      ResourceState::kUndefined};
+  gpu::GpuImage prev_depth_[kFramesInFlight];
+  gpu::ResourceState prev_depth_state_[kFramesInFlight] = {gpu::ResourceState::kUndefined,
+                                                      gpu::ResourceState::kUndefined};
   u32 depth_w_ = 0, depth_h_ = 0, hiz_w_ = 0, hiz_h_ = 0;
-  PipelineHandle hiz_pipeline_;
+  gpu::PipelineHandle hiz_pipeline_;
 };
 
 }  // namespace rx::render

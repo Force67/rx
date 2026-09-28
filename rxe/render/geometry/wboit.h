@@ -7,9 +7,12 @@
 #include "rxe/render/core/render_graph.h"
 #include "rxe/gpu/rhi/resources.h"
 
+namespace rx::gpu {
+class Device;
+}  // namespace rx::gpu
+
 namespace rx::render {
 
-class Device;
 
 // One transparent instance for the order-independent transparency pass.
 struct WboitInstance {
@@ -25,20 +28,20 @@ struct WboitInstance {
 // fragile material shaders.
 class WboitPass {
  public:
-  bool Initialize(Device& device, Format color_format, Format depth_format);
-  void Destroy(Device& device);
+  bool Initialize(gpu::Device& device, gpu::Format color_format, gpu::Format depth_format);
+  void Destroy(gpu::Device& device);
 
   // Renders the instances order-independently and composites over color; returns
   // the composited colour handle.
   // Lit-translucency inputs: clustered lights plus the froxel volume's
   // transmittance (dummies when a feature is off this frame).
   struct LightingContext {
-    GpuBuffer lights;
-    GpuBuffer cluster_counts;
-    GpuBuffer cluster_indices;
+    gpu::GpuBuffer lights;
+    gpu::GpuBuffer cluster_counts;
+    gpu::GpuBuffer cluster_indices;
     f32 cluster_params[4] = {0, 0, 64, 64};
-    TextureView froxel_volume;
-    SamplerHandle froxel_sampler;
+    gpu::TextureView froxel_volume;
+    gpu::SamplerHandle froxel_sampler;
     f32 froxel_near = 0.1f;
     f32 froxel_far = 64.0f;
     bool froxel_enabled = false;
@@ -50,15 +53,15 @@ class WboitPass {
                             u32 height, const LightingContext& lighting);
 
  private:
-  PipelineHandle geom_pipeline_;
-  PipelineHandle resolve_pipeline_;
-  SamplerHandle sampler_;
-  GpuBuffer vertices_;
-  GpuBuffer indices_;
-  GpuBuffer frames_[2];  // view projection + lighting params, too big for the push
+  gpu::PipelineHandle geom_pipeline_;
+  gpu::PipelineHandle resolve_pipeline_;
+  gpu::SamplerHandle sampler_;
+  gpu::GpuBuffer vertices_;
+  gpu::GpuBuffer indices_;
+  gpu::GpuBuffer frames_[2];  // view projection + lighting params, too big for the push
   u32 frame_slot_ = 0;
   u32 index_count_ = 0;
-  Format color_format_ = Format::kUnknown;
+  gpu::Format color_format_ = gpu::Format::kUnknown;
 };
 
 }  // namespace rx::render

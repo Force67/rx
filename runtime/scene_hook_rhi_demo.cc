@@ -33,8 +33,8 @@ struct RhiPush {
 };
 static_assert(sizeof(RhiPush) == 120, "push layout must match the demo shaders");
 
-render::ShaderBlob Spirv(const unsigned char* data, size_t size) {
-  return render::ShaderBlob{data, size, render::ShaderFormat::kSpirv};
+gpu::ShaderBlob Spirv(const unsigned char* data, size_t size) {
+  return gpu::ShaderBlob{data, size, gpu::ShaderFormat::kSpirv};
 }
 
 constexpr u32 kTexSize = 8;
@@ -45,8 +45,8 @@ SceneHookRhiDemo::~SceneHookRhiDemo() { Shutdown(); }
 
 bool SceneHookRhiDemo::CreateTextureArray() {
   tex_array_ = device_->CreateImage2DArray(
-      render::Format::kRGBA8Unorm, kTexSize, kTexSize, layer_count_,
-      render::kTextureUsageSampled | render::kTextureUsageTransferDst, /*mip_levels=*/1);
+      gpu::Format::kRGBA8Unorm, kTexSize, kTexSize, layer_count_,
+      gpu::kTextureUsageSampled | gpu::kTextureUsageTransferDst, /*mip_levels=*/1);
   if (!tex_array_) {
     RX_ERROR("scenehook-rhi: 2d texture array creation failed");
     return false;
@@ -72,18 +72,18 @@ bool SceneHookRhiDemo::CreateTextureArray() {
     }
   }
 
-  render::GpuBuffer staging =
-      device_->CreateBuffer(pixels.size(), render::kBufferUsageTransferSrc, /*host_visible=*/true);
+  gpu::GpuBuffer staging =
+      device_->CreateBuffer(pixels.size(), gpu::kBufferUsageTransferSrc, /*host_visible=*/true);
   if (!staging.mapped) {
     RX_ERROR("scenehook-rhi: texture staging buffer failed");
     return false;
   }
   base::MemCopy(staging.mapped, pixels.data(), pixels.size());
 
-  device_->ImmediateSubmit([&](render::CommandList& cmd) {
-    cmd.Barrier(render::Transition(tex_array_, render::ResourceState::kUndefined,
-                                   render::ResourceState::kCopyDst));
-    base::Vector<render::BufferTextureCopy> regions(layer_count_);
+  device_->ImmediateSubmit([&](gpu::CommandList& cmd) {
+    cmd.Barrier(gpu::Transition(tex_array_, gpu::ResourceState::kUndefined,
+                                   gpu::ResourceState::kCopyDst));
+    base::Vector<gpu::BufferTextureCopy> regions(layer_count_);
     for (u32 l = 0; l < layer_count_; ++l) {
       regions[l] = {.buffer_offset = static_cast<u64>(l) * layer_bytes,
                     .mip = 0,
@@ -91,8 +91,8 @@ bool SceneHookRhiDemo::CreateTextureArray() {
                     .extent = {kTexSize, kTexSize}};
     }
     cmd.CopyBufferToTexture(staging, tex_array_, base::Span(regions.data(), regions.size()));
-    cmd.Barrier(render::Transition(tex_array_, render::ResourceState::kCopyDst,
-                                   render::ResourceState::kShaderReadFragment));
+    cmd.Barrier(gpu::Transition(tex_array_, gpu::ResourceState::kCopyDst,
+                                   gpu::ResourceState::kShaderReadFragment));
   });
   device_->DestroyBuffer(staging);
   return true;
@@ -104,20 +104,20 @@ bool SceneHookRhiDemo::Init(render::Renderer& renderer) {
   if (!device_ || device_->is_stub()) return false;
   // The shaders read/write buffer-device-address arenas (SPIR-V only, no DXIL
   // sidecar) and the scene hook fires on Vulkan, so this path is Vulkan-only.
-  if (device_->caps().backend != render::Backend::kVulkan) {
+  if (device_->caps().backend != gpu::Backend::kVulkan) {
     RX_WARN("scenehook-rhi demo: not on the vulkan backend, staying inert");
     return false;
   }
 
   if (!CreateTextureArray()) return false;
-  render::SamplerDesc sd;
-  sd.min_filter = sd.mag_filter = sd.mip_filter = render::Filter::kNearest;
-  sd.address_u = sd.address_v = render::AddressMode::kClampToEdge;
+  gpu::SamplerDesc sd;
+  sd.min_filter = sd.mag_filter = sd.mip_filter = gpu::Filter::kNearest;
+  sd.address_u = sd.address_v = gpu::AddressMode::kClampToEdge;
   sampler_ = device_->GetSampler(sd);
 
   // Compute cull/placement pipeline: no descriptor sets, everything by address.
   {
-    render::ComputePipelineDesc desc;
+    gpu::ComputePipelineDesc desc;
     desc.shader = Spirv(k_scenehook_rhi_cull_cs_hlsl, sizeof(k_scenehook_rhi_cull_cs_hlsl));
     desc.push_constant_size = sizeof(RhiPush);
     desc.debug_name = "scenehook_rhi_cull";
@@ -127,24 +127,24 @@ bool SceneHookRhiDemo::Init(render::Renderer& renderer) {
   // Shared set 0: the texture array as a combined image sampler in the fragment
   // stage; both draw pipelines declare it identically.
   auto make_set0 = []() {
-    render::PipelineBindings set0;
-    set0.slots.push_back({.binding = 0, .type = render::BindingType::kCombinedTextureSampler});
-    set0.stages = render::kShaderStageFragment;
+    gpu::PipelineBindings set0;
+    set0.slots.push_back({.binding = 0, .type = gpu::BindingType::kCombinedTextureSampler});
+    set0.stages = gpu::kShaderStageFragment;
     return set0;
   };
 
   // Classic vertex-pulling draw pipeline (DrawIndirectCount path).
   {
-    render::GraphicsPipelineDesc desc;
+    gpu::GraphicsPipelineDesc desc;
     desc.vertex = Spirv(k_scenehook_rhi_vs_hlsl, sizeof(k_scenehook_rhi_vs_hlsl));
     desc.fragment = Spirv(k_scenehook_rhi_ps_hlsl, sizeof(k_scenehook_rhi_ps_hlsl));
-    desc.raster.cull = render::CullMode::kNone;
+    desc.raster.cull = gpu::CullMode::kNone;
     desc.depth = {.test = true,
                   .write = true,
-                  .compare = render::CompareOp::kGreaterEqual,
-                  .format = render::Format::kD32Float};
-    desc.color_formats.push_back(render::Format::kRGBA16Float);
-    desc.color_formats.push_back(render::Format::kR32Float);
+                  .compare = gpu::CompareOp::kGreaterEqual,
+                  .format = gpu::Format::kD32Float};
+    desc.color_formats.push_back(gpu::Format::kRGBA16Float);
+    desc.color_formats.push_back(gpu::Format::kR32Float);
     desc.sets.push_back(make_set0());
     desc.push_constant_size = sizeof(RhiPush);
     desc.debug_name = "scenehook_rhi_draw";
@@ -153,16 +153,16 @@ bool SceneHookRhiDemo::Init(render::Renderer& renderer) {
 
   // Mesh-shader draw pipeline (DrawMeshTasksIndirect path), when available.
   if (device_->caps().mesh_shaders) {
-    render::GraphicsPipelineDesc desc;
+    gpu::GraphicsPipelineDesc desc;
     desc.mesh = Spirv(k_scenehook_rhi_ms_hlsl, sizeof(k_scenehook_rhi_ms_hlsl));
     desc.fragment = Spirv(k_scenehook_rhi_ps_hlsl, sizeof(k_scenehook_rhi_ps_hlsl));
-    desc.raster.cull = render::CullMode::kNone;
+    desc.raster.cull = gpu::CullMode::kNone;
     desc.depth = {.test = true,
                   .write = true,
-                  .compare = render::CompareOp::kGreaterEqual,
-                  .format = render::Format::kD32Float};
-    desc.color_formats.push_back(render::Format::kRGBA16Float);
-    desc.color_formats.push_back(render::Format::kR32Float);
+                  .compare = gpu::CompareOp::kGreaterEqual,
+                  .format = gpu::Format::kD32Float};
+    desc.color_formats.push_back(gpu::Format::kRGBA16Float);
+    desc.color_formats.push_back(gpu::Format::kR32Float);
     desc.sets.push_back(make_set0());
     desc.push_constant_size = sizeof(RhiPush);
     desc.debug_name = "scenehook_rhi_mesh";
@@ -179,17 +179,17 @@ bool SceneHookRhiDemo::Init(render::Renderer& renderer) {
   // the slot every frame before the draw reads it; the slot recycles only once
   // its fence has fired.
   const u64 arena_bytes = static_cast<u64>(instance_count_) * 48u;
-  for (u32 i = 0; i < render::Device::kMaxFramesInFlight; ++i) {
+  for (u32 i = 0; i < gpu::Device::kMaxFramesInFlight; ++i) {
     Slot slot;
     slot.instances = device_->CreateBuffer(
-        arena_bytes, render::kBufferUsageStorage | render::kBufferUsageDeviceAddress, false);
+        arena_bytes, gpu::kBufferUsageStorage | gpu::kBufferUsageDeviceAddress, false);
     slot.args = device_->CreateBuffer(
-        64, render::kBufferUsageStorage | render::kBufferUsageIndirect |
-                render::kBufferUsageDeviceAddress,
+        64, gpu::kBufferUsageStorage | gpu::kBufferUsageIndirect |
+                gpu::kBufferUsageDeviceAddress,
         false);
     slot.count = device_->CreateBuffer(
-        16, render::kBufferUsageStorage | render::kBufferUsageIndirect |
-                render::kBufferUsageDeviceAddress,
+        16, gpu::kBufferUsageStorage | gpu::kBufferUsageIndirect |
+                gpu::kBufferUsageDeviceAddress,
         false);
     if (!slot.instances.address || !slot.args.address || !slot.count.address) {
       RX_ERROR("scenehook-rhi: buffer-device-address unavailable");
@@ -209,8 +209,8 @@ void SceneHookRhiDemo::Record(const render::SceneHookContext& ctx) {
 
   // A tiny scratch buffer the compute pass touches, then churned every frame
   // through the frame-safe deferred-destruction path (exercises the graveyard).
-  render::GpuBuffer churn = device_->CreateBuffer(
-      256, render::kBufferUsageStorage | render::kBufferUsageDeviceAddress, false);
+  gpu::GpuBuffer churn = device_->CreateBuffer(
+      256, gpu::kBufferUsageStorage | gpu::kBufferUsageDeviceAddress, false);
 
   RhiPush push{};
   push.view_proj = ctx.view_proj;
@@ -230,24 +230,24 @@ void SceneHookRhiDemo::Record(const render::SceneHookContext& ctx) {
   ctx.cmd->Push(push);
   ctx.cmd->Dispatch((instance_count_ + 63) / 64, 1, 1);
   // Compute storage writes -> indirect-arg fetch and vertex-stage BDA reads.
-  ctx.cmd->MemoryBarrier(render::BarrierScope::kComputeWrite, render::BarrierScope::kIndirectArgs);
-  ctx.cmd->MemoryBarrier(render::BarrierScope::kComputeWrite, render::BarrierScope::kGraphicsRead);
+  ctx.cmd->MemoryBarrier(gpu::BarrierScope::kComputeWrite, gpu::BarrierScope::kIndirectArgs);
+  ctx.cmd->MemoryBarrier(gpu::BarrierScope::kComputeWrite, gpu::BarrierScope::kGraphicsRead);
 
   // 2) Draw into rx's scene targets (LoadOp kLoad preserves rx's opaque + sky).
-  render::ColorAttachment colors[2];
-  colors[0] = {.view = ctx.color_view, .load = render::LoadOp::kLoad};
-  colors[1] = {.view = ctx.depth_export_view, .load = render::LoadOp::kLoad};
-  render::DepthAttachment depth{.view = ctx.depth_view, .load = render::LoadOp::kLoad};
+  gpu::ColorAttachment colors[2];
+  colors[0] = {.view = ctx.color_view, .load = gpu::LoadOp::kLoad};
+  colors[1] = {.view = ctx.depth_export_view, .load = gpu::LoadOp::kLoad};
+  gpu::DepthAttachment depth{.view = ctx.depth_view, .load = gpu::LoadOp::kLoad};
   ctx.cmd->BeginRendering({.extent = ctx.extent, .colors = base::Span(colors, 2), .depth = &depth});
 
   ctx.cmd->BindPipeline(draw_pipeline_);
-  ctx.cmd->BindTransient(0, {render::Bind::Combined(0, tex_array_.view, sampler_)});
+  ctx.cmd->BindTransient(0, {gpu::Bind::Combined(0, tex_array_.view, sampler_)});
   ctx.cmd->Push(push);
   ctx.cmd->DrawIndirectCount(slot.args, 0, slot.count, 0, /*max_draw_count=*/1, /*stride=*/16);
 
   if (use_mesh_) {
     ctx.cmd->BindPipeline(mesh_pipeline_);
-    ctx.cmd->BindTransient(0, {render::Bind::Combined(0, tex_array_.view, sampler_)});
+    ctx.cmd->BindTransient(0, {gpu::Bind::Combined(0, tex_array_.view, sampler_)});
     ctx.cmd->Push(push);
     // One mesh-task record at byte 16 of the args buffer (uint3 group counts).
     ctx.cmd->DrawMeshTasksIndirect(slot.args, 16, /*draw_count=*/1, /*stride=*/12);

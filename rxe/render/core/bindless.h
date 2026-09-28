@@ -97,14 +97,14 @@ class BindlessRegistry {
   // RX_MATERIAL_FLAG_HUMAN so the raster and RT flag namespaces agree.
   static constexpr u32 kMaterialHuman = 1u << 22;
 
-  static base::UniquePointer<BindlessRegistry> Create(Device& device);
+  static base::UniquePointer<BindlessRegistry> Create(gpu::Device& device);
   ~BindlessRegistry();
 
   BindlessRegistry(const BindlessRegistry&) = delete;
   BindlessRegistry& operator=(const BindlessRegistry&) = delete;
 
   // All return kInvalidIndex when the respective table is full.
-  u32 RegisterTexture(TextureView view);
+  u32 RegisterTexture(gpu::TextureView view);
   u32 RegisterMaterial(const MaterialRecord& record);
   // Rewrites an already-registered record's SHADING fields, leaving its texture
   // indices alone (streaming owns those; see RewriteTextureIndex). The live
@@ -124,26 +124,26 @@ class BindlessRegistry {
   // Geometry records must follow the blas geometry order (non-blend
   // submeshes in submesh order). Returns the instanceCustomIndex.
   // The buffers must have been created with kBufferUsageDeviceAddress.
-  u32 RegisterMesh(const GpuBuffer& vertices, const GpuBuffer& indices,
+  u32 RegisterMesh(const gpu::GpuBuffer& vertices, const gpu::GpuBuffer& indices,
                    const GeometryRecord* geometries, u32 geometry_count);
   // Returns a mesh/geometry table allocation to the free lists. The caller
   // must wait until in-flight TLAS users of the index have completed.
   void ReleaseMesh(u32 index);
 
-  BindingLayoutHandle set_layout() const { return set_layout_; }
-  BindingSetHandle set() const { return set_; }
+  gpu::BindingLayoutHandle set_layout() const { return set_layout_; }
+  gpu::BindingSetHandle set() const { return set_; }
 
  private:
-  explicit BindlessRegistry(Device& device) : device_(device) {}
+  explicit BindlessRegistry(gpu::Device& device) : device_(device) {}
   bool Initialize();
 
-  Device& device_;
-  BindingLayoutHandle set_layout_;
-  BindingSetHandle set_;
+  gpu::Device& device_;
+  gpu::BindingLayoutHandle set_layout_;
+  gpu::BindingSetHandle set_;
 
-  GpuBuffer mesh_table_;      // host visible MeshRecord[]
-  GpuBuffer geometry_table_;  // host visible GeometryRecord[]
-  GpuBuffer material_table_;  // host visible MaterialRecord[]
+  gpu::GpuBuffer mesh_table_;      // host visible MeshRecord[]
+  gpu::GpuBuffer geometry_table_;  // host visible GeometryRecord[]
+  gpu::GpuBuffer material_table_;  // host visible MaterialRecord[]
   struct GeometryRange {
     u32 offset = 0;
     u32 count = 0;

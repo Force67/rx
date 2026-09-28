@@ -46,22 +46,22 @@ class FroxelFog {
     // fills interiors with a flat glow instead of window shafts.
     bool ray_query_sun = false;
     // Cluster + shadow inputs (dummies when a feature is off).
-    GpuBuffer lights;
-    GpuBuffer cluster_counts;
-    GpuBuffer cluster_indices;
-    GpuBuffer local_shadow_faces;
-    TextureView local_shadow_atlas;
-    GpuBuffer cascade_buffer;
+    gpu::GpuBuffer lights;
+    gpu::GpuBuffer cluster_counts;
+    gpu::GpuBuffer cluster_indices;
+    gpu::GpuBuffer local_shadow_faces;
+    gpu::TextureView local_shadow_atlas;
+    gpu::GpuBuffer cascade_buffer;
     u64 cascade_size = 0;
-    TextureView cascade_atlas;
-    SamplerHandle comparison_sampler;
+    gpu::TextureView cascade_atlas;
+    gpu::SamplerHandle comparison_sampler;
   };
 
   // ray_query builds the second scatter pipeline that shadows the sun with an
   // inline ray; without it Frame::ray_query_sun is ignored and the pass stays
   // on the cascades.
-  bool Initialize(Device& device, bool ray_query);
-  void Destroy(Device& device);
+  bool Initialize(gpu::Device& device, bool ray_query);
+  void Destroy(gpu::Device& device);
   bool available() const { return static_cast<bool>(scatter_pipeline_); }
 
   // Records scatter + integrate + composite onto `lit`. cascade_atlas rides as
@@ -71,26 +71,26 @@ class FroxelFog {
   // for the ray-query sun and the rt pipeline came up.
   void AddToGraph(RenderGraph& graph, ResourceHandle lit, ResourceHandle depth_export,
                   ResourceHandle cascade_atlas_handle, RayTracingContext* raytracing,
-                  u32 tlas_slot, Extent2D extent, const Frame& frame);
+                  u32 tlas_slot, gpu::Extent2D extent, const Frame& frame);
 
   // Whether the inline-ray scatter variant was built. False on a device with no
   // ray query, or if that pipeline failed to compile.
   bool ray_query_available() const { return static_cast<bool>(scatter_pipeline_rt_); }
 
   // Sampled by translucency passes after AddToGraph ran this frame.
-  const GpuImage& integrated() const { return integrated_; }
-  SamplerHandle volume_sampler() const { return sampler_; }
+  const gpu::GpuImage& integrated() const { return integrated_; }
+  gpu::SamplerHandle volume_sampler() const { return sampler_; }
 
  private:
-  PipelineHandle scatter_pipeline_;
-  PipelineHandle scatter_pipeline_rt_;
-  PipelineHandle integrate_pipeline_;
-  PipelineHandle apply_pipeline_;
-  GpuImage scatter_[2];  // temporal ping-pong
-  GpuImage integrated_;
-  SamplerHandle sampler_;
-  GpuBuffer dummy_uniform_;
-  GpuBuffer camera_[2];  // scatter matrices, too big for the push block
+  gpu::PipelineHandle scatter_pipeline_;
+  gpu::PipelineHandle scatter_pipeline_rt_;
+  gpu::PipelineHandle integrate_pipeline_;
+  gpu::PipelineHandle apply_pipeline_;
+  gpu::GpuImage scatter_[2];  // temporal ping-pong
+  gpu::GpuImage integrated_;
+  gpu::SamplerHandle sampler_;
+  gpu::GpuBuffer dummy_uniform_;
+  gpu::GpuBuffer camera_[2];  // scatter matrices, too big for the push block
   bool volumes_initialized_ = false;
 };
 

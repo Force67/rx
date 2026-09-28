@@ -40,18 +40,18 @@ f32 Sigmoid(f32 x) { return 1.0f / (1.0f + ::expf(-x)); }
 
 }  // namespace
 
-bool GaussianSplat::Initialize(Device& device, Format color_format) {
+bool GaussianSplat::Initialize(gpu::Device& device, gpu::Format color_format) {
   // TODO(rhi): blend preset mismatch: old alpha factors were ZERO/ONE (dst alpha
   // preserved); kAlpha uses ONE/ONE_MINUS_SRC_ALPHA.
   pipeline_ = device.CreateGraphicsPipeline({
       .vertex = RX_SHADER(k_gsplat_vs_hlsl),
       .fragment = RX_SHADER(k_gsplat_ps_hlsl),
-      .topology = PrimitiveTopology::kTriangleStrip,
-      .raster = {.cull = CullMode::kNone},
+      .topology = gpu::PrimitiveTopology::kTriangleStrip,
+      .raster = {.cull = gpu::CullMode::kNone},
       .color_formats = {color_format},
-      .blend = {BlendMode::kAlpha},
-      .sets = {{.slots = {{0, BindingType::kStorageBuffer}}}},
-      .push_constant_size = PushSize<GaussianPush>(),
+      .blend = {gpu::BlendMode::kAlpha},
+      .sets = {{.slots = {{0, gpu::BindingType::kStorageBuffer}}}},
+      .push_constant_size = gpu::PushSize<GaussianPush>(),
       .debug_name = "gaussian_splat",
   });
   if (!pipeline_) {
@@ -61,7 +61,7 @@ bool GaussianSplat::Initialize(Device& device, Format color_format) {
 
   for (u32 i = 0; i < kFramesInFlight; ++i) {
     buffers_[i] = device.CreateBuffer(static_cast<u64>(kMaxGaussians) * sizeof(GaussianInstance),
-                                      kBufferUsageStorage, true);
+                                      gpu::kBufferUsageStorage, true);
     if (!buffers_[i].mapped) return false;
   }
   return true;
@@ -87,19 +87,19 @@ void GaussianSplat::AddToGraph(RenderGraph& graph, ResourceHandle color,
 
   GaussianInstance* dst = static_cast<GaussianInstance*>(buffers_[frame_slot].mapped);
   for (u32 i = 0; i < count; ++i) dst[i] = gaussians[order[i]];
-  GpuBuffer buffer = buffers_[frame_slot];
+  gpu::GpuBuffer buffer = buffers_[frame_slot];
 
   graph.AddPass(
       "gaussian_splat",
       [&](RenderGraph::PassBuilder& builder) { builder.Write(color, ResourceUsage::kColorAttachment); },
       [this, color, buffer, count, frame](PassContext& ctx) {
-        const GpuImage& target = ctx.graph->image(color);
-        ColorAttachment attachment[] = {{.view = target.view, .load = LoadOp::kLoad}};
+        const gpu::GpuImage& target = ctx.graph->image(color);
+        gpu::ColorAttachment attachment[] = {{.view = target.view, .load = gpu::LoadOp::kLoad}};
         ctx.cmd->BeginRendering({.extent = target.extent, .colors = attachment});
 
         ctx.cmd->BindPipeline(pipeline_);
         ctx.cmd->BindTransient(
-            0, {Bind::StorageBuffer(0, buffer, 0, count * sizeof(GaussianInstance))});
+            0, {gpu::Bind::StorageBuffer(0, buffer, 0, count * sizeof(GaussianInstance))});
 
         GaussianPush push{};
         push.view = frame.view;
@@ -114,7 +114,7 @@ void GaussianSplat::AddToGraph(RenderGraph& graph, ResourceHandle color,
       });
 }
 
-void GaussianSplat::Destroy(Device& device) {
+void GaussianSplat::Destroy(gpu::Device& device) {
   device.DestroyPipeline(pipeline_);
   pipeline_ = {};
   for (u32 i = 0; i < kFramesInFlight; ++i) device.DestroyBuffer(buffers_[i]);

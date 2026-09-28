@@ -183,7 +183,7 @@ bool Editor::UiInit() {
   else
     RX_WARN("editor: no system font found; text will not render");
 
-  render::VulkanHandles vk = render::GetVulkanHandles(*renderer_->device());
+  gpu::VulkanHandles vk = gpu::GetVulkanHandles(*renderer_->device());
   if (!vk.device) {
     RX_WARN("editor: renderer is not on the Vulkan backend; ugui disabled");
     return false;
@@ -194,8 +194,8 @@ bool Editor::UiInit() {
   bi.device = vk.device;
   bi.queue_family = vk.graphics_family;
   bi.queue = vk.graphics_queue;
-  bi.color_format = render::GetVkFormat(renderer_->swapchain_format());
-  bi.frames_in_flight = render::GetVulkanFramesInFlight(*renderer_->device());
+  bi.color_format = gpu::GetVkFormat(renderer_->swapchain_format());
+  bi.frames_in_flight = gpu::GetVulkanFramesInFlight(*renderer_->device());
   if (!backend_.Init(bi))
     return false;
   ui_.set_texture_backend(&backend_);
@@ -1423,11 +1423,11 @@ void Editor::OnBuildView(f32 dt, render::FrameView &view) {
     font_revision_ = ui_.text_engine().atlas_revision();
   }
   backend_.NewFrame();
-  view.hud_draw = [this, &view](render::CommandList &cmd) {
-    backend_.SetBackdrop(render::GetVkImageView(view.blur_source),
-                         render::GetVkSampler(view.blur_sampler));
+  view.hud_draw = [this, &view](gpu::CommandList &cmd) {
+    backend_.SetBackdrop(gpu::GetVkImageView(view.blur_source),
+                         gpu::GetVkSampler(view.blur_sampler));
     if (draw_data_)
-      backend_.Render(*draw_data_, render::GetVkCommandBuffer(cmd));
+      backend_.Render(*draw_data_, gpu::GetVkCommandBuffer(cmd));
   };
 }
 

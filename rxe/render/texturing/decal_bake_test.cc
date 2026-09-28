@@ -23,6 +23,7 @@
 #include "rxe/render/texturing/decal_bake.h"
 
 using namespace rx::render;
+namespace gpu = rx::gpu;
 using rx::asset::Vertex;
 using rx::Vec3;
 
@@ -47,7 +48,7 @@ bool Near(f32 a, f32 b) { return ::fabsf(a - b) < 1e-4f; }
 // A unit quad in the XZ plane, uv0 covering the full 0..1 chart. World x maps to
 // u and world z to v, so a projector at the origin lands in the middle of the
 // tile and the tile corners stay outside it.
-GpuMesh CreateQuad(Device& device, f32 udim_u = 0) {
+gpu::GpuMesh CreateQuad(gpu::Device& device, f32 udim_u = 0) {
   const f32 u0 = udim_u;
   const f32 u1 = udim_u + 1.0f;
   const Vertex vertices[4] = {
@@ -57,36 +58,36 @@ GpuMesh CreateQuad(Device& device, f32 udim_u = 0) {
       {{-1, 0, 1}, {0, 1, 0}, {1, 0, 0, 1}, {u0, 1}, 0xffffffff},
   };
   const u32 indices[6] = {0, 1, 2, 0, 2, 3};
-  GpuMesh mesh;
+  gpu::GpuMesh mesh;
   mesh.vertices = device.CreateBufferWithData(
-      rx::ByteSpan(reinterpret_cast<const u8*>(vertices), sizeof(vertices)), kBufferUsageVertex);
+      rx::ByteSpan(reinterpret_cast<const u8*>(vertices), sizeof(vertices)), gpu::kBufferUsageVertex);
   mesh.indices = device.CreateBufferWithData(
-      rx::ByteSpan(reinterpret_cast<const u8*>(indices), sizeof(indices)), kBufferUsageIndex);
+      rx::ByteSpan(reinterpret_cast<const u8*>(indices), sizeof(indices)), gpu::kBufferUsageIndex);
   mesh.index_count = 6;
   mesh.vertex_count = 4;
   return mesh;
 }
 
 // 1x1 opaque white: the "authored" decal page every stamp in this test samples.
-GpuImage CreateWhiteSource(Device& device) {
-  GpuImage image = device.CreateImage2D(Format::kRGBA8Unorm, {1, 1},
-                                        kTextureUsageSampled | kTextureUsageTransferDst);
+gpu::GpuImage CreateWhiteSource(gpu::Device& device) {
+  gpu::GpuImage image = device.CreateImage2D(gpu::Format::kRGBA8Unorm, {1, 1},
+                                        gpu::kTextureUsageSampled | gpu::kTextureUsageTransferDst);
   if (!image) return image;
   const f32 white[4] = {1, 1, 1, 1};
-  device.ImmediateSubmit([&](CommandList& cmd) {
-    cmd.Barrier(Transition(image, ResourceState::kUndefined, ResourceState::kCopyDst));
+  device.ImmediateSubmit([&](gpu::CommandList& cmd) {
+    cmd.Barrier(gpu::Transition(image, gpu::ResourceState::kUndefined, gpu::ResourceState::kCopyDst));
     cmd.ClearColor(image, white);
-    cmd.Barrier(Transition(image, ResourceState::kCopyDst, ResourceState::kShaderReadFragment));
+    cmd.Barrier(gpu::Transition(image, gpu::ResourceState::kCopyDst, gpu::ResourceState::kShaderReadFragment));
   });
   return image;
 }
 
-void RunBake(Device& device, DecalBaker& baker, TransientPool& pool,
-             const DecalBaker::Target& target, u64 frame_index, TextureView source) {
+void RunBake(gpu::Device& device, DecalBaker& baker, TransientPool& pool,
+             const DecalBaker::Target& target, u64 frame_index, gpu::TextureView source) {
   RenderGraph graph;
   pool.BeginFrame();
   baker.AddToGraph(graph, base::Span(&target, 1), 0, frame_index, source, source);
-  CommandList* cmd = device.BeginFrame(0);
+  gpu::CommandList* cmd = device.BeginFrame(0);
   if (!cmd || !graph.Compile(device, pool)) {
     Check(false, "frame and graph setup");
     return;
@@ -117,13 +118,13 @@ int main() {
     Check(::fabsf(outside.x) > 1.0f, "a point past the box falls outside");
   }
 
-  DeviceDesc desc;
-  desc.backend = Backend::kVulkan;
+  gpu::DeviceDesc desc;
+  desc.backend = gpu::Backend::kVulkan;
   desc.request_raytracing = false;
   // RX_VALIDATION=1 runs the bake through the Vulkan validation layers, which
   // is where the pass's hand-written image barriers get checked.
   desc.enable_validation = ::getenv("RX_VALIDATION") != nullptr;
-  base::UniquePointer<Device> device = Device::CreateOffscreen(desc);
+  base::UniquePointer<gpu::Device> device = gpu::Device::CreateOffscreen(desc);
   if (!device) {
     ::fprintf(stderr, "decal_bake_test: FAIL: CreateOffscreen returned null\n");
     return 1;
@@ -146,8 +147,8 @@ int main() {
   }
   Check(baker.stats().tile_capacity == 1, "a 64/64 atlas holds exactly one tile");
 
-  GpuMesh quad = CreateQuad(*device);
-  GpuImage source = CreateWhiteSource(*device);
+  gpu::GpuMesh quad = CreateQuad(*device);
+  gpu::GpuImage source = CreateWhiteSource(*device);
   if (!quad.vertices || !quad.indices || !source) {
     ::fprintf(stderr, "decal_bake_test: FAIL: test resource creation\n");
     return 1;
@@ -165,16 +166,16 @@ int main() {
   };
   auto read_atlas = [&] {
     base::MemSet(pixels.data(), 0, pixels.size());
-    Check(device->ReadbackImage(baker.albedo_atlas(), ResourceState::kShaderReadFragment,
+    Check(device->ReadbackImage(baker.albedo_atlas(), gpu::ResourceState::kShaderReadFragment,
                                 pixels.data(), pixels.size()),
           "reading the layer atlas back");
     // ReadbackImage leaves the image in kCopySrc, but the baker rightly assumes
     // it owns the atlas and left it shader-readable. Nothing in the renderer
     // reads the atlas back; put it where the baker expects it so the next bake's
     // barriers stay honest (and validation stays quiet).
-    device->ImmediateSubmit([&](CommandList& cmd) {
-      cmd.Barrier(Transition(baker.albedo_atlas(), ResourceState::kCopySrc,
-                             ResourceState::kShaderReadFragment));
+    device->ImmediateSubmit([&](gpu::CommandList& cmd) {
+      cmd.Barrier(gpu::Transition(baker.albedo_atlas(), gpu::ResourceState::kCopySrc,
+                             gpu::ResourceState::kShaderReadFragment));
     });
   };
 
@@ -258,7 +259,7 @@ int main() {
     if (!budget.Initialize(*device, bd3)) {
       Check(false, "budget baker initialize");
     } else {
-      GpuMesh quad3 = CreateQuad(*device);
+      gpu::GpuMesh quad3 = CreateQuad(*device);
       // Two receivers, each with a journal as long as the whole frame budget:
       // the first fits, the second cannot and must be left untouched.
       u32 handles[2] = {budget.AcquireReceiver(), budget.AcquireReceiver()};
@@ -278,7 +279,7 @@ int main() {
       RenderGraph graph;
       pool.BeginFrame();
       budget.AddToGraph(graph, base::Span(t3, 2), 0, 1, source.view, source.view);
-      CommandList* cmd = device->BeginFrame(0);
+      gpu::CommandList* cmd = device->BeginFrame(0);
       if (cmd && graph.Compile(*device, pool)) {
         PassContext ctx;
         ctx.cmd = cmd;
@@ -308,7 +309,7 @@ int main() {
     if (!burst.Initialize(*device, bd2)) {
       Check(false, "burst baker initialize");
     } else {
-      GpuMesh quad2 = CreateQuad(*device);
+      gpu::GpuMesh quad2 = CreateQuad(*device);
       const u32 many = burst.AcquireReceiver();
       // 12 projectors in a row across the quad, oldest first.
       constexpr u32 kSpots = 12;
@@ -325,7 +326,7 @@ int main() {
       RunBake(*device, burst, pool, t2, 1, source.view);
 
       base::Vector<u8> tile(256ull * 256 * 4);
-      Check(device->ReadbackImage(burst.albedo_atlas(), ResourceState::kShaderReadFragment,
+      Check(device->ReadbackImage(burst.albedo_atlas(), gpu::ResourceState::kShaderReadFragment,
                                   tile.data(), tile.size()),
             "reading the burst atlas back");
       u32 landed = 0;
@@ -357,7 +358,7 @@ int main() {
   // Real character bodies (Daz/Genesis) lay their zones out across u in [0,7).
   // Without a bias the whole mesh sits outside 0..1 and nothing may bake; with
   // one, the addressed zone gets the entire layer.
-  GpuMesh udim_quad = CreateQuad(*device, 2.0f);
+  gpu::GpuMesh udim_quad = CreateQuad(*device, 2.0f);
   const u32 shifted = baker.AcquireReceiver();
   target.receiver = shifted;
   target.mesh = &udim_quad;

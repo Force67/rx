@@ -21,13 +21,13 @@ namespace rx::render {
 
 class HairStrands {
  public:
-  bool Initialize(Device& device, Format color_format, Format depth_format);
-  void Destroy(Device& device);
+  bool Initialize(gpu::Device& device, gpu::Format color_format, gpu::Format depth_format);
+  void Destroy(gpu::Device& device);
   bool active() const;
 
   // Uploads a CPU-built groom and returns a stable handle (0 = failure). The
   // transform places the groom-local frame (scalp at origin) into the world.
-  u32 CreateGroom(Device& device, const GroomData& data, const GroomParams& params,
+  u32 CreateGroom(gpu::Device& device, const GroomData& data, const GroomParams& params,
                   const Mat4& transform);
   // Re-places the groom. A groom that no simulation feeds follows rigidly
   // (its rest pose re-transformed); a fed groom only moves its head sphere,
@@ -37,14 +37,14 @@ class HairStrands {
   // Feeds this frame's simulated node positions (world-space xyz, strand-major,
   // guide_count * kGroomPointsPerStrand nodes). Extra floats are ignored.
   void SetGroomPoints(u32 id, const f32* positions, u32 count);
-  void DestroyGroom(Device& device, u32 id);
+  void DestroyGroom(gpu::Device& device, u32 id);
   // The groom's head collision sphere in world space (transform applied), for
   // aligning a head mesh to it. Returns false for an unknown id.
   bool GroomHead(u32 id, Vec3* center, f32* radius);
 
   // Procedural fallback groom on a head sphere (the original --demo strands
   // look); static unless a simulation feeds it through SetGroomPoints.
-  void SeedCap(Device& device, const Vec3& head_center, f32 head_radius, u32 strand_count,
+  void SeedCap(gpu::Device& device, const Vec3& head_center, f32 head_radius, u32 strand_count,
                f32 strand_length);
 
   // Per-groom fibre parameters. Colour is PIGMENT: the groom's per-strand colour
@@ -84,16 +84,16 @@ class HairStrands {
   void AddTransmittanceToGraph(RenderGraph& graph, const Frame& frame, u32 frame_slot);
 
   void AddToGraph(RenderGraph& graph, ResourceHandle color, ResourceHandle depth,
-                  Extent2D extent, const Frame& frame, u32 frame_slot);
+                  gpu::Extent2D extent, const Frame& frame, u32 frame_slot);
 
   // The volume the last AddTransmittanceToGraph produced, for consumers outside
   // the hair pass (the skin under the groom needs the same fibre count). Null
   // view when hair is absent or the volume is off.
   struct TransmittanceBinding {
-    TextureView front_depth;
-    TextureView layers;
-    const GpuBuffer* params = nullptr;
-    SamplerHandle sampler;
+    gpu::TextureView front_depth;
+    gpu::TextureView layers;
+    const gpu::GpuBuffer* params = nullptr;
+    gpu::SamplerHandle sampler;
   };
   TransmittanceBinding transmittance() const;
 
@@ -118,9 +118,9 @@ class HairStrands {
     f32 prev[4];  // xyz previous position, w unused
   };
   struct Groom {
-    GpuBuffer points[kFramesInFlight];  // host-visible HairPoint ring
-    GpuBuffer colors;                   // guide_count float4 linear rgb
-    GpuBuffer indices;  // ribbon triangle list over guide_count * children strands
+    gpu::GpuBuffer points[kFramesInFlight];  // host-visible HairPoint ring
+    gpu::GpuBuffer colors;                   // guide_count float4 linear rgb
+    gpu::GpuBuffer indices;  // ribbon triangle list over guide_count * children strands
     base::Vector<HairPoint> host_points;  // canonical CPU copy, world space
     base::Vector<f32> local_points;       // groom-local rest, for the unfed rigid path
     u32 stale = 0;      // per-slot bits: host_points newer than points[slot]
@@ -136,32 +136,32 @@ class HairStrands {
     Vec3 tint{1, 1, 1};
     HairSurfaceParameters hair;
     HairTier tier = HairTier::kHero;
-    GpuBuffer material;  // GroomMaterial, rewritten only when the material changes
+    gpu::GpuBuffer material;  // GroomMaterial, rewritten only when the material changes
     u32 id = 0;
     bool alive = false;
   };
   Groom* Find(u32 id);
-  u32 Upload(Device& device, const GroomData& data, const GroomParams& params,
+  u32 Upload(gpu::Device& device, const GroomData& data, const GroomParams& params,
              const Mat4& transform);
   // World AABB of every live groom's points. The light frustum is fitted to it,
   // so the map's resolution follows the hair rather than the world.
   bool WorldBounds(Vec3* lo, Vec3* hi) const;
   void WriteGroomMaterial(Groom& g);
 
-  PipelineHandle draw_pipeline_;
-  PipelineHandle depth_pipeline_;  // DOM pass one: front-most fibre depth
-  PipelineHandle dom_pipeline_;    // DOM pass two: layered fibre counts
-  SamplerHandle volume_sampler_;
-  GpuImage front_depth_;
-  GpuImage dom_;
-  GpuBuffer volume_params_[kFramesInFlight];
-  ResourceState front_depth_state_ = ResourceState::kUndefined;
-  ResourceState dom_state_ = ResourceState::kUndefined;
+  gpu::PipelineHandle draw_pipeline_;
+  gpu::PipelineHandle depth_pipeline_;  // DOM pass one: front-most fibre depth
+  gpu::PipelineHandle dom_pipeline_;    // DOM pass two: layered fibre counts
+  gpu::SamplerHandle volume_sampler_;
+  gpu::GpuImage front_depth_;
+  gpu::GpuImage dom_;
+  gpu::GpuBuffer volume_params_[kFramesInFlight];
+  gpu::ResourceState front_depth_state_ = gpu::ResourceState::kUndefined;
+  gpu::ResourceState dom_state_ = gpu::ResourceState::kUndefined;
   bool volume_valid_ = false;
   u32 volume_slot_ = 0;
   ResourceHandle volume_front_handle_{};
   ResourceHandle volume_layers_handle_{};
-  Device* device_ = nullptr;
+  gpu::Device* device_ = nullptr;
   base::Vector<Groom> grooms_;
   u32 next_id_ = 1;
 };

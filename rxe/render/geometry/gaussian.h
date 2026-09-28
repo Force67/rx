@@ -10,9 +10,12 @@
 #include "rxe/render/core/render_graph.h"
 #include "rxe/gpu/rhi/device.h"
 
+namespace rx::gpu {
+class Device;
+}  // namespace rx::gpu
+
 namespace rx::render {
 
-class Device;
 
 // One 3D gaussian, filled by the engine and handed to the renderer through
 // FrameView. Matches the Gaussian struct in gsplat.vs (std430).
@@ -33,8 +36,8 @@ struct GaussianInstance {
 // architecture treats splats as first-class drawables alongside triangles.
 class GaussianSplat {
  public:
-  bool Initialize(Device& device, Format color_format);
-  void Destroy(Device& device);
+  bool Initialize(gpu::Device& device, gpu::Format color_format);
+  void Destroy(gpu::Device& device);
 
   struct Frame {
     Mat4 view;       // world -> view
@@ -55,8 +58,8 @@ class GaussianSplat {
   static constexpr u32 kFramesInFlight = 2;
   static constexpr u32 kMaxGaussians = 1u << 18;  // 262144
 
-  PipelineHandle pipeline_;
-  GpuBuffer buffers_[kFramesInFlight];
+  gpu::PipelineHandle pipeline_;
+  gpu::GpuBuffer buffers_[kFramesInFlight];
 };
 
 // Loads an INRIA 3D Gaussian Splatting .ply (ascii or binary little-endian) into

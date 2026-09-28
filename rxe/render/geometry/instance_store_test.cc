@@ -15,29 +15,30 @@ namespace {
 
 using namespace rx;
 using namespace rx::render;
+namespace gpu = rx::gpu;
 
-class TestDevice final : public Device {
+class TestDevice final : public gpu::Device {
  public:
   ~TestDevice() override = default;
 
   void WaitIdle() override {}
   bool RecreateSurface(Window&) override { return false; }
   void DestroySurface() override {}
-  base::UniquePointer<Swapchain> CreateSwapchain(u32, u32, bool, bool) override { return {}; }
+  base::UniquePointer<gpu::Swapchain> CreateSwapchain(u32, u32, bool, bool) override { return {}; }
   MemoryBudget memory_budget() const override { return {}; }
 
-  GpuBuffer CreateBuffer(rx::u64 size, BufferUsageFlags, bool) override {
+  gpu::GpuBuffer CreateBuffer(rx::u64 size, gpu::BufferUsageFlags, bool) override {
     auto* data = new u8[size];
     ++live_buffers_;
     return {.handle = {reinterpret_cast<rx::u64>(data)}, .size = size, .mapped = data};
   }
-  GpuBuffer CreateBufferWithData(ByteSpan data, BufferUsageFlags usage) override {
+  gpu::GpuBuffer CreateBufferWithData(ByteSpan data, gpu::BufferUsageFlags usage) override {
     ++data_uploads_;
-    GpuBuffer buffer = CreateBuffer(data.size(), usage, true);
+    gpu::GpuBuffer buffer = CreateBuffer(data.size(), usage, true);
     base::MemCopy(buffer.mapped, data.data(), data.size());
     return buffer;
   }
-  void DestroyBuffer(GpuBuffer& buffer) override {
+  void DestroyBuffer(gpu::GpuBuffer& buffer) override {
     if (buffer) {
       delete[] reinterpret_cast<u8*>(buffer.handle.value);
       --live_buffers_;
@@ -45,33 +46,33 @@ class TestDevice final : public Device {
     buffer = {};
   }
 
-  GpuImage CreateImage2D(Format, Extent2D, TextureUsageFlags, u32, u32) override { return {}; }
-  GpuImage CreateImageCube(Format, u32, TextureUsageFlags, u32) override { return {}; }
-  void DestroyImage(GpuImage& image) override { image = {}; }
-  TextureView CreateMipView(const GpuImage&, u32) override { return {}; }
-  TextureView CreateArrayView(const GpuImage&) override { return {}; }
-  void DestroyView(TextureView) override {}
-  SamplerHandle GetSampler(const SamplerDesc&) override { return {}; }
-  PipelineHandle CreateComputePipeline(const ComputePipelineDesc&) override { return {}; }
-  PipelineHandle CreateGraphicsPipeline(const GraphicsPipelineDesc&) override { return {}; }
-  void DestroyPipeline(PipelineHandle) override {}
-  BindingLayoutHandle CreateBindingLayout(const BindingLayoutDesc&) override { return {}; }
-  void DestroyBindingLayout(BindingLayoutHandle) override {}
-  BindingSetHandle CreateBindingSet(BindingLayoutHandle, u32) override { return {}; }
-  void DestroyBindingSet(BindingSetHandle) override {}
-  void UpdateBindingSet(BindingSetHandle, base::Span<const BindingItem>) override {}
-  AccelSizes GetBlasSizes(const BlasBuildDesc&) override { return {}; }
-  AccelSizes GetTlasSizes(u32) override { return {}; }
-  AccelStructHandle CreateAccelStruct(AccelStructType, rx::u64) override { return {}; }
-  void DestroyAccelStruct(AccelStructHandle) override {}
-  rx::u64 accel_address(AccelStructHandle) override { return 0; }
-  TimestampPoolHandle CreateTimestampPool(u32) override { return {}; }
-  void DestroyTimestampPool(TimestampPoolHandle) override {}
-  bool GetTimestamps(TimestampPoolHandle, u32, u32, rx::u64*) override { return false; }
-  void ImmediateSubmit(const base::Function<void(CommandList&)>&) override {}
-  CommandList* BeginFrame(u32) override { return nullptr; }
-  PresentResult SubmitFrame(CommandList*, Swapchain&, u32) override {
-    return PresentResult::kFailed;
+  gpu::GpuImage CreateImage2D(gpu::Format, gpu::Extent2D, gpu::TextureUsageFlags, u32, u32) override { return {}; }
+  gpu::GpuImage CreateImageCube(gpu::Format, u32, gpu::TextureUsageFlags, u32) override { return {}; }
+  void DestroyImage(gpu::GpuImage& image) override { image = {}; }
+  gpu::TextureView CreateMipView(const gpu::GpuImage&, u32) override { return {}; }
+  gpu::TextureView CreateArrayView(const gpu::GpuImage&) override { return {}; }
+  void DestroyView(gpu::TextureView) override {}
+  gpu::SamplerHandle GetSampler(const gpu::SamplerDesc&) override { return {}; }
+  gpu::PipelineHandle CreateComputePipeline(const gpu::ComputePipelineDesc&) override { return {}; }
+  gpu::PipelineHandle CreateGraphicsPipeline(const gpu::GraphicsPipelineDesc&) override { return {}; }
+  void DestroyPipeline(gpu::PipelineHandle) override {}
+  gpu::BindingLayoutHandle CreateBindingLayout(const gpu::BindingLayoutDesc&) override { return {}; }
+  void DestroyBindingLayout(gpu::BindingLayoutHandle) override {}
+  gpu::BindingSetHandle CreateBindingSet(gpu::BindingLayoutHandle, u32) override { return {}; }
+  void DestroyBindingSet(gpu::BindingSetHandle) override {}
+  void UpdateBindingSet(gpu::BindingSetHandle, base::Span<const gpu::BindingItem>) override {}
+  gpu::AccelSizes GetBlasSizes(const gpu::BlasBuildDesc&) override { return {}; }
+  gpu::AccelSizes GetTlasSizes(u32) override { return {}; }
+  gpu::AccelStructHandle CreateAccelStruct(gpu::AccelStructType, rx::u64) override { return {}; }
+  void DestroyAccelStruct(gpu::AccelStructHandle) override {}
+  rx::u64 accel_address(gpu::AccelStructHandle) override { return 0; }
+  gpu::TimestampPoolHandle CreateTimestampPool(u32) override { return {}; }
+  void DestroyTimestampPool(gpu::TimestampPoolHandle) override {}
+  bool GetTimestamps(gpu::TimestampPoolHandle, u32, u32, rx::u64*) override { return false; }
+  void ImmediateSubmit(const base::Function<void(gpu::CommandList&)>&) override {}
+  gpu::CommandList* BeginFrame(u32) override { return nullptr; }
+  gpu::PresentResult SubmitFrame(gpu::CommandList*, gpu::Swapchain&, u32) override {
+    return gpu::PresentResult::kFailed;
   }
 
   size_t live_buffers() const { return live_buffers_; }
@@ -84,7 +85,7 @@ class TestDevice final : public Device {
 
 bool Near(f32 a, f32 b) { return ::fabsf(a - b) < 1e-5f; }
 
-f32 TranslationX(const GpuBuffer& buffer, size_t index = 0) {
+f32 TranslationX(const gpu::GpuBuffer& buffer, size_t index = 0) {
   return static_cast<const Mat4*>(buffer.mapped)[index].m[12];
 }
 

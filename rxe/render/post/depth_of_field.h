@@ -13,8 +13,8 @@ namespace rx::render {
 
 class DepthOfFieldPass {
  public:
-  bool Initialize(Device& device);
-  void Destroy(Device& device);
+  bool Initialize(gpu::Device& device);
+  void Destroy(gpu::Device& device);
 
   struct Frame {
     f32 aperture = 6.0f;        // coc pixels per unit relative defocus
@@ -27,17 +27,17 @@ class DepthOfFieldPass {
   // color is the AA-resolved scene at output resolution; depth is the
   // render-res reversed-z export (uv-sampled, so resolutions may differ).
   ResourceHandle AddToGraph(RenderGraph& graph, ResourceHandle color, ResourceHandle depth,
-                            Extent2D extent, const Frame& frame);
+                            gpu::Extent2D extent, const Frame& frame);
 
  private:
-  PipelineHandle focus_pipeline_;
-  PipelineHandle coc_pipeline_;
-  PipelineHandle gather_pipeline_;
-  PipelineHandle composite_pipeline_;
-  GpuImage focus_state_;
-  ResourceState focus_layout_ = ResourceState::kUndefined;
+  gpu::PipelineHandle focus_pipeline_;
+  gpu::PipelineHandle coc_pipeline_;
+  gpu::PipelineHandle gather_pipeline_;
+  gpu::PipelineHandle composite_pipeline_;
+  gpu::GpuImage focus_state_;
+  gpu::ResourceState focus_layout_ = gpu::ResourceState::kUndefined;
   bool focus_valid_ = false;
-  SamplerHandle sampler_;
+  gpu::SamplerHandle sampler_;
 };
 
 }  // namespace rx::render

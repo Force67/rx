@@ -24,7 +24,7 @@
 #include <nvsdk_ngx_vk.h>
 #endif
 
-namespace rx::render::vk {
+namespace rx::gpu::vk {
 namespace {
 
 constexpr const char* kValidationLayer = "VK_LAYER_KHRONOS_validation";
@@ -3076,4 +3076,4 @@ PresentResult VulkanDevice::TranslatePresent(VkResult presented, Swapchain& swap
   return presented == VK_SUCCESS ? PresentResult::kOk : PresentResult::kFailed;
 }
 
-}  // namespace rx::render::vk
+}  // namespace rx::gpu::vk

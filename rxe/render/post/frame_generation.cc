@@ -18,20 +18,20 @@
 namespace rx::render {
 namespace {
 
-Format ToFormat(FfxSurfaceFormat format) {
+gpu::Format ToFormat(FfxSurfaceFormat format) {
   switch (format) {
-    case FFX_SURFACE_FORMAT_R32_FLOAT: return Format::kR32Float;
-    case FFX_SURFACE_FORMAT_R16G16_FLOAT: return Format::kRG16Float;
-    case FFX_SURFACE_FORMAT_R16G16_SINT: return Format::kRG16Sint;
-    case FFX_SURFACE_FORMAT_R32_UINT: return Format::kR32Uint;
-    default: return Format::kUnknown;
+    case FFX_SURFACE_FORMAT_R32_FLOAT: return gpu::Format::kR32Float;
+    case FFX_SURFACE_FORMAT_R16G16_FLOAT: return gpu::Format::kRG16Float;
+    case FFX_SURFACE_FORMAT_R16G16_SINT: return gpu::Format::kRG16Sint;
+    case FFX_SURFACE_FORMAT_R32_UINT: return gpu::Format::kR32Uint;
+    default: return gpu::Format::kUnknown;
   }
 }
 
-FfxResourceDescription DescribeImage(const GpuImage& image, FfxResourceUsage usage) {
+FfxResourceDescription DescribeImage(const gpu::GpuImage& image, FfxResourceUsage usage) {
   FfxResourceDescription desc{};
   desc.type = FFX_RESOURCE_TYPE_TEXTURE2D;
-  desc.format = ffxGetSurfaceFormatVK(GetVkFormat(image.format));
+  desc.format = ffxGetSurfaceFormatVK(gpu::GetVkFormat(image.format));
   desc.width = image.extent.width;
   desc.height = image.extent.height;
   desc.depth = 1;
@@ -55,13 +55,13 @@ PFN_vkVoidFunction DeviceProcAddr(VkDevice device, const char* name) {
 
 class FfxFrameGenerator final : public FrameGenerator {
  public:
-  explicit FfxFrameGenerator(Device& device) : device_(device) {}
+  explicit FfxFrameGenerator(gpu::Device& device) : device_(device) {}
   ~FfxFrameGenerator() override { Destroy(); }
 
   bool Initialize(const FrameGenDesc& desc) {
     desc_ = desc;
 
-    VulkanHandles h = GetVulkanHandles(device_);
+    gpu::VulkanHandles h = gpu::GetVulkanHandles(device_);
     if (h.device == VK_NULL_HANDLE) {
       RX_WARN("framegen: requires the vulkan backend");
       return false;
@@ -119,8 +119,8 @@ class FfxFrameGenerator final : public FrameGenerator {
     return true;
   }
 
-  bool Record(CommandList& cmd, const FrameGenInputs& in) override {
-    FfxCommandList ffx_cmd = ffxGetCommandListVK(GetVkCommandBuffer(cmd));
+  bool Record(gpu::CommandList& cmd, const FrameGenInputs& in) override {
+    FfxCommandList ffx_cmd = ffxGetCommandListVK(gpu::GetVkCommandBuffer(cmd));
 
     // 1) Optical flow over the pre-UI color (the ui would drag flow vectors).
     FfxOpticalflowDispatchDescription of{};
@@ -183,8 +183,8 @@ class FfxFrameGenerator final : public FrameGenerator {
     return true;
   }
 
-  const GpuImage& interpolated() const override { return interpolated_; }
-  const GpuImage& hudless() const override { return hudless_; }
+  const gpu::GpuImage& interpolated() const override { return interpolated_; }
+  const gpu::GpuImage& hudless() const override { return hudless_; }
 
  private:
   // Shared resource slots (app-owned, persistent, kept in GENERAL).
@@ -204,15 +204,15 @@ class FfxFrameGenerator final : public FrameGenerator {
         &of_shared.opticalFlowVector, &of_shared.opticalFlowSCD};
     for (u32 i = 0; i < kSharedCount; ++i) {
       const FfxResourceDescription& res = descs[i]->resourceDescription;
-      Format format = ToFormat(res.format);
-      if (format == Format::kUnknown) {
+      gpu::Format format = ToFormat(res.format);
+      if (format == gpu::Format::kUnknown) {
         RX_ERROR("framegen: unexpected shared resource format ({})",
                   static_cast<int>(res.format));
         return false;
       }
       shared_[i] = device_.CreateImage2D(
           format, {res.width, res.height},
-          kTextureUsageSampled | kTextureUsageStorage | kTextureUsageTransferDst);
+          gpu::kTextureUsageSampled | gpu::kTextureUsageStorage | gpu::kTextureUsageTransferDst);
       if (!shared_[i]) {
         RX_ERROR("framegen: shared resource allocation failed");
         return false;
@@ -223,8 +223,8 @@ class FfxFrameGenerator final : public FrameGenerator {
     // The interpolated output: UAV-written by FI, transfer-blitted into the
     // swapchain image (the blit also converts to the surface's channel order).
     interpolated_ = device_.CreateImage2D(
-        Format::kRGBA8Unorm, {desc_.display_width, desc_.display_height},
-        kTextureUsageStorage | kTextureUsageSampled | kTextureUsageTransferSrc);
+        gpu::Format::kRGBA8Unorm, {desc_.display_width, desc_.display_height},
+        gpu::kTextureUsageStorage | gpu::kTextureUsageSampled | gpu::kTextureUsageTransferSrc);
     if (!interpolated_) {
       RX_ERROR("framegen: interpolated target allocation failed");
       return false;
@@ -233,35 +233,35 @@ class FfxFrameGenerator final : public FrameGenerator {
     // TRANSFER_SRC as well: the FI context copies it into its internal
     // previous-interpolation-source buffer each dispatch.
     hudless_ = device_.CreateImage2D(
-        Format::kRGBA8Unorm, {desc_.display_width, desc_.display_height},
-        kTextureUsageSampled | kTextureUsageTransferDst | kTextureUsageTransferSrc);
+        gpu::Format::kRGBA8Unorm, {desc_.display_width, desc_.display_height},
+        gpu::kTextureUsageSampled | gpu::kTextureUsageTransferDst | gpu::kTextureUsageTransferSrc);
     if (!hudless_) {
       RX_ERROR("framegen: hudless target allocation failed");
       return false;
     }
 
-    device_.ImmediateSubmit([this](CommandList& cmd) {
-      TextureBarrier barriers[kSharedCount + 1];
+    device_.ImmediateSubmit([this](gpu::CommandList& cmd) {
+      gpu::TextureBarrier barriers[kSharedCount + 1];
       for (u32 i = 0; i < kSharedCount; ++i) {
-        barriers[i] = Transition(shared_[i], ResourceState::kUndefined, ResourceState::kGeneral);
+        barriers[i] = gpu::Transition(shared_[i], gpu::ResourceState::kUndefined, gpu::ResourceState::kGeneral);
       }
       barriers[kSharedCount] =
-          Transition(interpolated_, ResourceState::kUndefined, ResourceState::kGeneral);
+          gpu::Transition(interpolated_, gpu::ResourceState::kUndefined, gpu::ResourceState::kGeneral);
       cmd.TextureBarriers(base::Span(barriers, kSharedCount + 1));
-      TextureBarrier hudless_init =
-          Transition(hudless_, ResourceState::kUndefined, ResourceState::kShaderReadCompute);
+      gpu::TextureBarrier hudless_init =
+          gpu::Transition(hudless_, gpu::ResourceState::kUndefined, gpu::ResourceState::kShaderReadCompute);
       cmd.TextureBarriers(base::Span(&hudless_init, 1));
     });
     return true;
   }
 
-  FfxResource Res(const GpuImage& image, FfxResourceUsage usage, const wchar_t* name,
+  FfxResource Res(const gpu::GpuImage& image, FfxResourceUsage usage, const wchar_t* name,
                   FfxResourceStates state) {
-    return ffxGetResourceVK(GetVkImage(image), DescribeImage(image, usage), name, state);
+    return ffxGetResourceVK(gpu::GetVkImage(image), DescribeImage(image, usage), name, state);
   }
 
   FfxResource Shared(SharedSlot slot, const wchar_t* name) {
-    return ffxGetResourceVK(GetVkImage(shared_[slot]), shared_descs_[slot], name,
+    return ffxGetResourceVK(gpu::GetVkImage(shared_[slot]), shared_descs_[slot], name,
                             FFX_RESOURCE_STATE_UNORDERED_ACCESS);
   }
 
@@ -275,7 +275,7 @@ class FfxFrameGenerator final : public FrameGenerator {
       ffxOpticalflowContextDestroy(&of_context_);
       of_valid_ = false;
     }
-    for (GpuImage& image : shared_) {
+    for (gpu::GpuImage& image : shared_) {
       if (image) device_.DestroyImage(image);
     }
     if (interpolated_) device_.DestroyImage(interpolated_);
@@ -286,7 +286,7 @@ class FfxFrameGenerator final : public FrameGenerator {
     }
   }
 
-  Device& device_;
+  gpu::Device& device_;
   FrameGenDesc desc_;
   void* scratch_ = nullptr;
   size_t scratch_size_ = 0;
@@ -295,15 +295,15 @@ class FfxFrameGenerator final : public FrameGenerator {
   FfxFrameInterpolationContext fi_context_{};
   bool of_valid_ = false;
   bool fi_valid_ = false;
-  GpuImage shared_[kSharedCount];
+  gpu::GpuImage shared_[kSharedCount];
   FfxResourceDescription shared_descs_[kSharedCount]{};
-  GpuImage interpolated_;
-  GpuImage hudless_;
+  gpu::GpuImage interpolated_;
+  gpu::GpuImage hudless_;
 };
 
 }  // namespace
 
-base::UniquePointer<FrameGenerator> CreateFrameGenerator(Device& device, const FrameGenDesc& desc) {
+base::UniquePointer<FrameGenerator> CreateFrameGenerator(gpu::Device& device, const FrameGenDesc& desc) {
   auto generator = base::MakeUnique<FfxFrameGenerator>(device);
   if (!generator->Initialize(desc)) return nullptr;
   return generator;

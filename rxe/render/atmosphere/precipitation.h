@@ -5,9 +5,12 @@
 #include "rxe/render/core/render_graph.h"
 #include "rxe/gpu/rhi/resources.h"
 
+namespace rx::gpu {
+class Device;
+}  // namespace rx::gpu
+
 namespace rx::render {
 
-class Device;
 
 // Screen-space precipitation (rain streaks / snow flakes) composited over the
 // lit scene, driven by the weather system. Procedural, world-anchored, cheap; no
@@ -22,14 +25,14 @@ class Precipitation {
     bool snow = false;     // snow flakes vs rain streaks
   };
 
-  bool Initialize(Device& device);
-  void Destroy(Device& device);
+  bool Initialize(gpu::Device& device);
+  void Destroy(gpu::Device& device);
 
-  ResourceHandle AddToGraph(RenderGraph& graph, ResourceHandle color, Extent2D extent,
+  ResourceHandle AddToGraph(RenderGraph& graph, ResourceHandle color, gpu::Extent2D extent,
                             const Frame& frame);
 
  private:
-  PipelineHandle pipeline_;
+  gpu::PipelineHandle pipeline_;
 };
 
 }  // namespace rx::render

@@ -9,7 +9,7 @@
 #include "foundation/build_config/types.h"
 #include "rxe/gpu/rhi/types.h"
 
-namespace rx::render {
+namespace rx::gpu {
 
 class CommandList;
 class Device;
@@ -92,6 +92,6 @@ class GpuProfiler {
   u64 resolved_frames_ = 0;
 };
 
-}  // namespace rx::render
+}  // namespace rx::gpu
 
 #endif  // RX_RENDER_GPU_PROFILER_H_

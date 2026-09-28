@@ -25,7 +25,7 @@
 #include "rxe/gpu/rhi/swapchain.h"
 #include "rxe/gpu/rhi/vulkan_interop.h"
 
-namespace rx::render::vk {
+namespace rx::gpu::vk {
 
 // Resolves the promoted-command table VulkanApi() hands out; called once, right
 // after volkLoadDevice, with the api version the device was created at.
@@ -577,6 +577,6 @@ class VulkanDevice final : public Device {
   friend class VulkanCommandList;
 };
 
-}  // namespace rx::render::vk
+}  // namespace rx::gpu::vk
 
 #endif  // RX_RENDER_VULKAN_VK_BACKEND_H_

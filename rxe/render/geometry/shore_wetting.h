@@ -29,11 +29,11 @@ class ShoreWetting {
     f32 drying_time = 28.0f; // seconds for a wet patch to fade back to dry
     f32 island[4] = {0, 0, 10, 1.5f};  // analytic beach: center xz, sigma, peak
     bool fft_active = false;           // sample ocean_displacement vs Gerstner
-    TextureView ocean_displacement;    // valid when fft_active
+    gpu::TextureView ocean_displacement;    // valid when fft_active
   };
 
-  bool Initialize(Device& device);
-  void Destroy(Device& device);
+  bool Initialize(gpu::Device& device);
+  void Destroy(gpu::Device& device);
   bool available() const { return static_cast<bool>(pipeline_) && static_cast<bool>(fields_[0]); }
 
   // Snap the field origin to the camera and advance the ping-pong. Call once
@@ -46,14 +46,14 @@ class ShoreWetting {
   void AddToGraph(RenderGraph& graph, const Params& params);
 
   // The field written this frame, sampled by the scene pass.
-  TextureView current_view() const { return fields_[write_index_].view; }
+  gpu::TextureView current_view() const { return fields_[write_index_].view; }
 
  private:
-  PipelineHandle pipeline_;
-  GpuImage fields_[2];      // ping-pong R16F, both kept in GENERAL
-  GpuImage dummy_ocean_;    // 1x1 stand-in bound when the FFT ocean is off
-  SamplerHandle linear_clamp_;
-  SamplerHandle linear_wrap_;
+  gpu::PipelineHandle pipeline_;
+  gpu::GpuImage fields_[2];      // ping-pong R16F, both kept in GENERAL
+  gpu::GpuImage dummy_ocean_;    // 1x1 stand-in bound when the FFT ocean is off
+  gpu::SamplerHandle linear_clamp_;
+  gpu::SamplerHandle linear_wrap_;
   u32 write_index_ = 0;
   u32 read_index_ = 1;
   f32 origin_[2] = {0, 0};       // this frame's field min-corner world xz

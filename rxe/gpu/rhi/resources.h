@@ -6,7 +6,7 @@
 #include "foundation/build_config/types.h"
 #include "rxe/gpu/rhi/types.h"
 
-namespace rx::render {
+namespace rx::gpu {
 
 using BufferHandle = RhiHandle<struct BufferTag>;
 using TextureHandle = RhiHandle<struct TextureTag>;
@@ -140,6 +140,6 @@ struct GpuMesh {
   bool has_meshlets = false;
 };
 
-} // namespace rx::render
+} // namespace rx::gpu
 
 #endif // RX_RENDER_RHI_RESOURCES_H_

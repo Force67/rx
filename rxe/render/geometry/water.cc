@@ -10,17 +10,17 @@
 
 namespace rx::render {
 
-base::UniquePointer<WaterPass> WaterPass::Create(Device& device, Format color_format,
-                                             Format motion_format, Format depth_format,
-                                             BindingLayoutHandle globals_layout,
-                                             BindingLayoutHandle material_layout,
-                                             BindingLayoutHandle environment_layout,
-                                             BindingLayoutHandle bindless_layout) {
+base::UniquePointer<WaterPass> WaterPass::Create(gpu::Device& device, gpu::Format color_format,
+                                             gpu::Format motion_format, gpu::Format depth_format,
+                                             gpu::BindingLayoutHandle globals_layout,
+                                             gpu::BindingLayoutHandle material_layout,
+                                             gpu::BindingLayoutHandle environment_layout,
+                                             gpu::BindingLayoutHandle bindless_layout) {
   auto pass = base::UniquePointer<WaterPass>(new WaterPass(device));
 
-  pass->sampler_ = device.GetSampler({.address_u = AddressMode::kClampToEdge,
-                                      .address_v = AddressMode::kClampToEdge,
-                                      .address_w = AddressMode::kClampToEdge});
+  pass->sampler_ = device.GetSampler({.address_u = gpu::AddressMode::kClampToEdge,
+                                      .address_v = gpu::AddressMode::kClampToEdge,
+                                      .address_w = gpu::AddressMode::kClampToEdge});
 
   // Water replaces its pixels (refraction samples the snapshot), so it
   // renders opaquely over the scene and writes depth for the post stack.
@@ -28,30 +28,30 @@ base::UniquePointer<WaterPass> WaterPass::Create(Device& device, Format color_fo
       .vertex = RX_SHADER(k_mesh_vs_hlsl),
       .fragment = RX_SHADER(k_water_ps_hlsl),
       .vertex_buffers = {{.stride = sizeof(asset::Vertex),
-                          .attributes = {{0, Format::kRGB32Float,
+                          .attributes = {{0, gpu::Format::kRGB32Float,
                                           offsetof(asset::Vertex, position)},
-                                         {1, Format::kRGB32Float, offsetof(asset::Vertex, normal)},
-                                         {2, Format::kRGBA32Float,
+                                         {1, gpu::Format::kRGB32Float, offsetof(asset::Vertex, normal)},
+                                         {2, gpu::Format::kRGBA32Float,
                                           offsetof(asset::Vertex, tangent)},
-                                         {3, Format::kRG32Float, offsetof(asset::Vertex, uv)},
-                                         {4, Format::kRGBA8Unorm,
+                                         {3, gpu::Format::kRG32Float, offsetof(asset::Vertex, uv)},
+                                         {4, gpu::Format::kRGBA8Unorm,
                                           offsetof(asset::Vertex, color)}}}},
-      .raster = {.cull = CullMode::kNone},
+      .raster = {.cull = gpu::CullMode::kNone},
       .depth = {.test = true,
                 .write = true,
-                .compare = CompareOp::kGreater,  // reversed z
+                .compare = gpu::CompareOp::kGreater,  // reversed z
                 .format = depth_format},
       .color_formats = {color_format, motion_format},
-      .blend = {BlendMode::kOpaque, BlendMode::kOpaque},
+      .blend = {gpu::BlendMode::kOpaque, gpu::BlendMode::kOpaque},
       .sets = {{.shared = globals_layout},
                {.shared = material_layout},
                {.shared = environment_layout},
                {.shared = bindless_layout},
-               {.slots = {{0, BindingType::kCombinedTextureSampler},
-                          {1, BindingType::kCombinedTextureSampler}},
-                .stages = kShaderStageFragment}},
-      .push_constant_size = PushSize<MeshPushConstants>(),
-      .push_bda = PushBdaHeader::kMeshDraw,
+               {.slots = {{0, gpu::BindingType::kCombinedTextureSampler},
+                          {1, gpu::BindingType::kCombinedTextureSampler}},
+                .stages = gpu::kShaderStageFragment}},
+      .push_constant_size = gpu::PushSize<MeshPushConstants>(),
+      .push_bda = gpu::PushBdaHeader::kMeshDraw,
       .debug_name = "water",
   });
   if (!pass->pipeline_) {
@@ -62,8 +62,8 @@ base::UniquePointer<WaterPass> WaterPass::Create(Device& device, Format color_fo
   // Snapshot copy compute.
   pass->copy_pipeline_ = device.CreateComputePipeline({
       .shader = RX_SHADER(k_copy_cs_hlsl),
-      .sets = {{.slots = {{0, BindingType::kStorageImage},
-                          {1, BindingType::kCombinedTextureSampler}}}},
+      .sets = {{.slots = {{0, gpu::BindingType::kStorageImage},
+                          {1, gpu::BindingType::kCombinedTextureSampler}}}},
       .debug_name = "water_copy",
   });
   if (!pass->copy_pipeline_) {
@@ -85,23 +85,23 @@ WaterPass::~WaterPass() {
 void WaterPass::RecordCopy(PassContext& ctx, ResourceHandle scene_color,
                            ResourceHandle opaque_color, u32 width, u32 height) {
   ctx.cmd->BindPipeline(copy_pipeline_);
-  ctx.cmd->BindTransient(0, {Bind::Storage(0, ctx.graph->image(opaque_color)),
-                             Bind::Combined(1, ctx.graph->image(scene_color).view, sampler_)});
+  ctx.cmd->BindTransient(0, {gpu::Bind::Storage(0, ctx.graph->image(opaque_color)),
+                             gpu::Bind::Combined(1, ctx.graph->image(scene_color).view, sampler_)});
   ctx.cmd->Dispatch2D({width, height});
 }
 
-void WaterPass::Bind(PassContext& ctx, BindingSetHandle globals, BindingSetHandle environment,
-                     BindingSetHandle bindless, ResourceHandle opaque_color,
+void WaterPass::Bind(PassContext& ctx, gpu::BindingSetHandle globals, gpu::BindingSetHandle environment,
+                     gpu::BindingSetHandle bindless, ResourceHandle opaque_color,
                      ResourceHandle opaque_depth) {
   ctx.cmd->BindPipeline(pipeline_);
   ctx.cmd->BindSet(0, globals);
   ctx.cmd->BindSet(2, environment);
   ctx.cmd->BindSet(3, bindless);
-  ctx.cmd->BindTransient(4, {Bind::Combined(0, ctx.graph->image(opaque_color).view, sampler_),
-                             Bind::Combined(1, ctx.graph->image(opaque_depth).view, sampler_)});
+  ctx.cmd->BindTransient(4, {gpu::Bind::Combined(0, ctx.graph->image(opaque_color).view, sampler_),
+                             gpu::Bind::Combined(1, ctx.graph->image(opaque_depth).view, sampler_)});
 }
 
-void WaterPass::BindMaterial(CommandList& cmd, BindingSetHandle material) {
+void WaterPass::BindMaterial(gpu::CommandList& cmd, gpu::BindingSetHandle material) {
   cmd.BindSet(1, material);
 }
 

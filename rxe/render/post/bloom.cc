@@ -22,17 +22,17 @@ struct UpPush {
 
 }  // namespace
 
-bool BloomPass::Initialize(Device& device) {
-  sampler_ = device.GetSampler({.address_u = AddressMode::kClampToEdge,
-                                .address_v = AddressMode::kClampToEdge,
-                                .address_w = AddressMode::kClampToEdge});
+bool BloomPass::Initialize(gpu::Device& device) {
+  sampler_ = device.GetSampler({.address_u = gpu::AddressMode::kClampToEdge,
+                                .address_v = gpu::AddressMode::kClampToEdge,
+                                .address_w = gpu::AddressMode::kClampToEdge});
 
-  auto make = [&](ShaderBlob shader, const char* name, PipelineHandle* pipeline) {
+  auto make = [&](gpu::ShaderBlob shader, const char* name, gpu::PipelineHandle* pipeline) {
     *pipeline = device.CreateComputePipeline({
         .shader = shader,
-        .sets = {{.slots = {{0, BindingType::kStorageImage},
-                            {1, BindingType::kCombinedTextureSampler}}}},
-        .push_constant_size = PushSize<DownPush>(),
+        .sets = {{.slots = {{0, gpu::BindingType::kStorageImage},
+                            {1, gpu::BindingType::kCombinedTextureSampler}}}},
+        .push_constant_size = gpu::PushSize<DownPush>(),
         .debug_name = name,
     });
     return static_cast<bool>(*pipeline);
@@ -45,7 +45,7 @@ bool BloomPass::Initialize(Device& device) {
   return true;
 }
 
-void BloomPass::Destroy(Device& device) {
+void BloomPass::Destroy(gpu::Device& device) {
   device.DestroyPipeline(down_pipeline_);
   device.DestroyPipeline(up_pipeline_);
   down_pipeline_ = {};
@@ -66,12 +66,12 @@ ResourceHandle BloomPass::AddToGraph(RenderGraph& graph, ResourceHandle input, u
     widths[i] = mip_width;
     heights[i] = mip_height;
     mips[i] = graph.CreateTexture({.name = "bloom_mip",
-                                   .format = Format::kRGBA16Float,
+                                   .format = gpu::Format::kRGBA16Float,
                                    .width = mip_width,
                                    .height = mip_height});
   }
 
-  auto dispatch = [this](PassContext& ctx, PipelineHandle pipeline, ResourceHandle dst,
+  auto dispatch = [this](PassContext& ctx, gpu::PipelineHandle pipeline, ResourceHandle dst,
                          ResourceHandle src, u32 dst_width, u32 dst_height, f32 src_width,
                          f32 src_height, bool first) {
     DownPush push{};
@@ -79,8 +79,8 @@ ResourceHandle BloomPass::AddToGraph(RenderGraph& graph, ResourceHandle input, u
     push.src_inv_size[1] = 1.0f / src_height;
     push.first_pass = first ? 1u : 0u;
     ctx.cmd->BindPipeline(pipeline);
-    ctx.cmd->BindTransient(0, {Bind::Storage(0, ctx.graph->image(dst)),
-                               Bind::Combined(1, ctx.graph->image(src).view, sampler_)});
+    ctx.cmd->BindTransient(0, {gpu::Bind::Storage(0, ctx.graph->image(dst)),
+                               gpu::Bind::Combined(1, ctx.graph->image(src).view, sampler_)});
     ctx.cmd->Push(push);
     ctx.cmd->Dispatch2D({dst_width, dst_height});
   };
@@ -107,7 +107,7 @@ ResourceHandle BloomPass::AddToGraph(RenderGraph& graph, ResourceHandle input, u
   // replace flag, so this writes a fresh copy rather than blending).
   if (flare_src) {
     ResourceHandle flare = graph.CreateTexture({.name = "flare_src",
-                                                .format = Format::kRGBA16Float,
+                                                .format = gpu::Format::kRGBA16Float,
                                                 .width = widths[1],
                                                 .height = heights[1]});
     graph.AddPass(
@@ -142,7 +142,7 @@ ResourceHandle BloomPass::AddToGraph(RenderGraph& graph, ResourceHandle input, u
 
   // Final tent up to full resolution.
   ResourceHandle full = graph.CreateTexture({.name = "bloom",
-                                             .format = Format::kRGBA16Float,
+                                             .format = gpu::Format::kRGBA16Float,
                                              .width = width,
                                              .height = height});
   graph.AddPass(

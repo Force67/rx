@@ -7,7 +7,7 @@
 #include "base/memory/mem_ops.h"
 #include "foundation/build_config/types.h"
 
-namespace rx::render {
+namespace rx::gpu {
 
 VkShaderModule CreateShaderModule(VkDevice device, const unsigned char* code, size_t size) {
   base::Vector<u32> words((size + 3) / 4);
@@ -21,4 +21,4 @@ VkShaderModule CreateShaderModule(VkDevice device, const unsigned char* code, si
   return module;
 }
 
-}  // namespace rx::render
+}  // namespace rx::gpu

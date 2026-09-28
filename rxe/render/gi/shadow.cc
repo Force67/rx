@@ -22,60 +22,60 @@ namespace {
 Vec3 Add(const Vec3& a, const Vec3& b) { return {a.x + b.x, a.y + b.y, a.z + b.z}; }
 Vec3 Mul(const Vec3& v, f32 s) { return {v.x * s, v.y * s, v.z * s}; }
 
-static_assert(offsetof(ShadowPass::Push, bone_address) == kPushBdaBoneOffset,
+static_assert(offsetof(ShadowPass::Push, bone_address) == gpu::kPushBdaBoneOffset,
               "d3d12 binds the bone palette root SRV from this offset");
 static_assert(offsetof(ShadowPass::Push, light_view_proj) == ShadowPass::kLightMatrixOffset,
               "the per-cascade matrix push offset must follow the per-draw head");
 
 }  // namespace
 
-bool ShadowPass::Initialize(Device& device, BindingLayoutHandle material_layout,
-                            Format local_depth_format) {
+bool ShadowPass::Initialize(gpu::Device& device, gpu::BindingLayoutHandle material_layout,
+                            gpu::Format local_depth_format) {
   // Position (binding 0) + uv for alpha test; the skinned variant adds the bone
   // index/weight stream (binding 1) so it skins in the vertex stage. The push
   // block covers the skinned permutation's trailing bone_address + skin_offset;
   // the static caster only writes the two leading matrices.
-  VertexBufferLayout position_stream{
+  gpu::VertexBufferLayout position_stream{
       .stride = sizeof(asset::Vertex),
-      .attributes = {{0, Format::kRGB32Float, offsetof(asset::Vertex, position)},
-                     {3, Format::kRG32Float, offsetof(asset::Vertex, uv)}}};
-  VertexBufferLayout skin_stream{
+      .attributes = {{0, gpu::Format::kRGB32Float, offsetof(asset::Vertex, position)},
+                     {3, gpu::Format::kRG32Float, offsetof(asset::Vertex, uv)}}};
+  gpu::VertexBufferLayout skin_stream{
       .stride = sizeof(asset::SkinnedVertexExtra),
-      .attributes = {{5, Format::kRGBA8Uint, offsetof(asset::SkinnedVertexExtra, bone_indices)},
-                     {6, Format::kRGBA8Unorm, offsetof(asset::SkinnedVertexExtra, bone_weights)}}};
-  VertexBufferLayout instance_stream{
+      .attributes = {{5, gpu::Format::kRGBA8Uint, offsetof(asset::SkinnedVertexExtra, bone_indices)},
+                     {6, gpu::Format::kRGBA8Unorm, offsetof(asset::SkinnedVertexExtra, bone_weights)}}};
+  gpu::VertexBufferLayout instance_stream{
       .stride = sizeof(Mat4),
       .per_instance = true,
-      .attributes = {{7, Format::kRGBA32Float, 0},
-                     {8, Format::kRGBA32Float, 16},
-                     {9, Format::kRGBA32Float, 32},
-                     {10, Format::kRGBA32Float, 48}}};
+      .attributes = {{7, gpu::Format::kRGBA32Float, 0},
+                     {8, gpu::Format::kRGBA32Float, 16},
+                     {9, gpu::Format::kRGBA32Float, 32},
+                     {10, gpu::Format::kRGBA32Float, 48}}};
 
-  auto make_pipeline = [&](ShaderBlob vertex, bool skinned, bool instanced, bool masked,
-                           Format depth_format, const char* name) {
-    GraphicsPipelineDesc desc{
+  auto make_pipeline = [&](gpu::ShaderBlob vertex, bool skinned, bool instanced, bool masked,
+                           gpu::Format depth_format, const char* name) {
+    gpu::GraphicsPipelineDesc desc{
         .vertex = vertex,
         // Masked casters alpha-test in the fragment; opaque ones run with no
         // fragment shader at all (the discard's presence would force late-Z).
-        .fragment = masked ? RX_SHADER(k_shadow_ps_hlsl) : ShaderBlob{},
+        .fragment = masked ? RX_SHADER(k_shadow_ps_hlsl) : gpu::ShaderBlob{},
         // Thin geometry must cast from both sides.
-        .raster = {.cull = CullMode::kNone, .front = FrontFace::kCounterClockwise},
+        .raster = {.cull = gpu::CullMode::kNone, .front = gpu::FrontFace::kCounterClockwise},
         // Standard depth, nearest occluder wins; slope-scaled bias kills most
         // shadow acne. Attachment format is fixed in the PSO, so cascades and
         // local shadows need separate families for their D16/D32 atlases.
         .depth = {.test = true,
                   .write = true,
-                  .compare = CompareOp::kLess,
+                  .compare = gpu::CompareOp::kLess,
                   .format = depth_format,
                   .bias_constant = 1.25f,
                   .bias_slope = 2.0f},
         // set 0: alpha-test inputs. set 1: the frame's per-draw transform
         // arena, which the vertex stage indexes with the pushed record.
         .sets = {{.shared = material_layout},
-                 {.slots = {{0, BindingType::kStorageBuffer}},
-                  .stages = kShaderStageVertex}},
-        .push_constant_size = PushSize<ShadowPass::Push>(),
-        .push_bda = PushBdaHeader::kBones,
+                 {.slots = {{0, gpu::BindingType::kStorageBuffer}},
+                  .stages = gpu::kShaderStageVertex}},
+        .push_constant_size = gpu::PushSize<ShadowPass::Push>(),
+        .push_bda = gpu::PushBdaHeader::kBones,
         .debug_name = name,
     };
     desc.vertex_buffers.push_back(position_stream);
@@ -120,7 +120,7 @@ bool ShadowPass::Initialize(Device& device, BindingLayoutHandle material_layout,
   }
 
   for (u32 i = 0; i < kFramesInFlight; ++i) {
-    cascades_[i] = device.CreateBuffer(sizeof(CascadeData), kBufferUsageUniform, true);
+    cascades_[i] = device.CreateBuffer(sizeof(CascadeData), gpu::kBufferUsageUniform, true);
     if (!cascades_[i].mapped) return false;
     base::MemSet(cascades_[i].mapped, 0, sizeof(CascadeData));
   }
@@ -209,13 +209,13 @@ void ShadowPass::Update(const Vec3& eye, const Vec3& forward, const Vec3& right,
   base::MemCopy(cascades_[frame_slot].mapped, &current_, sizeof(CascadeData));
 }
 
-void ShadowPass::Render(CommandList& cmd, TextureView atlas_view,
-                        const base::Function<void(CommandList&, const Mat4&)>& draw) {
+void ShadowPass::Render(gpu::CommandList& cmd, gpu::TextureView atlas_view,
+                        const base::Function<void(gpu::CommandList&, const Mat4&)>& draw) {
   const u32 res = settings_.resolution;
 
   // The graph already put the atlas in the depth-target state for this write.
-  DepthAttachment depth{
-      .view = atlas_view, .load = LoadOp::kClear, .store = StoreOp::kStore, .clear = 1.0f};
+  gpu::DepthAttachment depth{
+      .view = atlas_view, .load = gpu::LoadOp::kClear, .store = gpu::StoreOp::kStore, .clear = 1.0f};
   cmd.BeginRendering({.extent = {res * settings_.cascade_count, res}, .depth = &depth});
   // Push constants resolve against the bound pipeline, so bind the static
   // permutation up front; the draw callback binds pipeline()/skinned_pipeline()
@@ -234,7 +234,7 @@ void ShadowPass::Render(CommandList& cmd, TextureView atlas_view,
   cmd.EndRendering();
 }
 
-void ShadowPass::Destroy(Device& device) {
+void ShadowPass::Destroy(gpu::Device& device) {
   device.DestroyPipeline(pipeline_);
   device.DestroyPipeline(skinned_pipeline_);
   device.DestroyPipeline(opaque_pipeline_);

@@ -24,6 +24,7 @@
 #include "rxe/gpu/rhi/device.h"
 
 using namespace rx::render;
+namespace gpu = rx::gpu;
 namespace asset = rx::asset;
 
 namespace {
@@ -58,25 +59,25 @@ class TwoPartyBarrier {
 
 // Uploads `bytes` of a deterministic per-buffer pattern and returns the device
 // buffer (created batched when a batch is open).
-GpuBuffer UploadPattern(Device& device, u64 bytes, u8 seed, base::Vector<u8>& expect) {
+gpu::GpuBuffer UploadPattern(gpu::Device& device, u64 bytes, u8 seed, base::Vector<u8>& expect) {
   expect.resize(bytes);
   for (u64 i = 0; i < bytes; ++i) expect[i] = static_cast<u8>(seed + i * 31);
   return device.CreateBufferWithData(rx::ByteSpan(expect.data(), expect.size()),
-                                     kBufferUsageTransferSrc);
+                                     gpu::kBufferUsageTransferSrc);
 }
 
 // Copies `buffer` back to the host and compares against `expect`.
-bool VerifyContents(Device& device, const GpuBuffer& buffer, const base::Vector<u8>& expect) {
-  GpuBuffer readback =
-      device.CreateBuffer(expect.size(), kBufferUsageTransferDst, /*host_visible=*/true);
+bool VerifyContents(gpu::Device& device, const gpu::GpuBuffer& buffer, const base::Vector<u8>& expect) {
+  gpu::GpuBuffer readback =
+      device.CreateBuffer(expect.size(), gpu::kBufferUsageTransferDst, /*host_visible=*/true);
   if (!readback || !readback.mapped) return false;
-  device.ImmediateSubmit([&](CommandList& cmd) {
+  device.ImmediateSubmit([&](gpu::CommandList& cmd) {
     cmd.CopyBuffer(buffer, 0, readback, 0, expect.size());
-    cmd.MemoryBarrier(BarrierScope::kTransferWrite, BarrierScope::kHostRead);
+    cmd.MemoryBarrier(gpu::BarrierScope::kTransferWrite, gpu::BarrierScope::kHostRead);
   });
   device.InvalidateBuffer(readback, 0, expect.size());
   const bool ok = base::MemCompare(readback.mapped, expect.data(), expect.size()) == 0;
-  GpuBuffer retire = readback;
+  gpu::GpuBuffer retire = readback;
   device.DestroyBuffer(retire);
   return ok;
 }
@@ -84,10 +85,10 @@ bool VerifyContents(Device& device, const GpuBuffer& buffer, const base::Vector<
 }  // namespace
 
 int main() {
-  DeviceDesc desc;
-  desc.backend = Backend::kVulkan;
+  gpu::DeviceDesc desc;
+  desc.backend = gpu::Backend::kVulkan;
   desc.enable_validation = ::getenv("RX_VALIDATION") != nullptr;
-  base::UniquePointer<Device> device = Device::CreateOffscreen(desc);
+  base::UniquePointer<gpu::Device> device = gpu::Device::CreateOffscreen(desc);
   if (!device) return Fail("CreateOffscreen returned null");
   if (device->is_stub()) {
     ::printf("upload_batch_test: no vulkan driver, skipping (null backend)\n");
@@ -98,9 +99,9 @@ int main() {
   // batched uploads, nested scopes, verified after the outermost flush
   device->BeginUploadBatch();
   base::Vector<u8> expect_a, expect_b;
-  GpuBuffer a = UploadPattern(*device, 64 * 1024, 1, expect_a);
+  gpu::GpuBuffer a = UploadPattern(*device, 64 * 1024, 1, expect_a);
   device->BeginUploadBatch();  // nested: must not submit at the inner flush
-  GpuBuffer b = UploadPattern(*device, 3 * 1024 + 7, 2, expect_b);
+  gpu::GpuBuffer b = UploadPattern(*device, 3 * 1024 + 7, 2, expect_b);
   device->FlushUploadBatch();
   if (!device->UploadBatchActive()) return Fail("inner flush closed the batch");
   device->FlushUploadBatch();
@@ -112,7 +113,7 @@ int main() {
   // implicit flush: ImmediateSubmit must see a still-batched buffer
   device->BeginUploadBatch();
   base::Vector<u8> expect_c;
-  GpuBuffer c = UploadPattern(*device, 16 * 1024, 3, expect_c);
+  gpu::GpuBuffer c = UploadPattern(*device, 16 * 1024, 3, expect_c);
   if (!c) return Fail("batched buffer creation failed (implicit-flush case)");
   // VerifyContents runs an ImmediateSubmit while the batch is still open; the
   // implicit flush must submit the pending copy first or the readback is junk.
@@ -124,7 +125,7 @@ int main() {
   constexpr u64 kChunk = 24ull << 20;  // 3 x 24 MiB crosses the 64 MiB budget
   device->BeginUploadBatch();
   base::Vector<u8> expect_big[3];
-  GpuBuffer big[3];
+  gpu::GpuBuffer big[3];
   for (int i = 0; i < 3; ++i) {
     big[i] = UploadPattern(*device, kChunk, static_cast<u8>(10 + i), expect_big[i]);
     if (!big[i]) return Fail("large batched buffer creation failed");
@@ -141,15 +142,15 @@ int main() {
   // frame, which is what streaming mid-frame relies on. ---
   device->BeginUploadBatch();
   base::Vector<u8> expect_d;
-  GpuBuffer d = UploadPattern(*device, 128 * 1024, 4, expect_d);
+  gpu::GpuBuffer d = UploadPattern(*device, 128 * 1024, 4, expect_d);
   if (!d) return Fail("batched buffer creation failed (frame case)");
-  GpuBuffer frame_readback =
-      device->CreateBuffer(expect_d.size(), kBufferUsageTransferDst, /*host_visible=*/true);
+  gpu::GpuBuffer frame_readback =
+      device->CreateBuffer(expect_d.size(), gpu::kBufferUsageTransferDst, /*host_visible=*/true);
   if (!frame_readback.mapped) return Fail("frame readback buffer creation failed");
-  CommandList* frame = device->BeginFrame(0);
+  gpu::CommandList* frame = device->BeginFrame(0);
   if (!frame) return Fail("BeginFrame returned null");
   frame->CopyBuffer(d, 0, frame_readback, 0, expect_d.size());
-  frame->MemoryBarrier(BarrierScope::kTransferWrite, BarrierScope::kHostRead);
+  frame->MemoryBarrier(gpu::BarrierScope::kTransferWrite, gpu::BarrierScope::kHostRead);
   device->SubmitFrame(frame);
   device->WaitIdle();
   device->InvalidateBuffer(frame_readback, 0, expect_d.size());
@@ -164,27 +165,27 @@ int main() {
   base::Vector<u8> expect_tex(kDim * kDim * 4);
   for (size_t i = 0; i < expect_tex.size(); ++i) expect_tex[i] = static_cast<u8>(i * 7 + 3);
   device->BeginUploadBatch();
-  GpuImage image = device->CreateImage2D(
-      Format::kRGBA8Unorm, {kDim, kDim},
-      kTextureUsageSampled | kTextureUsageTransferDst | kTextureUsageTransferSrc);
+  gpu::GpuImage image = device->CreateImage2D(
+      gpu::Format::kRGBA8Unorm, {kDim, kDim},
+      gpu::kTextureUsageSampled | gpu::kTextureUsageTransferDst | gpu::kTextureUsageTransferSrc);
   if (!image) return Fail("CreateImage2D returned null");
-  GpuBuffer tex_staging =
-      device->CreateBuffer(expect_tex.size(), kBufferUsageTransferSrc, /*host_visible=*/true);
+  gpu::GpuBuffer tex_staging =
+      device->CreateBuffer(expect_tex.size(), gpu::kBufferUsageTransferSrc, /*host_visible=*/true);
   if (!tex_staging.mapped) return Fail("texture staging creation failed");
   base::MemCopy(tex_staging.mapped, expect_tex.data(), expect_tex.size());
   device->FlushBuffer(tex_staging, 0, expect_tex.size());
   if (!device->UploadBatchActive()) return Fail("batch not active for the texture case");
-  device->RecordUpload([&](CommandList& cmd) {
-    cmd.Barrier(Transition(image, ResourceState::kUndefined, ResourceState::kCopyDst));
-    BufferTextureCopy region{.mip = 0, .extent = {kDim, kDim}};
+  device->RecordUpload([&](gpu::CommandList& cmd) {
+    cmd.Barrier(gpu::Transition(image, gpu::ResourceState::kUndefined, gpu::ResourceState::kCopyDst));
+    gpu::BufferTextureCopy region{.mip = 0, .extent = {kDim, kDim}};
     cmd.CopyBufferToTexture(tex_staging, image, base::Span(&region, 1));
-    cmd.Barrier(Transition(image, ResourceState::kCopyDst, ResourceState::kShaderReadAll));
+    cmd.Barrier(gpu::Transition(image, gpu::ResourceState::kCopyDst, gpu::ResourceState::kShaderReadAll));
   });
   device->ParkBatchStaging(tex_staging);
   if (tex_staging) return Fail("ParkBatchStaging left the caller's handle live");
   device->FlushUploadBatch();
   base::Vector<u8> got_tex(expect_tex.size());
-  if (!device->ReadbackImage(image, ResourceState::kShaderReadAll, got_tex.data(), got_tex.size()))
+  if (!device->ReadbackImage(image, gpu::ResourceState::kShaderReadAll, got_tex.data(), got_tex.size()))
     return Fail("ReadbackImage failed");
   if (base::MemCompare(got_tex.data(), expect_tex.data(), expect_tex.size()) != 0)
     return Fail("batched texture contents wrong after flush");
@@ -210,14 +211,14 @@ int main() {
   // BeginFrame waits a fence and resets three pools before touching
   // current_slot_, so the worker usually gets there and back first.
   constexpr int kRaceIterations = 16;
-  GpuBuffer race_buffers[kRaceIterations];
-  for (GpuBuffer& buffer : race_buffers) {
-    buffer = device->CreateBuffer(16, kBufferUsageStorage, true);
+  gpu::GpuBuffer race_buffers[kRaceIterations];
+  for (gpu::GpuBuffer& buffer : race_buffers) {
+    buffer = device->CreateBuffer(16, gpu::kBufferUsageStorage, true);
     if (!buffer) return Fail("CreateBuffer returned null (off-thread destroy case)");
   }
   TwoPartyBarrier start;
   base::Thread retire("retire", [&] {
-    for (GpuBuffer& buffer : race_buffers) {
+    for (gpu::GpuBuffer& buffer : race_buffers) {
       start.ArriveAndWait();
       device->DestroyBufferDeferred(buffer);
     }
@@ -225,7 +226,7 @@ int main() {
   bool race_frames_ok = true;
   for (int i = 0; i < kRaceIterations; ++i) {
     start.ArriveAndWait();  // every iteration must arrive, or the worker hangs
-    if (CommandList* frame_cmd = device->BeginFrame(i % Device::kMaxFramesInFlight)) {
+    if (gpu::CommandList* frame_cmd = device->BeginFrame(i % gpu::Device::kMaxFramesInFlight)) {
       device->SubmitFrame(frame_cmd);
     } else {
       race_frames_ok = false;
@@ -240,33 +241,33 @@ int main() {
   // serial keeps the free honest. Under validation an early free shows up as
   // "destroyed while in use" (the ctest FAIL_REGULAR_EXPRESSION catches it). ---
   device->BeginUploadBatch();
-  GpuImage doomed = device->CreateImage2D(Format::kRGBA8Unorm, {kDim, kDim},
-                                         kTextureUsageSampled | kTextureUsageTransferDst);
+  gpu::GpuImage doomed = device->CreateImage2D(gpu::Format::kRGBA8Unorm, {kDim, kDim},
+                                         gpu::kTextureUsageSampled | gpu::kTextureUsageTransferDst);
   if (!doomed) return Fail("CreateImage2D returned null (deferred-destroy case)");
-  GpuBuffer doomed_staging =
-      device->CreateBuffer(expect_tex.size(), kBufferUsageTransferSrc, /*host_visible=*/true);
+  gpu::GpuBuffer doomed_staging =
+      device->CreateBuffer(expect_tex.size(), gpu::kBufferUsageTransferSrc, /*host_visible=*/true);
   if (!doomed_staging.mapped) return Fail("staging creation failed (deferred-destroy case)");
   base::MemCopy(doomed_staging.mapped, expect_tex.data(), expect_tex.size());
   device->FlushBuffer(doomed_staging, 0, expect_tex.size());
-  device->RecordUpload([&](CommandList& cmd) {
-    cmd.Barrier(Transition(doomed, ResourceState::kUndefined, ResourceState::kCopyDst));
-    BufferTextureCopy region{.mip = 0, .extent = {kDim, kDim}};
+  device->RecordUpload([&](gpu::CommandList& cmd) {
+    cmd.Barrier(gpu::Transition(doomed, gpu::ResourceState::kUndefined, gpu::ResourceState::kCopyDst));
+    gpu::BufferTextureCopy region{.mip = 0, .extent = {kDim, kDim}};
     cmd.CopyBufferToTexture(doomed_staging, doomed, base::Span(&region, 1));
-    cmd.Barrier(Transition(doomed, ResourceState::kCopyDst, ResourceState::kShaderReadAll));
+    cmd.Barrier(gpu::Transition(doomed, gpu::ResourceState::kCopyDst, gpu::ResourceState::kShaderReadAll));
   });
   device->ParkBatchStaging(doomed_staging);
   device->DestroyImageDeferred(doomed);  // batch still pending, copy not submitted yet
   device->FlushUploadBatch();            // submits, does NOT wait
   // Cycle the frame ring so every slot's graveyard gets a drain attempt while
   // the batch may still be running.
-  for (u32 i = 0; i < Device::kMaxFramesInFlight + 1; ++i) {
-    CommandList* spin = device->BeginFrame(i % Device::kMaxFramesInFlight);
+  for (u32 i = 0; i < gpu::Device::kMaxFramesInFlight + 1; ++i) {
+    gpu::CommandList* spin = device->BeginFrame(i % gpu::Device::kMaxFramesInFlight);
     if (!spin) return Fail("BeginFrame returned null (deferred-destroy case)");
     device->SubmitFrame(spin);
   }
   device->WaitIdle();
 
-  for (GpuBuffer* buffer : {&a, &b, &c, &d, &frame_readback, &big[0], &big[1], &big[2]})
+  for (gpu::GpuBuffer* buffer : {&a, &b, &c, &d, &frame_readback, &big[0], &big[1], &big[2]})
     device->DestroyBuffer(*buffer);
   device->WaitIdle();
   ::printf("upload_batch_test: PASS\n");

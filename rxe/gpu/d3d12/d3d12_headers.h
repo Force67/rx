@@ -22,11 +22,11 @@
 #include <d3d12.h>
 #include <dxgi1_6.h>
 
-namespace rx::render::d3d12 {
+namespace rx::gpu::d3d12 {
 inline HANDLE CreateFenceEvent() { return CreateEventA(nullptr, FALSE, FALSE, nullptr); }
 inline void WaitFenceEvent(HANDLE event) { WaitForSingleObject(event, INFINITE); }
 inline void DestroyFenceEvent(HANDLE event) { CloseHandle(event); }
-}  // namespace rx::render::d3d12
+}  // namespace rx::gpu::d3d12
 
 #elif defined(RX_VKD3D_PROTON)  // vkd3d-proton native (Linux)
 
@@ -52,7 +52,7 @@ inline void DestroyFenceEvent(HANDLE event) { CloseHandle(event); }
 #undef max
 #endif
 
-namespace rx::render::d3d12 {
+namespace rx::gpu::d3d12 {
 inline HANDLE CreateFenceEvent() {
   return reinterpret_cast<HANDLE>(static_cast<intptr_t>(eventfd(0, EFD_CLOEXEC)));
 }
@@ -64,7 +64,7 @@ inline void WaitFenceEvent(HANDLE event) {
 inline void DestroyFenceEvent(HANDLE event) {
   close(static_cast<int>(reinterpret_cast<intptr_t>(event)));
 }
-}  // namespace rx::render::d3d12
+}  // namespace rx::gpu::d3d12
 
 #else  // WineHQ vkd3d (Linux and friends)
 
@@ -85,11 +85,11 @@ inline void DestroyFenceEvent(HANDLE event) {
 #undef max
 #endif
 
-namespace rx::render::d3d12 {
+namespace rx::gpu::d3d12 {
 inline HANDLE CreateFenceEvent() { return vkd3d_create_event(); }
 inline void WaitFenceEvent(HANDLE event) { vkd3d_wait_event(event, VKD3D_INFINITE); }
 inline void DestroyFenceEvent(HANDLE event) { vkd3d_destroy_event(event); }
-}  // namespace rx::render::d3d12
+}  // namespace rx::gpu::d3d12
 
 #endif
 

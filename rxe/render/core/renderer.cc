@@ -242,7 +242,7 @@ base::Option<const char *> RhiBackend{"rhi.backend", nullptr, "RX_RHI"};
 // Distance-based hierarchical lod: coarser geometry the further a mesh is from
 // the camera. Switches roughly every few bounding radii; clamps to the
 // coarsest.
-u32 SelectLod(const GpuMesh &mesh, f32 distance) {
+u32 SelectLod(const gpu::GpuMesh &mesh, f32 distance) {
   u32 lod_count = 1u + static_cast<u32>(mesh.lods.size());
   if (lod_count <= 1)
     return 0;
@@ -251,13 +251,13 @@ u32 SelectLod(const GpuMesh &mesh, f32 distance) {
   return lod < lod_count ? lod : lod_count - 1;
 }
 
-bool SupportsStaticInstances(const GpuMesh &mesh,
+bool SupportsStaticInstances(const gpu::GpuMesh &mesh,
                              const MaterialSystem *materials) {
   if (mesh.all_blend || mesh.skinned || mesh.morph_target_count > 0 ||
       mesh.terrain_lod || mesh.dynamic_vertices)
     return false;
-  auto supported = [materials](const base::Vector<GpuSubmesh> &submeshes) {
-    for (const GpuSubmesh &submesh : submeshes) {
+  auto supported = [materials](const base::Vector<gpu::GpuSubmesh> &submeshes) {
+    for (const gpu::GpuSubmesh &submesh : submeshes) {
       if (submesh.blend ||
           (materials && materials->is_normal_model_space(submesh.material))) {
         return false;
@@ -267,7 +267,7 @@ bool SupportsStaticInstances(const GpuMesh &mesh,
   };
   if (!supported(mesh.submeshes))
     return false;
-  for (const GpuLod &lod : mesh.lods) {
+  for (const gpu::GpuLod &lod : mesh.lods) {
     if (!supported(lod.submeshes))
       return false;
   }
@@ -362,7 +362,7 @@ bool SphereOutsideFrustum(const f32 planes[5][4], const Vec3 &c, f32 r) {
 // force-opaque behavior) when the alpha was not decoded: opaque texture, a
 // format without a CPU alpha decoder (BC7), or a missing material.
 f32 MaskedSubmeshOpacity(const base::Vector<asset::Vertex> &verts,
-                         const base::Vector<u32> &indices, const GpuSubmesh &sm,
+                         const base::Vector<u32> &indices, const gpu::GpuSubmesh &sm,
                          const MaterialSystem::AlphaCoverage *cov) {
   if (!cov)
     return 1.0f;
@@ -417,24 +417,24 @@ struct ContactCamera {
 // capture_image_, so Acquire and image() are never reached. BGRA8 is what both
 // backends negotiate for a real surface, and the byte order WriteBackbufferPng
 // unswizzles on the way to a png.
-class OffscreenSwapchain final : public Swapchain {
+class OffscreenSwapchain final : public gpu::Swapchain {
 public:
-  OffscreenSwapchain(Format format, Extent2D extent)
+  OffscreenSwapchain(gpu::Format format, gpu::Extent2D extent)
       : format_(format), extent_(extent) {}
 
-  AcquireResult Acquire(u32, u32 *) override { return AcquireResult::kFailed; }
-  Format format() const override { return format_; }
-  Extent2D extent() const override { return extent_; }
+  gpu::AcquireResult Acquire(u32, u32 *) override { return gpu::AcquireResult::kFailed; }
+  gpu::Format format() const override { return format_; }
+  gpu::Extent2D extent() const override { return extent_; }
   u32 image_count() const override { return 0; }
-  const GpuImage &image(u32) const override {
-    static const GpuImage kNone;
+  const gpu::GpuImage &image(u32) const override {
+    static const gpu::GpuImage kNone;
     return kNone;
   }
   bool can_sample() const override { return true; }
 
 private:
-  Format format_;
-  Extent2D extent_;
+  gpu::Format format_;
+  gpu::Extent2D extent_;
 };
 
 } // namespace
@@ -479,30 +479,30 @@ bool Renderer::InitializeCommon(const RendererDesc &desc, Window *window,
     settings_.hdr_paper_white = static_cast<f32>(double(HdrPaperWhite));
 
   // RX_RHI=vulkan|d3d12|null|auto overrides the graphics backend.
-  Backend backend = desc.backend;
+  gpu::Backend backend = desc.backend;
   if (const char *name = RhiBackend.get()) {
     base::String value = name;
     if (value == "vulkan")
-      backend = Backend::kVulkan;
+      backend = gpu::Backend::kVulkan;
     else if (value == "d3d12")
-      backend = Backend::kD3D12;
+      backend = gpu::Backend::kD3D12;
     else if (value == "null")
-      backend = Backend::kNull;
+      backend = gpu::Backend::kNull;
     else if (value == "auto")
-      backend = Backend::kAuto;
+      backend = gpu::Backend::kAuto;
     else
       RX_WARN("RX_RHI: unknown backend '{}', using {}", value,
-              BackendName(backend));
+              gpu::BackendName(backend));
   }
 
   window_ = window;
-  const DeviceDesc device_desc{
+  const gpu::DeviceDesc device_desc{
       .backend = backend,
       .enable_validation = desc.enable_validation,
       .request_raytracing = desc.enable_raytracing,
       .extra_device_extensions = desc.vulkan.extensions};
-  device_ = window ? Device::Create(device_desc, *window)
-                   : Device::CreateOffscreen(device_desc);
+  device_ = window ? gpu::Device::Create(device_desc, *window)
+                   : gpu::Device::CreateOffscreen(device_desc);
   if (device_->is_stub()) {
     RX_WARN("renderer running in stub mode");
     return true;
@@ -512,7 +512,7 @@ bool Renderer::InitializeCommon(const RendererDesc &desc, Window *window,
   // across cores on a cold cache (the guard joins the workers on every exit
   // path, and a failed compile fails Initialize at the End check).
   struct PipelineBatchGuard {
-    Device &device;
+    gpu::Device &device;
     bool ended = false;
     bool End() {
       ended = true;
@@ -538,7 +538,7 @@ bool Renderer::InitializeCommon(const RendererDesc &desc, Window *window,
       window ? device_->CreateSwapchain(output_width_, output_height_,
                                         settings_.vsync, swapchain_hdr_request_)
              : base::MakeUnique<OffscreenSwapchain>(
-                   Format::kBGRA8Unorm, Extent2D{output_width_, output_height_});
+                   gpu::Format::kBGRA8Unorm, gpu::Extent2D{output_width_, output_height_});
   if (!swapchain_ || !CreateFrameResources())
     return false;
   output_width_ = swapchain_->extent().width;
@@ -590,7 +590,7 @@ bool Renderer::InitializeCommon(const RendererDesc &desc, Window *window,
   mesh_pipeline_ = MeshPipeline::Create(
       *device_, kSceneColorFormat, kMotionFormat, kNormalFormat, kDepthFormat,
       material_system_->set_layout(), environment_->env_set_layout(),
-      bindless_ ? bindless_->set_layout() : BindingLayoutHandle{});
+      bindless_ ? bindless_->set_layout() : gpu::BindingLayoutHandle{});
   post_ = PostPass::Create(*device_, swapchain_->format());
   if (!mesh_pipeline_ || !post_ || !taa_.Initialize(*device_))
     return false;
@@ -598,38 +598,38 @@ bool Renderer::InitializeCommon(const RendererDesc &desc, Window *window,
   // hands the post-resolve raster passes a single-sampled depth buffer.
   msaa_resolve_pipeline_ = device_->CreateComputePipeline({
       .shader = RX_SHADER(k_msaa_resolve_cs_hlsl),
-      .sets = {{.slots = {{0, BindingType::kSampledImage},
-                          {1, BindingType::kSampledImage},
-                          {2, BindingType::kStorageImage},
-                          {3, BindingType::kStorageImage}}}},
+      .sets = {{.slots = {{0, gpu::BindingType::kSampledImage},
+                          {1, gpu::BindingType::kSampledImage},
+                          {2, gpu::BindingType::kStorageImage},
+                          {3, gpu::BindingType::kStorageImage}}}},
       .push_constant_size = 8,
       .debug_name = "msaa_resolve",
   });
   depth_copy_pipeline_ = device_->CreateGraphicsPipeline({
       .vertex = RX_SHADER(k_fullscreen_vs_slang),
       .fragment = RX_SHADER(k_depth_copy_ps_hlsl),
-      .raster = {.cull = CullMode::kNone},
+      .raster = {.cull = gpu::CullMode::kNone},
       .depth = {.test = true,
                 .write = true,
-                .compare = CompareOp::kAlways,
+                .compare = gpu::CompareOp::kAlways,
                 .format = kDepthFormat},
-      .sets = {{.slots = {{0, BindingType::kSampledImage}}}},
+      .sets = {{.slots = {{0, gpu::BindingType::kSampledImage}}}},
       .debug_name = "msaa_depth_copy",
   });
   hdr_overlay_copy_pipeline_ = device_->CreateGraphicsPipeline({
       .vertex = RX_SHADER(k_fullscreen_vs_slang),
       .fragment = RX_SHADER(k_blit_ps_slang),
-      .raster = {.cull = CullMode::kNone},
+      .raster = {.cull = gpu::CullMode::kNone},
       .color_formats = {kSceneColorFormat},
-      .blend = {BlendMode::kOpaque},
-      .sets = {{.slots = {{0, BindingType::kCombinedTextureSampler}},
-                .stages = kShaderStageFragment}},
+      .blend = {gpu::BlendMode::kOpaque},
+      .sets = {{.slots = {{0, gpu::BindingType::kCombinedTextureSampler}},
+                .stages = gpu::kShaderStageFragment}},
       .debug_name = "hdr_overlay_copy",
   });
   hdr_overlay_sampler_ =
-      device_->GetSampler({.address_u = AddressMode::kClampToEdge,
-                           .address_v = AddressMode::kClampToEdge,
-                           .address_w = AddressMode::kClampToEdge});
+      device_->GetSampler({.address_u = gpu::AddressMode::kClampToEdge,
+                           .address_v = gpu::AddressMode::kClampToEdge,
+                           .address_w = gpu::AddressMode::kClampToEdge});
   if (!msaa_resolve_pipeline_ || !depth_copy_pipeline_ ||
       !hdr_overlay_copy_pipeline_ || !hdr_overlay_sampler_)
     return false;
@@ -659,12 +659,12 @@ bool Renderer::InitializeCommon(const RendererDesc &desc, Window *window,
     };
     light_cluster_pipeline_ = device_->CreateComputePipeline({
         .shader = RX_SHADER(k_light_cluster_cs_hlsl),
-        .sets = {{.slots = {{0, BindingType::kStorageBuffer},
-                            {1, BindingType::kStorageBuffer},
-                            {2, BindingType::kStorageBuffer},
-                            {3, BindingType::kStorageBuffer},
-                            {4, BindingType::kStorageBuffer}}}},
-        .push_constant_size = PushSize<ClusterPush>(),
+        .sets = {{.slots = {{0, gpu::BindingType::kStorageBuffer},
+                            {1, gpu::BindingType::kStorageBuffer},
+                            {2, gpu::BindingType::kStorageBuffer},
+                            {3, gpu::BindingType::kStorageBuffer},
+                            {4, gpu::BindingType::kStorageBuffer}}}},
+        .push_constant_size = gpu::PushSize<ClusterPush>(),
         .debug_name = "light_cluster",
     });
     if (!light_cluster_pipeline_)
@@ -684,10 +684,10 @@ bool Renderer::InitializeCommon(const RendererDesc &desc, Window *window,
     };
     contact_shadow_pipeline_ = device_->CreateComputePipeline({
         .shader = RX_SHADER(k_contact_shadow_cs_hlsl),
-        .sets = {{.slots = {{0, BindingType::kStorageImage},
-                            {1, BindingType::kSampledImage},
-                            {2, BindingType::kUniformBuffer}}}},
-        .push_constant_size = PushSize<ContactPush>(),
+        .sets = {{.slots = {{0, gpu::BindingType::kStorageImage},
+                            {1, gpu::BindingType::kSampledImage},
+                            {2, gpu::BindingType::kUniformBuffer}}}},
+        .push_constant_size = gpu::PushSize<ContactPush>(),
         .debug_name = "contact_shadow",
     });
     if (!contact_shadow_pipeline_)
@@ -708,9 +708,9 @@ bool Renderer::InitializeCommon(const RendererDesc &desc, Window *window,
     };
     cloud_shadow_pipeline_ = device_->CreateComputePipeline({
         .shader = RX_SHADER(k_cloud_shadow_cs_hlsl),
-        .sets = {{.slots = {{0, BindingType::kStorageImage},
-                            {1, BindingType::kSampledImage}}}},
-        .push_constant_size = PushSize<CloudShadowPush>(),
+        .sets = {{.slots = {{0, gpu::BindingType::kStorageImage},
+                            {1, gpu::BindingType::kSampledImage}}}},
+        .push_constant_size = gpu::PushSize<CloudShadowPush>(),
         .debug_name = "cloud_shadow",
     });
     if (!cloud_shadow_pipeline_)
@@ -728,32 +728,32 @@ bool Renderer::InitializeCommon(const RendererDesc &desc, Window *window,
     };
     sss_pipeline_ = device_->CreateComputePipeline({
         .shader = RX_SHADER(k_sss_blur_cs_hlsl),
-        .sets = {{.slots = {{0, BindingType::kStorageImage},
-                            {1, BindingType::kCombinedTextureSampler},
-                            {2, BindingType::kCombinedTextureSampler},
-                            {3, BindingType::kCombinedTextureSampler}}}},
-        .push_constant_size = PushSize<SssPush>(),
+        .sets = {{.slots = {{0, gpu::BindingType::kStorageImage},
+                            {1, gpu::BindingType::kCombinedTextureSampler},
+                            {2, gpu::BindingType::kCombinedTextureSampler},
+                            {3, gpu::BindingType::kCombinedTextureSampler}}}},
+        .push_constant_size = gpu::PushSize<SssPush>(),
         .debug_name = "sss_blur",
     });
     if (!sss_pipeline_)
       return false;
     sss_sampler_ =
-        device_->GetSampler({.address_u = AddressMode::kClampToEdge,
-                             .address_v = AddressMode::kClampToEdge});
+        device_->GetSampler({.address_u = gpu::AddressMode::kClampToEdge,
+                             .address_v = gpu::AddressMode::kClampToEdge});
     cluster_counts_ =
-        device_->CreateBuffer(kClusterCount * sizeof(u32), kBufferUsageStorage);
+        device_->CreateBuffer(kClusterCount * sizeof(u32), gpu::kBufferUsageStorage);
     cluster_indices_ = device_->CreateBuffer(
         static_cast<u64>(kClusterCount) * kMaxLightsPerCluster * sizeof(u32),
-        kBufferUsageStorage);
+        gpu::kBufferUsageStorage);
     decal_cluster_indices_ = device_->CreateBuffer(
         static_cast<u64>(kClusterCount) * kMaxDecalsPerCluster * sizeof(u32),
-        kBufferUsageStorage);
+        gpu::kBufferUsageStorage);
     if (!cluster_counts_ || !cluster_indices_ || !decal_cluster_indices_)
       return false;
     // One per in-flight frame: the contact-shadow pass rewrites it while the
     // previous frame may still be reading its own copy.
-    for (GpuBuffer &camera : contact_camera_) {
-      camera = device_->CreateBuffer(sizeof(ContactCamera), kBufferUsageUniform,
+    for (gpu::GpuBuffer &camera : contact_camera_) {
+      camera = device_->CreateBuffer(sizeof(ContactCamera), gpu::kBufferUsageUniform,
                                      true);
       if (!camera.mapped)
         return false;
@@ -793,9 +793,9 @@ bool Renderer::InitializeCommon(const RendererDesc &desc, Window *window,
   };
   hdr_pipeline_ = device_->CreateComputePipeline({
       .shader = RX_SHADER(k_hdr_capture_cs_hlsl),
-      .sets = {{.slots = {{0, BindingType::kStorageBuffer},
-                          {1, BindingType::kSampledImage}}}},
-      .push_constant_size = PushSize<HdrCapturePush>(),
+      .sets = {{.slots = {{0, gpu::BindingType::kStorageBuffer},
+                          {1, gpu::BindingType::kSampledImage}}}},
+      .push_constant_size = gpu::PushSize<HdrCapturePush>(),
       .debug_name = "hdr_capture",
   });
   if (!hdr_pipeline_)
@@ -817,7 +817,7 @@ bool Renderer::InitializeCommon(const RendererDesc &desc, Window *window,
   decal_baker_.Initialize(*device_);     // non-fatal: gates on available()
   if (!particles_.Initialize(*device_, kSceneColorFormat,
                              bindless_ ? bindless_->set_layout()
-                                       : BindingLayoutHandle{}))
+                                       : gpu::BindingLayoutHandle{}))
     return false;
   if (!gaussians_.Initialize(*device_, kSceneColorFormat))
     return false;
@@ -857,10 +857,10 @@ bool Renderer::InitializeCommon(const RendererDesc &desc, Window *window,
     // 1x1 fallback hi-z so the mesh-shader cull descriptor is always valid;
     // bound (with occlusion disabled) on frames where no real hi-z was built.
     ms_dummy_hiz_ =
-        device_->CreateImage2D(Format::kR32Float, {1, 1}, kTextureUsageSampled);
-    device_->ImmediateSubmit([&](CommandList &cmd) {
-      cmd.Barrier(Transition(ms_dummy_hiz_, ResourceState::kUndefined,
-                             ResourceState::kShaderReadAll));
+        device_->CreateImage2D(gpu::Format::kR32Float, {1, 1}, gpu::kTextureUsageSampled);
+    device_->ImmediateSubmit([&](gpu::CommandList &cmd) {
+      cmd.Barrier(gpu::Transition(ms_dummy_hiz_, gpu::ResourceState::kUndefined,
+                             gpu::ResourceState::kShaderReadAll));
     });
   }
   if (!reference_compare_.Initialize(*device_))
@@ -888,7 +888,7 @@ bool Renderer::InitializeCommon(const RendererDesc &desc, Window *window,
   fluid_surface_ = FluidSurfacePass::Create(
       *device_, kSceneColorFormat, kMotionFormat, kDepthFormat,
       mesh_pipeline_->set_layout(), environment_->env_set_layout(),
-      bindless_ ? bindless_->set_layout() : BindingLayoutHandle{});
+      bindless_ ? bindless_->set_layout() : gpu::BindingLayoutHandle{});
   if (!fluid_surface_)
     RX_WARN("fluid surface renderer unavailable"); // optional feature stays off
   if (!environment_->CreateSkyPipeline(mesh_pipeline_->set_layout(),
@@ -1332,18 +1332,18 @@ void Renderer::WriteHdr() {
 
 // Debug readback for frame generation verification (RX_FRAMEGEN_DUMP): the
 // interpolated image should land between the two real frames around it.
-void Renderer::DumpFgImage(const GpuImage &image, ResourceState state,
+void Renderer::DumpFgImage(const gpu::GpuImage &image, gpu::ResourceState state,
                            bool bgra, const char *path) {
   device_->WaitIdle();
   u64 size = static_cast<u64>(image.extent.width) * image.extent.height * 4;
-  GpuBuffer staging =
-      device_->CreateBuffer(size, kBufferUsageTransferDst, true);
+  gpu::GpuBuffer staging =
+      device_->CreateBuffer(size, gpu::kBufferUsageTransferDst, true);
   if (!staging.mapped)
     return;
-  device_->ImmediateSubmit([&](CommandList &cmd) {
-    cmd.Barrier(Transition(image, state, ResourceState::kCopySrc));
+  device_->ImmediateSubmit([&](gpu::CommandList &cmd) {
+    cmd.Barrier(gpu::Transition(image, state, gpu::ResourceState::kCopySrc));
     cmd.CopyTextureToBuffer(image, staging, {});
-    cmd.Barrier(Transition(image, ResourceState::kCopySrc, state));
+    cmd.Barrier(gpu::Transition(image, gpu::ResourceState::kCopySrc, state));
   });
   base::Vector<u8> pixels(static_cast<size_t>(image.extent.width) *
                           image.extent.height * 3);
@@ -1364,16 +1364,16 @@ void Renderer::DumpFgImage(const GpuImage &image, ResourceState state,
 
 void Renderer::WriteBackbufferPng(const base::String &path) {
   device_->WaitIdle();
-  Extent2D extent = swapchain_->extent();
+  gpu::Extent2D extent = swapchain_->extent();
   u64 size = static_cast<u64>(extent.width) * extent.height * 4;
-  GpuBuffer staging =
-      device_->CreateBuffer(size, kBufferUsageTransferDst, true);
+  gpu::GpuBuffer staging =
+      device_->CreateBuffer(size, gpu::kBufferUsageTransferDst, true);
   if (!staging.mapped)
     return;
 
-  device_->ImmediateSubmit([&](CommandList &cmd) {
+  device_->ImmediateSubmit([&](gpu::CommandList &cmd) {
     cmd.CopyTextureToBuffer(capture_image_, staging, {});
-    cmd.MemoryBarrier(BarrierScope::kTransferWrite, BarrierScope::kHostRead);
+    cmd.MemoryBarrier(gpu::BarrierScope::kTransferWrite, gpu::BarrierScope::kHostRead);
   });
 
   // Swapchain is bgra; png wants rgb.
@@ -1411,7 +1411,7 @@ bool Renderer::CaptureArmed() const {
 }
 
 bool Renderer::EnsureCaptureImage() {
-  Extent2D extent = swapchain_->extent();
+  gpu::Extent2D extent = swapchain_->extent();
   if (capture_image_.handle && capture_image_.extent.width == extent.width &&
       capture_image_.extent.height == extent.height)
     return true;
@@ -1423,8 +1423,8 @@ bool Renderer::EnsureCaptureImage() {
   // behaves identically; TransferSrc is what the png readback copies from.
   capture_image_ = device_->CreateImage2D(
       swapchain_->format(), extent,
-      kTextureUsageColorTarget | kTextureUsageTransferSrc |
-          kTextureUsageTransferDst | kTextureUsageSampled);
+      gpu::kTextureUsageColorTarget | gpu::kTextureUsageTransferSrc |
+          gpu::kTextureUsageTransferDst | gpu::kTextureUsageSampled);
   if (!capture_image_.handle) {
     RX_WARN("offscreen capture image allocation failed");
     return false;
@@ -1567,7 +1567,7 @@ void Renderer::ApplySettings() {
     auto rebuilt = MeshPipeline::Create(
         *device_, kSceneColorFormat, kMotionFormat, kNormalFormat, kDepthFormat,
         material_system_->set_layout(), environment_->env_set_layout(),
-        bindless_ ? bindless_->set_layout() : BindingLayoutHandle{}, want_msaa);
+        bindless_ ? bindless_->set_layout() : gpu::BindingLayoutHandle{}, want_msaa);
     if (rebuilt) {
       mesh_pipeline_ = base::move(rebuilt);
       applied_msaa_samples_ = want_msaa;
@@ -1852,7 +1852,7 @@ InstanceGroupHandle
 Renderer::CreateInstanceGroup(u64 mesh, base::Span<const Mat4> transforms) {
   if (!device_ || device_->is_stub())
     return {};
-  const GpuMesh *gpu = meshes_.find(mesh);
+  const gpu::GpuMesh *gpu = meshes_.find(mesh);
   if (!gpu || !SupportsStaticInstances(*gpu, material_system_.Get_UseOnlyIfYouKnowWhatYouareDoing()) ||
       mesh_emitters_.find(mesh) || !HasUniformScale(transforms))
     return {};
@@ -1869,7 +1869,7 @@ bool Renderer::UpdateInstanceGroup(InstanceGroupHandle handle,
       handle.index >= instances_.groups().size())
     return false;
   const InstanceStore::Group &group = instances_.groups()[handle.index];
-  const GpuMesh *gpu = meshes_.find(group.mesh);
+  const gpu::GpuMesh *gpu = meshes_.find(group.mesh);
   const bool replaced =
       gpu && HasUniformScale(transforms) &&
       instances_.Replace(*device_, handle, transforms, gpu->bounds_center,
@@ -1920,16 +1920,16 @@ bool Renderer::UploadMesh(const asset::Mesh &mesh, u64 id_salt) {
   // kBufferUsageStorage: the bindless registry mirrors RT mesh buffers into
   // its geometry buffer array (raw reads for the DXIL hit shaders), so the
   // buffers must be descriptor-bindable, not just address-reachable.
-  BufferUsageFlags rt_usage =
-      raytracing_ ? (kBufferUsageAccelBuildInput | kBufferUsageDeviceAddress |
-                     kBufferUsageStorage)
+  gpu::BufferUsageFlags rt_usage =
+      raytracing_ ? (gpu::kBufferUsageAccelBuildInput | gpu::kBufferUsageDeviceAddress |
+                     gpu::kBufferUsageStorage)
                   : 0;
   // The mesh-shader path reads vertices/meshlets by device address. Skinned
   // and morphed meshes stay on the raster vertex path, which deforms them.
   const bool build_meshlets = device_->caps().mesh_shaders &&
                               !mesh.dynamic_vertices && !mesh.skinned &&
                               mesh.morph_targets.empty();
-  BufferUsageFlags ms_usage = build_meshlets ? kBufferUsageDeviceAddress : 0;
+  gpu::BufferUsageFlags ms_usage = build_meshlets ? gpu::kBufferUsageDeviceAddress : 0;
 
   // On the mesh-shader path, synthesize coarse lods for eligible
   // single-material statics so the task stage can drop detail with distance
@@ -1947,7 +1947,7 @@ bool Renderer::UploadMesh(const asset::Mesh &mesh, u64 id_salt) {
   }
 
   const asset::MeshLod &lod = src->lods[0];
-  GpuMesh gpu;
+  gpu::GpuMesh gpu;
 
   // Concatenate every lod into shared vertex/index buffers; each lod keeps its
   // local indices, rebased onto its vertices through the draw's vertexOffset.
@@ -1965,11 +1965,11 @@ bool Renderer::UploadMesh(const asset::Mesh &mesh, u64 id_salt) {
   gpu.vertices = device_->CreateBufferWithData(
       ByteSpan(reinterpret_cast<const u8 *>(all_verts.data()),
                all_verts.size() * sizeof(asset::Vertex)),
-      kBufferUsageVertex | rt_usage | ms_usage);
+      gpu::kBufferUsageVertex | rt_usage | ms_usage);
   gpu.indices = device_->CreateBufferWithData(
       ByteSpan(reinterpret_cast<const u8 *>(all_indices.data()),
                all_indices.size() * sizeof(u32)),
-      kBufferUsageIndex | rt_usage);
+      gpu::kBufferUsageIndex | rt_usage);
   gpu.index_count =
       static_cast<u32>(lod.indices.size()); // lod 0 (rt/shadow/overdraw)
   gpu.vertex_count = static_cast<u32>(lod.vertices.size());
@@ -1982,7 +1982,7 @@ bool Renderer::UploadMesh(const asset::Mesh &mesh, u64 id_salt) {
     gpu.skinning = device_->CreateBufferWithData(
         ByteSpan(reinterpret_cast<const u8 *>(lod.skinning.data()),
                  lod.skinning.size() * sizeof(asset::SkinnedVertexExtra)),
-        kBufferUsageVertex | kBufferUsageStorage);
+        gpu::kBufferUsageVertex | gpu::kBufferUsageStorage);
     gpu.skinned = static_cast<bool>(gpu.skinning);
   }
   // Morph target deltas, packed [target][vertex] as {position, normal,
@@ -2010,11 +2010,11 @@ bool Renderer::UploadMesh(const asset::Mesh &mesh, u64 id_salt) {
     gpu.morph_deltas = device_->CreateBufferWithData(
         ByteSpan(reinterpret_cast<const u8 *>(deltas.data()),
                  deltas.size() * sizeof(f32)),
-        kBufferUsageStorage | kBufferUsageDeviceAddress);
+        gpu::kBufferUsageStorage | gpu::kBufferUsageDeviceAddress);
     gpu.morph_target_count = static_cast<u32>(mesh.morph_targets.size());
   }
   auto build_submeshes = [&](const asset::MeshLod &l, u32 index_base,
-                             base::Vector<GpuSubmesh> &out) {
+                             base::Vector<gpu::GpuSubmesh> &out) {
     if (l.submeshes.empty()) {
       out.push_back(
           {index_base, static_cast<u32>(l.indices.size()), 0, false, false});
@@ -2031,7 +2031,7 @@ bool Renderer::UploadMesh(const asset::Mesh &mesh, u64 id_salt) {
       bool effect = material_system_ && material_system_->is_effect(material);
       bool effect_additive =
           effect && material_system_->is_effect_additive(material);
-      GpuSubmesh out_submesh{index_base + submesh.index_offset,
+      gpu::GpuSubmesh out_submesh{index_base + submesh.index_offset,
                              submesh.index_count,
                              material,
                              blend,
@@ -2044,14 +2044,14 @@ bool Renderer::UploadMesh(const asset::Mesh &mesh, u64 id_salt) {
   };
   build_submeshes(src->lods[0], index_bases[0], gpu.submeshes);
   for (size_t i = 1; i < src->lods.size(); ++i) {
-    GpuLod glod;
+    gpu::GpuLod glod;
     glod.vertex_offset = vertex_bases[i];
     build_submeshes(src->lods[i], index_bases[i], glod.submeshes);
     gpu.lods.push_back(base::move(glod));
   }
   gpu.all_blend = true;
   bool all_water = !gpu.submeshes.empty();
-  for (const GpuSubmesh &submesh : gpu.submeshes) {
+  for (const gpu::GpuSubmesh &submesh : gpu.submeshes) {
     if (!submesh.blend)
       gpu.all_blend = false;
     if (!submesh.water)
@@ -2096,9 +2096,9 @@ bool Renderer::UploadMesh(const asset::Mesh &mesh, u64 id_salt) {
     base::Vector<Meshlet> all_meshlets;
     base::Vector<u32> all_mv;
     base::Vector<u32> all_mt;
-    auto build_lod = [&](base::Vector<GpuSubmesh> &subs, u32 vertex_base,
+    auto build_lod = [&](base::Vector<gpu::GpuSubmesh> &subs, u32 vertex_base,
                          u32 vertex_count) {
-      for (GpuSubmesh &submesh : subs) {
+      for (gpu::GpuSubmesh &submesh : subs) {
         if (submesh.blend || submesh.index_count == 0)
           continue;
         MeshletGeometry geo = BuildMeshletGeometry(
@@ -2153,7 +2153,7 @@ bool Renderer::UploadMesh(const asset::Mesh &mesh, u64 id_salt) {
   // addresses (the registry itself now always exists for textures/materials).
   if (bindless_ && raytracing_ && !gpu.all_blend && include_rt) {
     base::Vector<BindlessRegistry::GeometryRecord> geometries;
-    for (const GpuSubmesh &submesh : gpu.submeshes) {
+    for (const gpu::GpuSubmesh &submesh : gpu.submeshes) {
       if (submesh.blend || submesh.index_count == 0)
         continue;
       geometries.push_back(
@@ -2188,8 +2188,8 @@ bool Renderer::UploadMesh(const asset::Mesh &mesh, u64 id_salt) {
       const u32 vertex_base = vertex_bases[li + 1]; // vertex_bases[0] = lod0
       base::Vector<u32> lod_indices;
       base::Vector<BindlessRegistry::GeometryRecord> lod_geoms;
-      GpuMesh::LodRt &rt = gpu.lod_rt[li];
-      for (const GpuSubmesh &submesh : gpu.lods[li].submeshes) {
+      gpu::GpuMesh::LodRt &rt = gpu.lod_rt[li];
+      for (const gpu::GpuSubmesh &submesh : gpu.lods[li].submeshes) {
         if (submesh.blend || submesh.index_count == 0)
           continue;
         const u32 offset = static_cast<u32>(lod_indices.size());
@@ -2206,8 +2206,8 @@ bool Renderer::UploadMesh(const asset::Mesh &mesh, u64 id_salt) {
       rt.indices = device_->CreateBufferWithData(
           ByteSpan(reinterpret_cast<const u8 *>(lod_indices.data()),
                    lod_indices.size() * sizeof(u32)),
-          kBufferUsageIndex | kBufferUsageAccelBuildInput |
-              kBufferUsageDeviceAddress | kBufferUsageStorage);
+          gpu::kBufferUsageIndex | gpu::kBufferUsageAccelBuildInput |
+              gpu::kBufferUsageDeviceAddress | gpu::kBufferUsageStorage);
       if (!rt.indices) {
         rt.geoms.clear();
         continue;
@@ -2226,7 +2226,7 @@ bool Renderer::UploadMesh(const asset::Mesh &mesh, u64 id_salt) {
   // forces the shrink factor to 1 (identical to the real triangles),
   // reproducing today's force-opaque behavior for A/B. Realtime-tlas meshes
   // only (no_rt fill is path-trace-only and never hits realtime rays).
-  base::Vector<AccelTriangles> approx_accel;
+  base::Vector<gpu::AccelTriangles> approx_accel;
   if (bindless_ && raytracing_ && material_system_ && !gpu.all_blend &&
       !gpu.no_rt) {
     const bool veg = RtVegOpt;
@@ -2238,7 +2238,7 @@ bool Renderer::UploadMesh(const asset::Mesh &mesh, u64 id_salt) {
       u32 index_count;
     };
     base::Vector<ApproxRange> approx_ranges;
-    for (const GpuSubmesh &submesh : gpu.submeshes) {
+    for (const gpu::GpuSubmesh &submesh : gpu.submeshes) {
       if (!submesh.alpha_mask || submesh.blend || submesh.index_count == 0)
         continue;
       f32 opacity =
@@ -2276,17 +2276,17 @@ bool Renderer::UploadMesh(const asset::Mesh &mesh, u64 id_salt) {
       approx_ranges.push_back({base_index, count});
     }
     if (!approx_verts.empty()) {
-      BufferUsageFlags approx_usage = kBufferUsageAccelBuildInput |
-                                      kBufferUsageDeviceAddress |
-                                      kBufferUsageStorage;
+      gpu::BufferUsageFlags approx_usage = gpu::kBufferUsageAccelBuildInput |
+                                      gpu::kBufferUsageDeviceAddress |
+                                      gpu::kBufferUsageStorage;
       gpu.rt_approx_vertices = device_->CreateBufferWithData(
           ByteSpan(reinterpret_cast<const u8 *>(approx_verts.data()),
                    approx_verts.size() * sizeof(asset::Vertex)),
-          kBufferUsageVertex | approx_usage);
+          gpu::kBufferUsageVertex | approx_usage);
       gpu.rt_approx_indices = device_->CreateBufferWithData(
           ByteSpan(reinterpret_cast<const u8 *>(approx_indices.data()),
                    approx_indices.size() * sizeof(u32)),
-          kBufferUsageIndex | approx_usage);
+          gpu::kBufferUsageIndex | approx_usage);
       if (gpu.rt_approx_vertices && gpu.rt_approx_indices) {
         gpu.rt_approx_bindless = bindless_->RegisterMesh(
             gpu.rt_approx_vertices, gpu.rt_approx_indices, approx_geoms.data(),
@@ -2300,11 +2300,11 @@ bool Renderer::UploadMesh(const asset::Mesh &mesh, u64 id_salt) {
               {.vertex_address = gpu.rt_approx_vertices.address,
                .vertex_stride = sizeof(asset::Vertex),
                .vertex_count = static_cast<u32>(approx_verts.size()),
-               .vertex_format = Format::kRGB32Float,
+               .vertex_format = gpu::Format::kRGB32Float,
                .index_address =
                    gpu.rt_approx_indices.address + r.index_offset * sizeof(u32),
                .index_count = r.index_count,
-               .index_type = IndexType::kUint32,
+               .index_type = gpu::IndexType::kUint32,
                .opaque = true});
         }
         gpu.rt_approx = !approx_accel.empty();
@@ -2315,7 +2315,7 @@ bool Renderer::UploadMesh(const asset::Mesh &mesh, u64 id_salt) {
   // the test spawn and again for the npc template) must free the previous
   // buffers or they leak until vkDestroyDevice complains.
   const bool replacing_mesh = meshes_.find(mesh_key) != nullptr;
-  if (GpuMesh *previous = meshes_.find(mesh_key)) {
+  if (gpu::GpuMesh *previous = meshes_.find(mesh_key)) {
     device_->WaitIdle(); // uploads happen at load time; never per frame
     skinned_rt_.InvalidateMesh(
         *device_, raytracing_.Get_UseOnlyIfYouKnowWhatYouareDoing(), mesh_key,
@@ -2327,7 +2327,7 @@ bool Renderer::UploadMesh(const asset::Mesh &mesh, u64 id_salt) {
     }
     if (bindless_ && previous->bindless_geometry)
       bindless_->ReleaseMesh(previous->bindless_index);
-    for (GpuMesh::LodRt &rt : previous->lod_rt) {
+    for (gpu::GpuMesh::LodRt &rt : previous->lod_rt) {
       if (rt.indices)
         device_->DestroyBuffer(rt.indices);
       // Now that mesh-table slots recycle, the per-LOD and approx records must
@@ -2372,7 +2372,7 @@ bool Renderer::UploadMesh(const asset::Mesh &mesh, u64 id_salt) {
     bindless_->ReleaseMesh(gpu.bindless_index);
     gpu.bindless_index = 0;
     gpu.bindless_geometry = false;
-    if (GpuMesh *stored = meshes_.find(mesh_key)) {
+    if (gpu::GpuMesh *stored = meshes_.find(mesh_key)) {
       stored->bindless_index = 0;
       stored->bindless_geometry = false;
     }
@@ -2407,7 +2407,7 @@ bool Renderer::UploadMesh(const asset::Mesh &mesh, u64 id_salt) {
     base::Vector<u32> opaque_indices;
     f32 albedo[3] = {0, 0, 0}, emissive[3] = {0, 0, 0};
     u64 weight = 0;
-    for (const GpuSubmesh &sm : gpu.submeshes) {
+    for (const gpu::GpuSubmesh &sm : gpu.submeshes) {
       if (sm.blend || sm.index_count == 0)
         continue;
       if (!lod.indices.empty()) {
@@ -2467,7 +2467,7 @@ bool Renderer::UpdateDynamicMesh(const asset::Mesh &mesh, u64 id_salt) {
   }
   const asset::MeshLod &lod = mesh.lods[0];
   const u64 key = mesh.id.hash ^ id_salt;
-  GpuMesh *gpu = meshes_.find(key);
+  gpu::GpuMesh *gpu = meshes_.find(key);
   // rt_approx meshes are rejected: the opaque-approx stand-in duplicates the
   // masked geometry into its own buffers/BLAS, which this fast path does not
   // rebuild; realtime rays would keep hitting the pre-edit shape. Callers
@@ -2481,12 +2481,12 @@ bool Renderer::UpdateDynamicMesh(const asset::Mesh &mesh, u64 id_salt) {
 
   const ByteSpan bytes(reinterpret_cast<const u8 *>(lod.vertices.data()),
                        lod.vertices.size() * sizeof(asset::Vertex));
-  const BufferUsageFlags rt_usage =
-      raytracing_ ? (kBufferUsageAccelBuildInput | kBufferUsageDeviceAddress |
-                     kBufferUsageStorage)
+  const gpu::BufferUsageFlags rt_usage =
+      raytracing_ ? (gpu::kBufferUsageAccelBuildInput | gpu::kBufferUsageDeviceAddress |
+                     gpu::kBufferUsageStorage)
                   : 0;
-  GpuBuffer replacement =
-      device_->CreateBufferWithData(bytes, kBufferUsageVertex | rt_usage);
+  gpu::GpuBuffer replacement =
+      device_->CreateBufferWithData(bytes, gpu::kBufferUsageVertex | rt_usage);
   if (!replacement)
     return false;
 
@@ -2500,7 +2500,7 @@ bool Renderer::UpdateDynamicMesh(const asset::Mesh &mesh, u64 id_salt) {
   }
   if (raytracing_)
     raytracing_->RemoveBlasDeferred(key);
-  GpuBuffer previous = gpu->vertices;
+  gpu::GpuBuffer previous = gpu->vertices;
   gpu->vertices = replacement;
   base::MemCopy(gpu->bounds_center, mesh.bounds_center,
               sizeof(gpu->bounds_center));
@@ -2534,7 +2534,7 @@ bool Renderer::SyncDynamicMeshRayTracing(const asset::Mesh &mesh, u64 id_salt) {
   if (!device_ || device_->is_stub())
     return false;
   const u64 key = mesh.id.hash ^ id_salt;
-  GpuMesh *gpu = meshes_.find(key);
+  gpu::GpuMesh *gpu = meshes_.find(key);
   if (!gpu || !gpu->dynamic_vertices)
     return false;
   if (!raytracing_ || !bindless_ || !material_system_ ||
@@ -2545,7 +2545,7 @@ bool Renderer::SyncDynamicMeshRayTracing(const asset::Mesh &mesh, u64 id_salt) {
     return true;
 
   base::Vector<BindlessRegistry::GeometryRecord> geometries;
-  for (const GpuSubmesh &submesh : gpu->submeshes) {
+  for (const gpu::GpuSubmesh &submesh : gpu->submeshes) {
     if (submesh.blend || submesh.index_count == 0)
       continue;
     geometries.push_back(
@@ -2578,7 +2578,7 @@ bool Renderer::RemoveDynamicMesh(asset::AssetId mesh, u64 id_salt) {
   if (!device_ || device_->is_stub())
     return false;
   const u64 key = mesh.hash ^ id_salt;
-  GpuMesh *gpu = meshes_.find(key);
+  gpu::GpuMesh *gpu = meshes_.find(key);
   if (!gpu || !gpu->dynamic_vertices || gpu->has_meshlets) {
     return false;
   }
@@ -2597,7 +2597,7 @@ bool Renderer::RemoveDynamicMesh(asset::AssetId mesh, u64 id_salt) {
   // Per-LOD RT and opaque-approx side state: without these a later UploadMesh
   // under the same asset id would find (and silently reuse) the stale
   // approx/LOD BLAS entries, and the bindless records would leak for good.
-  for (GpuMesh::LodRt &rt : gpu->lod_rt) {
+  for (gpu::GpuMesh::LodRt &rt : gpu->lod_rt) {
     if (rt.indices)
       device_->DestroyBufferDeferred(rt.indices);
     if (bindless_ && rt.bindless != BindlessRegistry::kInvalidIndex) {
@@ -2637,13 +2637,13 @@ bool Renderer::EnsureRayTracingGeometry() {
     return false;
   bool success = true;
   for (auto entry : meshes_) {
-    GpuMesh &gpu = entry.value;
+    gpu::GpuMesh &gpu = entry.value;
     if (gpu.all_blend || (gpu.no_rt && !settings_.path_trace))
       continue;
     if (raytracing_->HasBlas(entry.key))
       continue; // already built
     base::Vector<BindlessRegistry::GeometryRecord> geometries;
-    for (const GpuSubmesh &submesh : gpu.submeshes) {
+    for (const gpu::GpuSubmesh &submesh : gpu.submeshes) {
       if (submesh.blend || submesh.index_count == 0)
         continue;
       geometries.push_back(
@@ -2669,27 +2669,27 @@ bool Renderer::EnsureRayTracingGeometry() {
   return success;
 }
 
-u32 Renderer::EnsureLodRtGeometry(u64 mesh_key, GpuMesh &mesh, u32 lod) {
+u32 Renderer::EnsureLodRtGeometry(u64 mesh_key, gpu::GpuMesh &mesh, u32 lod) {
   if (lod == 0 || lod > mesh.lod_rt.size())
     return BindlessRegistry::kInvalidIndex;
-  GpuMesh::LodRt &rt = mesh.lod_rt[lod - 1];
+  gpu::GpuMesh::LodRt &rt = mesh.lod_rt[lod - 1];
   if (rt.bindless == BindlessRegistry::kInvalidIndex || rt.geoms.empty())
     return BindlessRegistry::kInvalidIndex; // no RT geometry at this LOD
   if (!rt.blas_built) {
     // Reconstruct the accel geometry from the eagerly-built (absolute-indexed,
     // force-opaque) LOD index buffer and build the BLAS once. The build blocks
     // (ImmediateSubmit), but only the first time this LOD is needed.
-    base::Vector<AccelTriangles> geometries;
+    base::Vector<gpu::AccelTriangles> geometries;
     geometries.reserve(rt.geoms.size());
-    for (const GpuMesh::LodRt::Geom &g : rt.geoms) {
+    for (const gpu::GpuMesh::LodRt::Geom &g : rt.geoms) {
       geometries.push_back(
           {.vertex_address = mesh.vertices.address,
            .vertex_stride = sizeof(asset::Vertex),
            .vertex_count = rt.vertex_count,
-           .vertex_format = Format::kRGB32Float,
+           .vertex_format = gpu::Format::kRGB32Float,
            .index_address = rt.indices.address + g.index_offset * sizeof(u32),
            .index_count = g.index_count,
-           .index_type = IndexType::kUint32,
+           .index_type = gpu::IndexType::kUint32,
            .opaque = true});
     }
     if (!raytracing_->BuildLodBlas(mesh_key, lod, geometries))
@@ -2707,12 +2707,12 @@ void Renderer::SetDecalAtlas(asset::AssetId texture,
   material_system_->Pin(texture.hash);
   if (normal_atlas)
     material_system_->Pin(normal_atlas.hash);
-  const GpuImage *img = material_system_->find_texture(texture.hash);
-  decal_atlas_view_ = img ? img->view : TextureView{};
-  const GpuImage *normal_img =
+  const gpu::GpuImage *img = material_system_->find_texture(texture.hash);
+  decal_atlas_view_ = img ? img->view : gpu::TextureView{};
+  const gpu::GpuImage *normal_img =
       normal_atlas ? material_system_->find_texture(normal_atlas.hash)
                    : nullptr;
-  decal_normal_atlas_view_ = normal_img ? normal_img->view : TextureView{};
+  decal_normal_atlas_view_ = normal_img ? normal_img->view : gpu::TextureView{};
 }
 
 u32 Renderer::AcquireSkinnedRt() { return skinned_rt_.Acquire(); }
@@ -2819,7 +2819,7 @@ void Renderer::RenderFrame(const FrameView &view) {
   u32 slot = frame_index_ % kFramesInFlight;
   // Waits on the slot's fence, resets its command allocator and transient
   // descriptor pool, and begins recording.
-  CommandList *cmd = device_->BeginFrame(slot);
+  gpu::CommandList *cmd = device_->BeginFrame(slot);
   if (bindless_) {
     for (u32 index : retired_bindless_meshes_[slot])
       bindless_->ReleaseMesh(index);
@@ -2842,13 +2842,13 @@ void Renderer::RenderFrame(const FrameView &view) {
     capture_offscreen_ = true;
   if (offscreen_only_ && !capture_offscreen_)
     return; // no capture image, nowhere to render
-  AcquireResult acquired =
-      capture_offscreen_ ? AcquireResult::kOk : swapchain_->Acquire(slot, &image_index);
-  if (acquired == AcquireResult::kOutOfDate) {
+  gpu::AcquireResult acquired =
+      capture_offscreen_ ? gpu::AcquireResult::kOk : swapchain_->Acquire(slot, &image_index);
+  if (acquired == gpu::AcquireResult::kOutOfDate) {
     RecreateSwapchain();
     return;
   }
-  if (acquired == AcquireResult::kTimeout) {
+  if (acquired == gpu::AcquireResult::kTimeout) {
     // The compositor is holding every image (window unmapped/occluded). With a
     // capture armed, keep driving the whole frame offscreen instead of just
     // the one frame the capture is due on: the engine needs its warm-up frames
@@ -2866,9 +2866,9 @@ void Renderer::RenderFrame(const FrameView &view) {
     }
     capture_offscreen_ = true;
     swapchain_starved_ = true;
-    acquired = AcquireResult::kOk;  // render this frame, offscreen
+    acquired = gpu::AcquireResult::kOk;  // render this frame, offscreen
   }
-  if (acquired != AcquireResult::kOk && acquired != AcquireResult::kSuboptimal)
+  if (acquired != gpu::AcquireResult::kOk && acquired != gpu::AcquireResult::kSuboptimal)
     return;
 
   // Frame generation: acquire a second image for the interpolated present.
@@ -2879,7 +2879,7 @@ void Renderer::RenderFrame(const FrameView &view) {
   // capture path has not acquired; skip it for that frame.
   if (!capture_offscreen_ && settings_.frame_generation &&
       !settings_.path_trace &&
-      swapchain_->color_space() == ColorSpace::kSrgbNonlinear && upscaler_ &&
+      swapchain_->color_space() == gpu::ColorSpace::kSrgbNonlinear && upscaler_ &&
       upscaler_->kind() == UpscalerKind::kFsr3) {
     if (!framegen_ && !framegen_attempted_) {
       framegen_attempted_ = true;
@@ -2892,9 +2892,9 @@ void Renderer::RenderFrame(const FrameView &view) {
         RX_WARN("framegen: unavailable, presenting real frames only");
     }
     if (framegen_) {
-      AcquireResult second = swapchain_->AcquireSecond(slot, &interp_index);
+      gpu::AcquireResult second = swapchain_->AcquireSecond(slot, &interp_index);
       fg_frame =
-          second == AcquireResult::kOk || second == AcquireResult::kSuboptimal;
+          second == gpu::AcquireResult::kOk || second == gpu::AcquireResult::kSuboptimal;
     }
   }
 #endif
@@ -2917,10 +2917,10 @@ void Renderer::RenderFrame(const FrameView &view) {
   profiler_.SetDetail(settings_.gpu_pass_timings);
   profiler_.BeginFrame(*cmd, slot);
   graph_.SetPassHooks(
-      [this](CommandList &c, const char *name) {
+      [this](gpu::CommandList &c, const char *name) {
         profiler_.BeginPass(c, name);
       },
-      [this](CommandList &c) { profiler_.EndPass(c); });
+      [this](gpu::CommandList &c) { profiler_.EndPass(c); });
 
   PassContext ctx;
   ctx.cmd = cmd;
@@ -2931,7 +2931,7 @@ void Renderer::RenderFrame(const FrameView &view) {
   profiler_.BeginFrameTotal(*cmd);
   // With async passes the graph splits the frame into segments; the returned
   // list is the final one and the only valid argument for SubmitFrame.
-  CommandList *final_cmd = graph_.Execute(ctx);
+  gpu::CommandList *final_cmd = graph_.Execute(ctx);
   profiler_.EndFrameTotal(*final_cmd);
 
   const bool screenshot_due =
@@ -2949,30 +2949,30 @@ void Renderer::RenderFrame(const FrameView &view) {
     if (!(screenshot_due || (sequence_due && seq_frame_ctr_ % seq_stride_ == 0) ||
           dump_due) || !EnsureCaptureImage())
       return;
-    const GpuImage &backbuffer = swapchain_->image(image_index);
-    TextureBarrier pre[] = {
-        Transition(backbuffer, ResourceState::kPresent, ResourceState::kCopySrc),
-        Transition(capture_image_, ResourceState::kUndefined, ResourceState::kCopyDst)};
+    const gpu::GpuImage &backbuffer = swapchain_->image(image_index);
+    gpu::TextureBarrier pre[] = {
+        gpu::Transition(backbuffer, gpu::ResourceState::kPresent, gpu::ResourceState::kCopySrc),
+        gpu::Transition(capture_image_, gpu::ResourceState::kUndefined, gpu::ResourceState::kCopyDst)};
     final_cmd->TextureBarriers(pre);
     final_cmd->CopyTexture(backbuffer, capture_image_);
-    TextureBarrier post[] = {
-        Transition(backbuffer, ResourceState::kCopySrc, ResourceState::kPresent),
-        Transition(capture_image_, ResourceState::kCopyDst, ResourceState::kCopySrc)};
+    gpu::TextureBarrier post[] = {
+        gpu::Transition(backbuffer, gpu::ResourceState::kCopySrc, gpu::ResourceState::kPresent),
+        gpu::Transition(capture_image_, gpu::ResourceState::kCopyDst, gpu::ResourceState::kCopySrc)};
     final_cmd->TextureBarriers(post);
     capture_ready = true;
   };
 
-  PresentResult presented;
+  gpu::PresentResult presented;
 #if defined(RX_HAS_FSR3)
   Fsr3SharedResources fg_shared;
   if (fg_frame && upscaler_ && upscaler_->fsr3_shared(&fg_shared)) {
-    const GpuImage &backbuffer = swapchain_->image(image_index);
-    const GpuImage &target = swapchain_->image(interp_index);
+    const gpu::GpuImage &backbuffer = swapchain_->image(image_index);
+    const gpu::GpuImage &target = swapchain_->image(interp_index);
     // The graph's final barrier left the backbuffer in PRESENT; bring it back
     // for the interpolation dispatch to sample.
     {
-      TextureBarrier to_read = Transition(backbuffer, ResourceState::kPresent,
-                                          ResourceState::kShaderReadCompute);
+      gpu::TextureBarrier to_read = gpu::Transition(backbuffer, gpu::ResourceState::kPresent,
+                                          gpu::ResourceState::kShaderReadCompute);
       final_cmd->TextureBarriers(base::Span(&to_read, 1));
     }
     FrameGenInputs fin;
@@ -2989,23 +2989,23 @@ void Renderer::RenderFrame(const FrameView &view) {
     framegen_was_active_ = interpolated;
 
     if (interpolated) {
-      const GpuImage &interp = framegen_->interpolated();
-      TextureBarrier pre[] = {
-          Transition(interp, ResourceState::kGeneral, ResourceState::kCopySrc),
-          Transition(target, ResourceState::kUndefined,
-                     ResourceState::kCopyDst)};
+      const gpu::GpuImage &interp = framegen_->interpolated();
+      gpu::TextureBarrier pre[] = {
+          gpu::Transition(interp, gpu::ResourceState::kGeneral, gpu::ResourceState::kCopySrc),
+          gpu::Transition(target, gpu::ResourceState::kUndefined,
+                     gpu::ResourceState::kCopyDst)};
       final_cmd->TextureBarriers(pre);
       final_cmd->CopyTexture(interp, target);
-      TextureBarrier mid[] = {
-          Transition(interp, ResourceState::kCopySrc, ResourceState::kGeneral),
-          Transition(target, ResourceState::kCopyDst,
-                     ResourceState::kColorTarget)};
+      gpu::TextureBarrier mid[] = {
+          gpu::Transition(interp, gpu::ResourceState::kCopySrc, gpu::ResourceState::kGeneral),
+          gpu::Transition(target, gpu::ResourceState::kCopyDst,
+                     gpu::ResourceState::kColorTarget)};
       final_cmd->TextureBarriers(mid);
       // Re-draw the UI onto the generated frame (the interpolation sourced the
       // pre-UI copy). Both backends replay retained draw data, so recording
       // them twice per frame is safe; blur_source was filled by the ui pass.
       if (view.hud_draw || view.ui_draw) {
-        ColorAttachment ui_color{.view = target.view, .load = LoadOp::kLoad};
+        gpu::ColorAttachment ui_color{.view = target.view, .load = gpu::LoadOp::kLoad};
         final_cmd->BeginRendering(
             {.extent = target.extent, .colors = base::Span(&ui_color, 1)});
         if (view.hud_draw)
@@ -3014,26 +3014,26 @@ void Renderer::RenderFrame(const FrameView &view) {
           view.ui_draw(*final_cmd);
         final_cmd->EndRendering();
       }
-      TextureBarrier post[] = {Transition(target, ResourceState::kColorTarget,
-                                          ResourceState::kPresent),
-                               Transition(backbuffer,
-                                          ResourceState::kShaderReadCompute,
-                                          ResourceState::kPresent)};
+      gpu::TextureBarrier post[] = {gpu::Transition(target, gpu::ResourceState::kColorTarget,
+                                          gpu::ResourceState::kPresent),
+                               gpu::Transition(backbuffer,
+                                          gpu::ResourceState::kShaderReadCompute,
+                                          gpu::ResourceState::kPresent)};
       final_cmd->TextureBarriers(post);
     } else {
       // Dispatch failed: duplicate the real frame so the acquired image still
       // presents something sane.
-      TextureBarrier pre[] = {Transition(backbuffer,
-                                         ResourceState::kShaderReadCompute,
-                                         ResourceState::kCopySrc),
-                              Transition(target, ResourceState::kUndefined,
-                                         ResourceState::kCopyDst)};
+      gpu::TextureBarrier pre[] = {gpu::Transition(backbuffer,
+                                         gpu::ResourceState::kShaderReadCompute,
+                                         gpu::ResourceState::kCopySrc),
+                              gpu::Transition(target, gpu::ResourceState::kUndefined,
+                                         gpu::ResourceState::kCopyDst)};
       final_cmd->TextureBarriers(pre);
       final_cmd->CopyTexture(backbuffer, target);
-      TextureBarrier post[] = {
-          Transition(backbuffer, ResourceState::kCopySrc,
-                     ResourceState::kPresent),
-          Transition(target, ResourceState::kCopyDst, ResourceState::kPresent)};
+      gpu::TextureBarrier post[] = {
+          gpu::Transition(backbuffer, gpu::ResourceState::kCopySrc,
+                     gpu::ResourceState::kPresent),
+          gpu::Transition(target, gpu::ResourceState::kCopyDst, gpu::ResourceState::kPresent)};
       final_cmd->TextureBarriers(post);
     }
     copy_capture();
@@ -3046,14 +3046,14 @@ void Renderer::RenderFrame(const FrameView &view) {
     if (const char *dump = ::getenv("RX_FRAMEGEN_DUMP")) {
       u64 dump_frame = ::strtoull(dump, nullptr, 10);
       if (frame_index_ == dump_frame && capture_ready) {
-        DumpFgImage(capture_image_, ResourceState::kCopySrc,
+        DumpFgImage(capture_image_, gpu::ResourceState::kCopySrc,
                     true, "fg_dump_real0.png");
       } else if (frame_index_ == dump_frame + 1 && capture_ready) {
-        DumpFgImage(framegen_->interpolated(), ResourceState::kGeneral, false,
+        DumpFgImage(framegen_->interpolated(), gpu::ResourceState::kGeneral, false,
                     "fg_dump_interp.png");
-        DumpFgImage(framegen_->hudless(), ResourceState::kShaderReadCompute,
+        DumpFgImage(framegen_->hudless(), gpu::ResourceState::kShaderReadCompute,
                     false, "fg_dump_hudless.png");
-        DumpFgImage(capture_image_, ResourceState::kCopySrc,
+        DumpFgImage(capture_image_, gpu::ResourceState::kCopySrc,
                     true, "fg_dump_real1.png");
       }
     }
@@ -3064,7 +3064,7 @@ void Renderer::RenderFrame(const FrameView &view) {
     // frame through the swapchainless overload (signals the slot fence) and
     // let the capture below read the offscreen image.
     device_->SubmitFrame(final_cmd);
-    presented = PresentResult::kOk;
+    presented = gpu::PresentResult::kOk;
     framegen_was_active_ = false;
   } else {
     copy_capture();
@@ -3111,7 +3111,7 @@ void Renderer::RenderFrame(const FrameView &view) {
   if (!CaptureArmed())
     swapchain_starved_ = false;
 
-  if (presented == PresentResult::kOutOfDate) {
+  if (presented == gpu::PresentResult::kOutOfDate) {
     RecreateSwapchain();
   }
 
@@ -3140,26 +3140,26 @@ struct DebugLinePush {
 void Renderer::BuildDebugLinePipelines() {
   if (debug_line_pipeline_)
     return;
-  VertexBufferLayout stream{
+  gpu::VertexBufferLayout stream{
       .stride = sizeof(DebugLineVertex),
       .attributes = {
-          {0, Format::kRGB32Float, offsetof(DebugLineVertex, pos)},
-          {1, Format::kRGBA8Unorm, offsetof(DebugLineVertex, rgba)}}};
-  GraphicsPipelineDesc desc{
+          {0, gpu::Format::kRGB32Float, offsetof(DebugLineVertex, pos)},
+          {1, gpu::Format::kRGBA8Unorm, offsetof(DebugLineVertex, rgba)}}};
+  gpu::GraphicsPipelineDesc desc{
       .vertex = RX_SHADER(k_debug_line_vs_hlsl),
       .fragment = RX_SHADER(k_debug_line_ps_hlsl),
       .vertex_buffers = {stream},
-      .topology = PrimitiveTopology::kLineList,
-      .raster = {.cull = CullMode::kNone,
-                 .front = FrontFace::kCounterClockwise,
-                 .polygon = PolygonMode::kFill},
+      .topology = gpu::PrimitiveTopology::kLineList,
+      .raster = {.cull = gpu::CullMode::kNone,
+                 .front = gpu::FrontFace::kCounterClockwise,
+                 .polygon = gpu::PolygonMode::kFill},
       .depth = {.test = true,
                 .write = false,
-                .compare = CompareOp::kGreaterEqual,
+                .compare = gpu::CompareOp::kGreaterEqual,
                 .format = kDepthFormat},
       .color_formats = {kSceneColorFormat},
-      .blend = {BlendMode::kAlpha},
-      .push_constant_size = PushSize<DebugLinePush>(),
+      .blend = {gpu::BlendMode::kAlpha},
+      .push_constant_size = gpu::PushSize<DebugLinePush>(),
       .debug_name = "debug_line",
   };
   debug_line_pipeline_ = device_->CreateGraphicsPipeline(desc);
@@ -3256,8 +3256,8 @@ void TessellateWorldText(const WorldText &t, const Vec3 &right, const Vec3 &up,
 
 }  // namespace
 
-void Renderer::DrawDebugLines(CommandList &cmd, const FrameView &view,
-                              const Mat4 &view_proj, Extent2D extent) {
+void Renderer::DrawDebugLines(gpu::CommandList &cmd, const FrameView &view,
+                              const Mat4 &view_proj, gpu::Extent2D extent) {
   // Camera-facing basis so WorldText billboards stay upright and readable.
   Vec3 text_right = Cross(Normalize(view.camera.target - view.camera.eye), Vec3{0, 1, 0});
   if (Length(text_right) < 1e-4f)
@@ -3287,7 +3287,7 @@ void Renderer::DrawDebugLines(CommandList &cmd, const FrameView &view,
     device_->DestroyBufferDeferred(debug_line_vbo_[slot]);
     debug_line_vbo_[slot] =
         device_->CreateBuffer(static_cast<u64>(cap) * sizeof(DebugLineVertex),
-                              kBufferUsageVertex, /*host_visible=*/true);
+                              gpu::kBufferUsageVertex, /*host_visible=*/true);
     debug_line_vbo_capacity_[slot] = cap;
   }
   auto *verts = static_cast<DebugLineVertex *>(debug_line_vbo_[slot].mapped);
@@ -3376,11 +3376,11 @@ void Renderer::RenderPickPass(const FrameView &view) {
     if (pick_depth_image_)
       device_->DestroyImageDeferred(pick_depth_image_);
     pick_id_image_ = device_->CreateImage2D(
-        Format::kR32Uint, {render_width_, render_height_},
-        kTextureUsageColorTarget | kTextureUsageTransferSrc);
-    pick_depth_image_ = device_->CreateImage2D(Format::kD32Float,
+        gpu::Format::kR32Uint, {render_width_, render_height_},
+        gpu::kTextureUsageColorTarget | gpu::kTextureUsageTransferSrc);
+    pick_depth_image_ = device_->CreateImage2D(gpu::Format::kD32Float,
                                                {render_width_, render_height_},
-                                               kTextureUsageDepthTarget);
+                                               gpu::kTextureUsageDepthTarget);
     pick_image_w_ = render_width_;
     pick_image_h_ = render_height_;
   }
@@ -3392,17 +3392,17 @@ void Renderer::RenderPickPass(const FrameView &view) {
         .vertex = RX_SHADER(k_pick_id_vs_hlsl),
         .fragment = RX_SHADER(k_pick_id_ps_hlsl),
         .vertex_buffers = {{.stride = sizeof(asset::Vertex),
-                            .attributes = {{0, Format::kRGB32Float,
+                            .attributes = {{0, gpu::Format::kRGB32Float,
                                             offsetof(asset::Vertex,
                                                      position)}}}},
-        .raster = {.cull = CullMode::kBack,
-                   .front = FrontFace::kCounterClockwise},
+        .raster = {.cull = gpu::CullMode::kBack,
+                   .front = gpu::FrontFace::kCounterClockwise},
         .depth = {.test = true,
                   .write = true,
-                  .compare = CompareOp::kGreaterEqual,
-                  .format = Format::kD32Float},
-        .color_formats = {Format::kR32Uint},
-        .push_constant_size = PushSize<PickPush>(),
+                  .compare = gpu::CompareOp::kGreaterEqual,
+                  .format = gpu::Format::kD32Float},
+        .color_formats = {gpu::Format::kR32Uint},
+        .push_constant_size = gpu::PushSize<PickPush>(),
         .debug_name = "pick_id",
     });
   }
@@ -3414,14 +3414,14 @@ void Renderer::RenderPickPass(const FrameView &view) {
   const Mat4 view_proj = PerspectiveReversedZ(view.camera.fov_y, aspect, 0.1f) *
                          LookAt(view.camera.eye, view.camera.target, {0, 1, 0});
 
-  device_->ImmediateSubmit([&](CommandList &cmd) {
-    cmd.Barrier(Transition(pick_id_image_, ResourceState::kUndefined,
-                           ResourceState::kColorTarget));
-    cmd.Barrier(Transition(pick_depth_image_, ResourceState::kUndefined,
-                           ResourceState::kDepthTarget));
-    ColorAttachment color{.view = pick_id_image_.view, .load = LoadOp::kClear};
-    DepthAttachment depth{
-        .view = pick_depth_image_.view, .load = LoadOp::kClear, .clear = 0.0f};
+  device_->ImmediateSubmit([&](gpu::CommandList &cmd) {
+    cmd.Barrier(gpu::Transition(pick_id_image_, gpu::ResourceState::kUndefined,
+                           gpu::ResourceState::kColorTarget));
+    cmd.Barrier(gpu::Transition(pick_depth_image_, gpu::ResourceState::kUndefined,
+                           gpu::ResourceState::kDepthTarget));
+    gpu::ColorAttachment color{.view = pick_id_image_.view, .load = gpu::LoadOp::kClear};
+    gpu::DepthAttachment depth{
+        .view = pick_depth_image_.view, .load = gpu::LoadOp::kClear, .clear = 0.0f};
     cmd.BeginRendering({.extent = {render_width_, render_height_},
                         .colors = base::Span(&color, 1),
                         .depth = &depth});
@@ -3432,14 +3432,14 @@ void Renderer::RenderPickPass(const FrameView &view) {
     for (const DrawItem &item : view.draws) {
       if (item.pick_id == 0)
         continue; // unpickable: leave the cleared 0
-      const GpuMesh *mesh = meshes_.find(item.mesh);
+      const gpu::GpuMesh *mesh = meshes_.find(item.mesh);
       if (!mesh || !mesh->indices)
         continue;
       PickPush push{view_proj * item.transform, item.pick_id};
       cmd.PushConstants(&push, sizeof(push), 0);
       cmd.BindVertexBuffer(0, mesh->vertices, 0);
-      cmd.BindIndexBuffer(mesh->indices, 0, IndexType::kUint32);
-      for (const GpuSubmesh &submesh : mesh->submeshes) {
+      cmd.BindIndexBuffer(mesh->indices, 0, gpu::IndexType::kUint32);
+      for (const gpu::GpuSubmesh &submesh : mesh->submeshes) {
         cmd.DrawIndexed(submesh.index_count, 1, submesh.index_offset, 0, 0);
       }
     }
@@ -3449,7 +3449,7 @@ void Renderer::RenderPickPass(const FrameView &view) {
   // Read back the whole id target and sample the requested pixel (in output
   // pixels, scaled to render resolution).
   base::Vector<u32> pixels(static_cast<size_t>(render_width_) * render_height_);
-  if (!device_->ReadbackImage(pick_id_image_, ResourceState::kColorTarget,
+  if (!device_->ReadbackImage(pick_id_image_, gpu::ResourceState::kColorTarget,
                               pixels.data(), pixels.size() * sizeof(u32))) {
     return;
   }
@@ -3466,24 +3466,24 @@ void Renderer::RenderPickPass(const FrameView &view) {
   pick_result_ready_ = true;
 }
 
-void Renderer::RecordDepthOnlyScene(CommandList &cmd,
+void Renderer::RecordDepthOnlyScene(gpu::CommandList &cmd,
                                     const Mat4 &light_view_proj,
                                     const FrameResources &frame,
                                     const FrameView &view) {
-  BindingSetHandle bound_material{};
+  gpu::BindingSetHandle bound_material{};
   // All the shadow caster pipelines share one layout, so pushes and set binds
   // persist across the per-submesh variant switches below. Bind the masked
   // static permutation up front so the matrix push always has a pipeline.
-  PipelineHandle bound_pipeline = shadow_.pipeline();
+  gpu::PipelineHandle bound_pipeline = shadow_.pipeline();
   cmd.BindPipeline(bound_pipeline);
   // Every caster pipeline shares this layout, so the arena binds once for the
   // whole depth-only pass; the per-draw base below selects the record.
   cmd.BindTransient(ShadowPass::kDrawRecordSet,
-                    {Bind::StorageBuffer(0, frame.draw_records)});
+                    {gpu::Bind::StorageBuffer(0, frame.draw_records)});
   cmd.PushConstants(&light_view_proj, sizeof(Mat4),
                     ShadowPass::kLightMatrixOffset);
   for (const DrawItem &item : view.draws) {
-    const GpuMesh *mesh = meshes_.find(item.mesh);
+    const gpu::GpuMesh *mesh = meshes_.find(item.mesh);
     // no_rt skips grass-like fill geometry, but skinned actors are
     // no_rt only to stay out of the tlas; they still cast shadows.
     // dynamic_vertices meshes always cast, even if a game marks them no_rt.
@@ -3507,13 +3507,13 @@ void Renderer::RecordDepthOnlyScene(CommandList &cmd,
     if (draw_skinned) {
       cmd.BindVertexBuffer(1, mesh->skinning);
     }
-    cmd.BindIndexBuffer(mesh->indices, 0, IndexType::kUint32);
-    for (const GpuSubmesh &submesh : mesh->submeshes) {
+    cmd.BindIndexBuffer(mesh->indices, 0, gpu::IndexType::kUint32);
+    for (const gpu::GpuSubmesh &submesh : mesh->submeshes) {
       if (submesh.blend)
         continue;
       // Opaque casters draw depth-only (no fragment, early-Z stays);
       // masked ones bind the alpha-test fragment + its material set.
-      PipelineHandle pipeline =
+      gpu::PipelineHandle pipeline =
           draw_skinned ? shadow_.skinned_pipeline(submesh.alpha_mask)
                        : shadow_.pipeline(submesh.alpha_mask);
       if (!(pipeline == bound_pipeline)) {
@@ -3521,7 +3521,7 @@ void Renderer::RecordDepthOnlyScene(CommandList &cmd,
         bound_pipeline = pipeline;
       }
       if (submesh.alpha_mask) {
-        BindingSetHandle material = material_system_->set(submesh.material);
+        gpu::BindingSetHandle material = material_system_->set(submesh.material);
         if (!(material == bound_material)) {
           cmd.BindSet(0, material);
           bound_material = material;
@@ -3539,23 +3539,23 @@ void Renderer::RecordDepthOnlyScene(CommandList &cmd,
         SphereOutsideFrustum(shadow_planes, group.bounds_center,
                              group.bounds_radius))
       continue;
-    const GpuMesh *mesh = meshes_.find(group.mesh);
+    const gpu::GpuMesh *mesh = meshes_.find(group.mesh);
     if (!mesh || mesh->all_blend || (mesh->no_rt && !mesh->dynamic_vertices))
       continue;
     cmd.BindVertexBuffer(0, mesh->vertices);
     cmd.BindVertexBuffer(1, group.buffer);
-    cmd.BindIndexBuffer(mesh->indices, 0, IndexType::kUint32);
-    for (const GpuSubmesh &submesh : mesh->submeshes) {
+    cmd.BindIndexBuffer(mesh->indices, 0, gpu::IndexType::kUint32);
+    for (const gpu::GpuSubmesh &submesh : mesh->submeshes) {
       if (submesh.blend)
         continue;
-      const PipelineHandle pipeline =
+      const gpu::PipelineHandle pipeline =
           shadow_.instanced_pipeline(submesh.alpha_mask);
       if (!(pipeline == bound_pipeline)) {
         cmd.BindPipeline(pipeline);
         bound_pipeline = pipeline;
       }
       if (submesh.alpha_mask) {
-        const BindingSetHandle material =
+        const gpu::BindingSetHandle material =
             material_system_->set(submesh.material);
         if (!(material == bound_material)) {
           cmd.BindSet(0, material);
@@ -3663,20 +3663,20 @@ void Renderer::BuildFrameGraph(FrameResources &frame, u32 image_index,
   // pipeline statically binds it) and an opaque snapshot pass.
   struct TransparentDraw {
     const DrawItem *item;
-    const GpuSubmesh *submesh;
+    const gpu::GpuSubmesh *submesh;
     f32 distance_sq;
   };
   base::Vector<TransparentDraw> transparent;
   transparent.reserve(view.draws.size());
   bool any_water = false;
   const DrawItem *adaptive_water_item = nullptr;
-  const GpuSubmesh *adaptive_water_submesh = nullptr;
+  const gpu::GpuSubmesh *adaptive_water_submesh = nullptr;
   f32 adaptive_water_area = 0.0f;
   for (const DrawItem &item : view.draws) {
-    const GpuMesh *mesh = meshes_.find(item.mesh);
+    const gpu::GpuMesh *mesh = meshes_.find(item.mesh);
     if (!mesh)
       continue;
-    for (const GpuSubmesh &submesh : mesh->submeshes) {
+    for (const gpu::GpuSubmesh &submesh : mesh->submeshes) {
       if (!submesh.blend)
         continue;
       f32 dx = item.transform.m[12] - view.camera.eye.x;
@@ -3760,26 +3760,26 @@ void Renderer::BuildFrameGraph(FrameResources &frame, u32 image_index,
   // The frame's globals set (uniform + optional tlas + optional hi-z) is
   // rewritten once per frame, from the first pass that needs it. The slot's
   // fence has fired, so its previous frame no longer reads the set.
-  BindingSetHandle globals_set = globals_sets_[frame_slot];
+  gpu::BindingSetHandle globals_set = globals_sets_[frame_slot];
   auto update_globals_set =
       [this, globals_set, tlas_slot](PassContext &ctx, ResourceHandle cull_hiz,
                                      bool ms_active, bool want_tlas) {
-        base::Vector<BindingItem> items;
+        base::Vector<gpu::BindingItem> items;
         items.push_back(
-            Bind::Uniform(0, frames_[frame_index_ % kFramesInFlight].globals, 0,
+            gpu::Bind::Uniform(0, frames_[frame_index_ % kFramesInFlight].globals, 0,
                           sizeof(FrameGlobals)));
-        items.push_back(Bind::StorageBuffer(
+        items.push_back(gpu::Bind::StorageBuffer(
             3, frames_[frame_index_ % kFramesInFlight].draw_records));
         if (want_tlas && rt_available_ && raytracing_ &&
             raytracing_->tlas(tlas_slot)) {
-          items.push_back(Bind::Accel(1, raytracing_->tlas(tlas_slot)));
+          items.push_back(gpu::Bind::Accel(1, raytracing_->tlas(tlas_slot)));
         }
         if (ms_active) { // hi-z for the task-stage occlusion cull (real or
                          // fallback)
-          TextureView hiz = cull_hiz != kInvalidResource
+          gpu::TextureView hiz = cull_hiz != kInvalidResource
                                 ? ctx.graph->image(cull_hiz).view
                                 : ms_dummy_hiz_.view;
-          items.push_back(Bind::SampledView(2, hiz));
+          items.push_back(gpu::Bind::SampledView(2, hiz));
         }
         device_->UpdateBindingSet(globals_set, base::Span(items.data(), items.size()));
       };
@@ -3861,7 +3861,7 @@ void Renderer::BuildFrameGraph(FrameResources &frame, u32 image_index,
                                /*want_tlas=*/true);
           }
 
-          BindingSetHandle env_set = env_transparent_sets_[frame_slot];
+          gpu::BindingSetHandle env_set = env_transparent_sets_[frame_slot];
           // The hair transmittance volume, so skin under a groom is shadowed
           // by the fibres over it (see HairStrands::AddTransmittanceToGraph).
           // Null params = no hair this frame, which the forward pass reads as
@@ -3876,12 +3876,12 @@ void Renderer::BuildFrameGraph(FrameResources &frame, u32 image_index,
           EnvironmentSystem::DdgiBinding ddgi_binding;
           if (ddgi_active)
             ddgi_binding = ddgi_->binding(frame_index_);
-          TextureView sun_shadow_view = sun_shadow != kInvalidResource
+          gpu::TextureView sun_shadow_view = sun_shadow != kInvalidResource
                                             ? ctx.graph->image(sun_shadow).view
-                                            : TextureView{};
-          TextureView rcgi_irr_view = rcgi_irr != kInvalidResource
+                                            : gpu::TextureView{};
+          gpu::TextureView rcgi_irr_view = rcgi_irr != kInvalidResource
                                           ? ctx.graph->image(rcgi_irr).view
-                                          : TextureView{};
+                                          : gpu::TextureView{};
           EnvironmentSystem::RcgiWorldBinding rcgi_world_binding;
           RcgiSystem::IrradianceBinding rcgi_world_src;
           if (rcgi_world)
@@ -3894,41 +3894,41 @@ void Renderer::BuildFrameGraph(FrameResources &frame, u32 image_index,
             rcgi_world_binding.interior_vols = rcgi_world_src.interior_vols;
           }
           environment_->WriteEnvSet(
-              env_set, TextureView{}, ddgi_active ? &ddgi_binding : nullptr,
-              csm_on ? ctx.graph->image(shadow_atlas).view : TextureView{},
-              csm_on ? shadow_.cascade_buffer(shadow_slot) : GpuBuffer{},
+              env_set, gpu::TextureView{}, ddgi_active ? &ddgi_binding : nullptr,
+              csm_on ? ctx.graph->image(shadow_atlas).view : gpu::TextureView{},
+              csm_on ? shadow_.cascade_buffer(shadow_slot) : gpu::GpuBuffer{},
               shadow_.cascade_buffer_size(),
               ctx.graph->image(opaque_color).view, sun_shadow_view,
-              frame.lights, frame.lights.size, TextureView{}, cluster_counts_,
+              frame.lights, frame.lights.size, gpu::TextureView{}, cluster_counts_,
               cluster_indices_, frame.decals, decal_cluster_indices_,
               decal_atlas_view_,
               local_shadows_active_ ? local_shadows_.face_buffer(frame_slot)
-                                    : GpuBuffer{},
+                                    : gpu::GpuBuffer{},
               local_shadows_active_ ? local_shadows_.atlas().view
-                                    : TextureView{},
-              decal_normal_atlas_view_, TextureView{}, TextureView{},
-              GpuBuffer{}, TextureView{}, TextureView{},
-              fft_ocean_active_ ? ocean_.displacement_view() : TextureView{},
-              fft_ocean_active_ ? ocean_.normal_foam_view() : TextureView{},
-              water_field_active_ ? water_field_.ring_view(0) : TextureView{},
-              water_field_active_ ? water_field_.ring_view(1) : TextureView{},
+                                    : gpu::TextureView{},
+              decal_normal_atlas_view_, gpu::TextureView{}, gpu::TextureView{},
+              gpu::GpuBuffer{}, gpu::TextureView{}, gpu::TextureView{},
+              fft_ocean_active_ ? ocean_.displacement_view() : gpu::TextureView{},
+              fft_ocean_active_ ? ocean_.normal_foam_view() : gpu::TextureView{},
+              water_field_active_ ? water_field_.ring_view(0) : gpu::TextureView{},
+              water_field_active_ ? water_field_.ring_view(1) : gpu::TextureView{},
               water_field_active_ ? water_field_.params_buffer(frame_slot)
-                                  : GpuBuffer{},
-              TextureView{}, TextureView{}, rcgi_irr_view,
+                                  : gpu::GpuBuffer{},
+              gpu::TextureView{}, gpu::TextureView{}, rcgi_irr_view,
               rcgi_world_src.valid ? &rcgi_world_binding : nullptr,
               decal_baker_.available() ? decal_baker_.albedo_view()
-                                       : TextureView{},
+                                       : gpu::TextureView{},
               decal_baker_.available() ? decal_baker_.fx_view()
-                                       : TextureView{},
+                                       : gpu::TextureView{},
               decal_baker_.available() ? decal_baker_.tile_uv_buffer(frame_slot)
-                                       : GpuBuffer{},
+                                       : gpu::GpuBuffer{},
               hair_env_binding.params ? &hair_env_binding : nullptr);
 
           // Update the dominant planar surface before beginning rasterization.
           // Its CBT/vertex/indirect buffers persist inside WaterPass; this
           // dispatch only changes leaf slots whose LOD decision changed.
           if (adaptive_water_item && adaptive_water_submesh) {
-            if (const GpuMesh *adaptive_mesh =
+            if (const gpu::GpuMesh *adaptive_mesh =
                     meshes_.find(adaptive_water_item->mesh)) {
               const f32 aspect = static_cast<f32>(render_width_) /
                                  static_cast<f32>(rx::Max(render_height_, 1u));
@@ -3951,13 +3951,13 @@ void Renderer::BuildFrameGraph(FrameResources &frame, u32 image_index,
             }
           }
 
-          ColorAttachment colors[2];
+          gpu::ColorAttachment colors[2];
           colors[0] = {.view = ctx.graph->image(composite).view,
-                       .load = LoadOp::kLoad};
+                       .load = gpu::LoadOp::kLoad};
           colors[1] = {.view = ctx.graph->image(motion).view,
-                       .load = LoadOp::kLoad};
-          DepthAttachment depth_attachment{.view = ctx.graph->image(depth).view,
-                                           .load = LoadOp::kLoad};
+                       .load = gpu::LoadOp::kLoad};
+          gpu::DepthAttachment depth_attachment{.view = ctx.graph->image(depth).view,
+                                           .load = gpu::LoadOp::kLoad};
           ctx.cmd->BeginRendering({.extent = {render_width_, render_height_},
                                    .colors = base::Span(colors, 2),
                                    .depth = &depth_attachment});
@@ -3967,10 +3967,10 @@ void Renderer::BuildFrameGraph(FrameResources &frame, u32 image_index,
           // materials (it premultiplies coverage for the additive one).
           enum class Mode { kNone, kWater, kBlend, kBlendAdditive };
           Mode mode = Mode::kNone;
-          BindingSetHandle bound_material{};
+          gpu::BindingSetHandle bound_material{};
           const DrawItem *bound_item = nullptr;
           for (const TransparentDraw &draw : transparent) {
-            const GpuMesh *mesh = meshes_.find(draw.item->mesh);
+            const gpu::GpuMesh *mesh = meshes_.find(draw.item->mesh);
             if (!mesh)
               continue;
             bool as_water = draw.submesh->water && water_pipeline_active;
@@ -3982,8 +3982,8 @@ void Renderer::BuildFrameGraph(FrameResources &frame, u32 image_index,
                 as_water ? Mode::kWater
                          : (additive ? Mode::kBlendAdditive : Mode::kBlend);
             if (mode != wanted) {
-              BindingSetHandle bindless_set =
-                  bindless_ ? bindless_->set() : BindingSetHandle{};
+              gpu::BindingSetHandle bindless_set =
+                  bindless_ ? bindless_->set() : gpu::BindingSetHandle{};
               if (as_water) {
                 water_->Bind(ctx, globals_set, env_set, bindless_->set(),
                              opaque_color, opaque_depth);
@@ -4026,14 +4026,14 @@ void Renderer::BuildFrameGraph(FrameResources &frame, u32 image_index,
                 if (!adaptive_draw) {
                   ctx.cmd->BindVertexBuffer(0, mesh->vertices);
                   ctx.cmd->BindIndexBuffer(mesh->indices, 0,
-                                           IndexType::kUint32);
+                                           gpu::IndexType::kUint32);
                 }
               } else {
                 mesh_pipeline_->Draw(*ctx.cmd, *mesh, push);
               }
               bound_item = draw.item;
             }
-            BindingSetHandle material =
+            gpu::BindingSetHandle material =
                 material_system_->set(draw.submesh->material);
             if (!(material == bound_material)) {
               if (as_water) {
@@ -4098,7 +4098,7 @@ void Renderer::BuildFrameGraph(FrameResources &frame, u32 image_index,
     f32 touch_planes[5][4];
     ExtractFrustumPlanes(view_proj, touch_planes);
     for (const DrawItem &item : view.draws) {
-      const GpuMesh *mesh = meshes_.find(item.mesh);
+      const gpu::GpuMesh *mesh = meshes_.find(item.mesh);
       if (!mesh)
         continue;
       const f32 *m = item.transform.m;
@@ -4112,7 +4112,7 @@ void Renderer::BuildFrameGraph(FrameResources &frame, u32 image_index,
       f32 radius = mesh->bounds_radius * rx::Max(sx, rx::Max(sy, sz));
       if (radius > 0.0f && SphereOutsideFrustum(touch_planes, wc, radius))
         continue;
-      for (const GpuSubmesh &submesh : mesh->submeshes) {
+      for (const gpu::GpuSubmesh &submesh : mesh->submeshes) {
         material_system_->Touch(submesh.material, frame_index_);
       }
     }
@@ -4123,10 +4123,10 @@ void Renderer::BuildFrameGraph(FrameResources &frame, u32 image_index,
                                 group.bounds_radius))) {
         continue;
       }
-      const GpuMesh *mesh = meshes_.find(group.mesh);
+      const gpu::GpuMesh *mesh = meshes_.find(group.mesh);
       if (!mesh)
         continue;
-      for (const GpuSubmesh &submesh : mesh->submeshes) {
+      for (const gpu::GpuSubmesh &submesh : mesh->submeshes) {
         material_system_->Touch(submesh.material, frame_index_);
       }
     }
@@ -4290,7 +4290,7 @@ void Renderer::BuildFrameGraph(FrameResources &frame, u32 image_index,
     for (const DrawItem &item : view.draws) {
       if (item.decal_receiver == 0)
         continue;
-      const GpuMesh *mesh = meshes_.find(item.mesh);
+      const gpu::GpuMesh *mesh = meshes_.find(item.mesh);
       if (!mesh)
         continue;
       DecalBaker::Target target;
@@ -4489,7 +4489,7 @@ void Renderer::BuildFrameGraph(FrameResources &frame, u32 image_index,
     // this so the real depth attachment never changes layout mid frame
     // (sampling round trips corrupt its compression metadata on nvidia).
     depth_export = graph_.CreateTexture({.name = "depth_export",
-                                         .format = Format::kR32Float,
+                                         .format = gpu::Format::kR32Float,
                                          .width = render_width_,
                                          .height = render_height_});
   }
@@ -4528,7 +4528,7 @@ void Renderer::BuildFrameGraph(FrameResources &frame, u32 image_index,
                                         .height = render_height_,
                                         .samples = msaa_samples});
     geom_depth_export = graph_.CreateTexture({.name = "depth_export_ms",
-                                              .format = Format::kR32Float,
+                                              .format = gpu::Format::kR32Float,
                                               .width = render_width_,
                                               .height = render_height_,
                                               .samples = msaa_samples});
@@ -4577,7 +4577,7 @@ void Renderer::BuildFrameGraph(FrameResources &frame, u32 image_index,
       sp.island[i] = settings_.shore_island[i];
     sp.fft_active = fft_ocean_active;
     sp.ocean_displacement =
-        fft_ocean_active ? ocean_.displacement_view() : TextureView{};
+        fft_ocean_active ? ocean_.displacement_view() : gpu::TextureView{};
     shore_wetting_.AddToGraph(graph_, sp);
   }
 
@@ -4595,9 +4595,9 @@ void Renderer::BuildFrameGraph(FrameResources &frame, u32 image_index,
     cp.receiver_depth = settings_.water_caustic_receiver_depth;
     cp.fft_active = fft_ocean_active;
     cp.ocean_displacement =
-        fft_ocean_active ? ocean_.displacement_view() : TextureView{};
+        fft_ocean_active ? ocean_.displacement_view() : gpu::TextureView{};
     cp.ocean_normal =
-        fft_ocean_active ? ocean_.normal_foam_view() : TextureView{};
+        fft_ocean_active ? ocean_.normal_foam_view() : gpu::TextureView{};
     water_caustics_.AddToGraph(graph_, cp);
   }
 
@@ -4667,11 +4667,11 @@ void Renderer::BuildFrameGraph(FrameResources &frame, u32 image_index,
     rt_cull_.BeginFrame(view.camera.eye);
     const Vec3 eye = view.camera.eye;
     // Model-space bounding sphere of a mesh as a Vec3 center.
-    auto mesh_center = [](const GpuMesh &m) {
+    auto mesh_center = [](const gpu::GpuMesh &m) {
       return Vec3{m.bounds_center[0], m.bounds_center[1], m.bounds_center[2]};
     };
     // Distance from the camera to an instance's world-space bounding centre.
-    auto center_distance = [&](const GpuMesh &m, const Mat4 &t) {
+    auto center_distance = [&](const gpu::GpuMesh &m, const Mat4 &t) {
       const Vec3 c = mesh_center(m);
       const f32 *mm = t.m;
       const f32 wx = mm[0] * c.x + mm[4] * c.y + mm[8] * c.z + mm[12];
@@ -4686,7 +4686,7 @@ void Renderer::BuildFrameGraph(FrameResources &frame, u32 image_index,
     // for the TLAS instance, lazily building the LOD BLAS + record on first
     // need and falling back to LOD0 when the mesh has no usable geometry at
     // that LOD.
-    auto select_rt = [&](u64 key, GpuMesh &m, const Mat4 &t, u32 &out_lod,
+    auto select_rt = [&](u64 key, gpu::GpuMesh &m, const Mat4 &t, u32 &out_lod,
                          u32 &out_index) {
       out_lod = 0;
       out_index = m.bindless_index;
@@ -4723,7 +4723,7 @@ void Renderer::BuildFrameGraph(FrameResources &frame, u32 image_index,
       // a T-posed twin standing where she is.
       if (item.rt_skin != 0 && skinned_rt_.active(item.rt_skin))
         continue;
-      GpuMesh *mesh = meshes_.find(item.mesh);
+      gpu::GpuMesh *mesh = meshes_.find(item.mesh);
       // no_rt grass-like fill stays out of the realtime tlas; when the path
       // tracer is active it joins with a path-trace-only instance mask, so
       // realtime rays (shadows/RTAO/reflections/fog/water) skip it either way:
@@ -4787,7 +4787,7 @@ void Renderer::BuildFrameGraph(FrameResources &frame, u32 image_index,
       const InstanceStore::Group &group = groups[gi];
       if (!group.alive)
         continue;
-      GpuMesh *mesh = meshes_.find(group.mesh);
+      gpu::GpuMesh *mesh = meshes_.find(group.mesh);
       if (!mesh || mesh->all_blend || (mesh->no_rt && !path_trace))
         continue;
       const u8 mask =
@@ -5085,7 +5085,7 @@ void Renderer::BuildFrameGraph(FrameResources &frame, u32 image_index,
       pt.pixel_spread = 2.0f * ::tanf(view.camera.fov_y * 0.5f) /
                         static_cast<f32>(render_height_);
       PathTracer::GbufferTargets t;
-      auto guide = [&](const char *name, Format format) {
+      auto guide = [&](const char *name, gpu::Format format) {
         return graph_.CreateTexture({.name = name,
                                      .format = format,
                                      .width = render_width_,
@@ -5177,7 +5177,7 @@ void Renderer::BuildFrameGraph(FrameResources &frame, u32 image_index,
       if (precip_occlusion_active_) {
         precip_occlusion_.BeginFrame(view.camera.eye, frame_index_);
         precip_occlusion_.AddToGraph(
-            graph_, [this, &frame, &view](CommandList &cmd,
+            graph_, [this, &frame, &view](gpu::CommandList &cmd,
                                           const Mat4 &occl_view_proj) {
               RecordDepthOnlyScene(cmd, occl_view_proj, frame, view);
             });
@@ -5199,9 +5199,9 @@ void Renderer::BuildFrameGraph(FrameResources &frame, u32 image_index,
             builder.Write(shadow_atlas, ResourceUsage::kDepthAttachment);
           },
           [this, shadow_atlas, &frame, &view](PassContext &ctx) {
-            TextureView atlas = ctx.graph->image(shadow_atlas).view;
+            gpu::TextureView atlas = ctx.graph->image(shadow_atlas).view;
             shadow_.Render(*ctx.cmd, atlas,
-                           [this, &frame, &view](CommandList &cmd,
+                           [this, &frame, &view](gpu::CommandList &cmd,
                                                  const Mat4 &light_view_proj) {
                              RecordDepthOnlyScene(cmd, light_view_proj, frame,
                                                   view);
@@ -5217,17 +5217,17 @@ void Renderer::BuildFrameGraph(FrameResources &frame, u32 image_index,
           [this, &frame, &view](PassContext &ctx) {
             local_shadows_.Render(
                 *ctx.cmd, shadow_.local_pipeline(),
-                [this, &frame, &view](CommandList &cmd,
+                [this, &frame, &view](gpu::CommandList &cmd,
                                       const LocalShadows::Face &face) {
-                  BindingSetHandle bound_material{};
+                  gpu::BindingSetHandle bound_material{};
                   // LocalShadows::Render bound the passed masked static
                   // pipeline.
-                  PipelineHandle bound_pipeline = shadow_.local_pipeline();
+                  gpu::PipelineHandle bound_pipeline = shadow_.local_pipeline();
                   cmd.BindTransient(
                       ShadowPass::kDrawRecordSet,
-                      {Bind::StorageBuffer(0, frame.draw_records)});
+                      {gpu::Bind::StorageBuffer(0, frame.draw_records)});
                   for (const DrawItem &item : view.draws) {
-                    const GpuMesh *mesh = meshes_.find(item.mesh);
+                    const gpu::GpuMesh *mesh = meshes_.find(item.mesh);
                     if (!mesh || mesh->all_blend ||
                         (mesh->no_rt && !mesh->skinned &&
                          !mesh->dynamic_vertices))
@@ -5268,13 +5268,13 @@ void Renderer::BuildFrameGraph(FrameResources &frame, u32 image_index,
                     if (draw_skinned) {
                       cmd.BindVertexBuffer(1, mesh->skinning);
                     }
-                    cmd.BindIndexBuffer(mesh->indices, 0, IndexType::kUint32);
-                    for (const GpuSubmesh &submesh : mesh->submeshes) {
+                    cmd.BindIndexBuffer(mesh->indices, 0, gpu::IndexType::kUint32);
+                    for (const gpu::GpuSubmesh &submesh : mesh->submeshes) {
                       if (submesh.blend)
                         continue;
                       // Depth-only for opaque casters, alpha-test only for
                       // masked.
-                      PipelineHandle pipeline =
+                      gpu::PipelineHandle pipeline =
                           draw_skinned
                               ? shadow_.local_skinned_pipeline(
                                     submesh.alpha_mask)
@@ -5284,7 +5284,7 @@ void Renderer::BuildFrameGraph(FrameResources &frame, u32 image_index,
                         bound_pipeline = pipeline;
                       }
                       if (submesh.alpha_mask) {
-                        BindingSetHandle material =
+                        gpu::BindingSetHandle material =
                             material_system_->set(submesh.material);
                         if (!(material == bound_material)) {
                           cmd.BindSet(0, material);
@@ -5299,7 +5299,7 @@ void Renderer::BuildFrameGraph(FrameResources &frame, u32 image_index,
                        instances_.groups()) {
                     if (!group.alive)
                       continue;
-                    const GpuMesh *mesh = meshes_.find(group.mesh);
+                    const gpu::GpuMesh *mesh = meshes_.find(group.mesh);
                     if (!mesh || mesh->all_blend ||
                         (mesh->no_rt && !mesh->dynamic_vertices))
                       continue;
@@ -5315,18 +5315,18 @@ void Renderer::BuildFrameGraph(FrameResources &frame, u32 image_index,
                       continue;
                     cmd.BindVertexBuffer(0, mesh->vertices);
                     cmd.BindVertexBuffer(1, group.buffer);
-                    cmd.BindIndexBuffer(mesh->indices, 0, IndexType::kUint32);
-                    for (const GpuSubmesh &submesh : mesh->submeshes) {
+                    cmd.BindIndexBuffer(mesh->indices, 0, gpu::IndexType::kUint32);
+                    for (const gpu::GpuSubmesh &submesh : mesh->submeshes) {
                       if (submesh.blend)
                         continue;
-                      const PipelineHandle pipeline =
+                      const gpu::PipelineHandle pipeline =
                           shadow_.local_instanced_pipeline(submesh.alpha_mask);
                       if (!(pipeline == bound_pipeline)) {
                         cmd.BindPipeline(pipeline);
                         bound_pipeline = pipeline;
                       }
                       if (submesh.alpha_mask) {
-                        const BindingSetHandle material =
+                        const gpu::BindingSetHandle material =
                             material_system_->set(submesh.material);
                         if (!(material == bound_material)) {
                           cmd.BindSet(0, material);
@@ -5348,14 +5348,14 @@ void Renderer::BuildFrameGraph(FrameResources &frame, u32 image_index,
     // instanceCounts.
     u32 cull_slot = frame_index_ % 2;
     gpu_cull_.ResizeDepth(*device_, render_width_, render_height_);
-    const GpuBuffer &cull_commands = gpu_cull_.command_buffer(cull_slot);
+    const gpu::GpuBuffer &cull_commands = gpu_cull_.command_buffer(cull_slot);
     u32 cull_instance_count = 0;
     {
       GpuCull::Instance *insts = gpu_cull_.instances(cull_slot);
       GpuCull::Command *cmds = gpu_cull_.commands(cull_slot);
       u32 cmd_total = 0;
       for (const DrawItem &item : view.draws) {
-        const GpuMesh *mesh = meshes_.find(item.mesh);
+        const gpu::GpuMesh *mesh = meshes_.find(item.mesh);
         if (!mesh || mesh->all_blend)
           continue;
         if (cull_instance_count >= GpuCull::kMaxInstances ||
@@ -5392,18 +5392,18 @@ void Renderer::BuildFrameGraph(FrameResources &frame, u32 image_index,
           Vec3 d = view.camera.eye - wc;
           lod = SelectLod(*mesh, ::sqrtf(d.x * d.x + d.y * d.y + d.z * d.z));
         }
-        const base::Vector<GpuSubmesh> &lod_subs =
+        const base::Vector<gpu::GpuSubmesh> &lod_subs =
             lod == 0 ? mesh->submeshes : mesh->lods[lod - 1].submeshes;
         i32 vtx_off =
             lod == 0 ? 0 : static_cast<i32>(mesh->lods[lod - 1].vertex_offset);
 
         u32 mesh_cmds = 0;
         u32 k = 0;
-        for (const GpuSubmesh &submesh : mesh->submeshes) {
+        for (const gpu::GpuSubmesh &submesh : mesh->submeshes) {
           if (!submesh.blend) {
             if (cmd_total >= GpuCull::kMaxCommands)
               break;
-            const GpuSubmesh &s = k < lod_subs.size() ? lod_subs[k] : submesh;
+            const gpu::GpuSubmesh &s = k < lod_subs.size() ? lod_subs[k] : submesh;
             cmds[cmd_total] = {s.index_count, 1u, s.index_offset, vtx_off, 0u};
             ++cmd_total;
             ++mesh_cmds;
@@ -5491,9 +5491,9 @@ void Renderer::BuildFrameGraph(FrameResources &frame, u32 image_index,
     // sub-passes (material binding differs via the bind callbacks).
     auto draw_meshlet_instances = [this, &view, &ms_occ, &ms_planes,
                                    &frame](PassContext &ctx) {
-      BindingSetHandle bound{};
+      gpu::BindingSetHandle bound{};
       for (const DrawItem &item : view.draws) {
-        const GpuMesh *mesh = meshes_.find(item.mesh);
+        const gpu::GpuMesh *mesh = meshes_.find(item.mesh);
         if (!mesh || mesh->all_blend || !mesh->has_meshlets)
           continue;
         MeshShaderPush push{};
@@ -5528,12 +5528,12 @@ void Renderer::BuildFrameGraph(FrameResources &frame, u32 image_index,
         u32 ms_lod =
             SelectLod(*mesh, ::sqrtf(ms_d.x * ms_d.x + ms_d.y * ms_d.y +
                                        ms_d.z * ms_d.z));
-        const base::Vector<GpuSubmesh> &ms_subs =
+        const base::Vector<gpu::GpuSubmesh> &ms_subs =
             ms_lod == 0 ? mesh->submeshes : mesh->lods[ms_lod - 1].submeshes;
-        for (const GpuSubmesh &submesh : ms_subs) {
+        for (const gpu::GpuSubmesh &submesh : ms_subs) {
           if (submesh.blend || submesh.meshlet_count == 0)
             continue;
-          BindingSetHandle material = material_system_->set(submesh.material);
+          gpu::BindingSetHandle material = material_system_->set(submesh.material);
           if (!(material == bound)) {
             mesh_pipeline_->BindMeshMaterial(*ctx.cmd, material);
             bound = material;
@@ -5566,18 +5566,18 @@ void Renderer::BuildFrameGraph(FrameResources &frame, u32 image_index,
                              ms_active,
                              /*want_tlas=*/true);
 
-          ColorAttachment colors[3];
+          gpu::ColorAttachment colors[3];
           colors[0] = {.view = ctx.graph->image(geom_normals).view};
           colors[1] = {.view = ctx.graph->image(geom_motion).view};
           colors[2] = {.view = ctx.graph->image(geom_depth_export).view};
-          DepthAttachment depth_attachment{
+          gpu::DepthAttachment depth_attachment{
               .view = ctx.graph->image(geom_depth).view,
               .clear = 0.0f}; // reversed z clears to far = 0
           ctx.cmd->BeginRendering(
               {.extent = {render_width_, render_height_},
                .colors = base::Span(colors, 3),
                .depth = &depth_attachment,
-               .shading_rate = vrs_active_ ? vrs_.rate_view() : TextureView{}});
+               .shading_rate = vrs_active_ ? vrs_.rate_view() : gpu::TextureView{}});
 
           // Mesh-shader sub-pass: static opaque meshes, cluster-culled on the
           // gpu.
@@ -5591,23 +5591,23 @@ void Renderer::BuildFrameGraph(FrameResources &frame, u32 image_index,
           // but still advance the cull index so it stays aligned with the cull
           // build order.
           environment_->WriteEnvSet(
-              env_prepass_sets_[frame_slot], TextureView{}, nullptr,
-              TextureView{}, GpuBuffer{}, 0, TextureView{}, TextureView{},
-              GpuBuffer{}, 0, TextureView{}, GpuBuffer{}, GpuBuffer{},
-              GpuBuffer{}, GpuBuffer{}, TextureView{}, GpuBuffer{},
-              TextureView{}, TextureView{}, TextureView{}, TextureView{},
-              GpuBuffer{}, TextureView{}, TextureView{},
-              fft_ocean_active_ ? ocean_.displacement_view() : TextureView{},
-              fft_ocean_active_ ? ocean_.normal_foam_view() : TextureView{});
+              env_prepass_sets_[frame_slot], gpu::TextureView{}, nullptr,
+              gpu::TextureView{}, gpu::GpuBuffer{}, 0, gpu::TextureView{}, gpu::TextureView{},
+              gpu::GpuBuffer{}, 0, gpu::TextureView{}, gpu::GpuBuffer{}, gpu::GpuBuffer{},
+              gpu::GpuBuffer{}, gpu::GpuBuffer{}, gpu::TextureView{}, gpu::GpuBuffer{},
+              gpu::TextureView{}, gpu::TextureView{}, gpu::TextureView{}, gpu::TextureView{},
+              gpu::GpuBuffer{}, gpu::TextureView{}, gpu::TextureView{},
+              fft_ocean_active_ ? ocean_.displacement_view() : gpu::TextureView{},
+              fft_ocean_active_ ? ocean_.normal_foam_view() : gpu::TextureView{});
           mesh_pipeline_->BindPrepass(*ctx.cmd, globals_set,
                                       env_prepass_sets_[frame_slot]);
-          BindingSetHandle bound_material{};
+          gpu::BindingSetHandle bound_material{};
           bool skinned_bound = false;
           bool masked_bound =
               false;              // BindPrepass bound the opaque static variant
           u32 cull_cmd_index = 0; // matches the cull build order
           for (const DrawItem &item : view.draws) {
-            const GpuMesh *mesh = meshes_.find(item.mesh);
+            const gpu::GpuMesh *mesh = meshes_.find(item.mesh);
             if (!mesh || mesh->all_blend)
               continue;
             // Stay within the commands the cull build wrote; past that the
@@ -5640,7 +5640,7 @@ void Renderer::BuildFrameGraph(FrameResources &frame, u32 image_index,
               }
               mesh_pipeline_->Draw(*ctx.cmd, *mesh, push);
             }
-            for (const GpuSubmesh &submesh : mesh->submeshes) {
+            for (const gpu::GpuSubmesh &submesh : mesh->submeshes) {
               if (submesh.blend)
                 continue; // transparency owns its own depth
               if (cull_cmd_index >= cull_total_commands_)
@@ -5655,7 +5655,7 @@ void Renderer::BuildFrameGraph(FrameResources &frame, u32 image_index,
                   skinned_bound = draw_skinned;
                   masked_bound = submesh.alpha_mask;
                 }
-                BindingSetHandle material =
+                gpu::BindingSetHandle material =
                     material_system_->set(submesh.material);
                 if (!(material == bound_material)) {
                   mesh_pipeline_->BindMaterial(*ctx.cmd, material);
@@ -5677,7 +5677,7 @@ void Renderer::BuildFrameGraph(FrameResources &frame, u32 image_index,
                                       group.bounds_radius))) {
               continue;
             }
-            const GpuMesh *mesh = meshes_.find(group.mesh);
+            const gpu::GpuMesh *mesh = meshes_.find(group.mesh);
             if (!mesh || mesh->all_blend)
               continue;
             const u32 lod =
@@ -5685,21 +5685,21 @@ void Renderer::BuildFrameGraph(FrameResources &frame, u32 image_index,
                     ? 0
                     : SelectLod(*mesh,
                                 InstanceGroupDistance(group, view.camera.eye));
-            const base::Vector<GpuSubmesh> &submeshes =
+            const base::Vector<gpu::GpuSubmesh> &submeshes =
                 lod == 0 ? mesh->submeshes : mesh->lods[lod - 1].submeshes;
             const i32 vertex_offset =
                 lod == 0 ? 0
                          : static_cast<i32>(mesh->lods[lod - 1].vertex_offset);
             MeshPushConstants push{};
-            const GpuBuffer &previous =
+            const gpu::GpuBuffer &previous =
                 group.previous_buffer ? group.previous_buffer : group.buffer;
             mesh_pipeline_->DrawInstances(*ctx.cmd, *mesh, group.buffer,
                                           previous, push);
-            for (const GpuSubmesh &submesh : submeshes) {
+            for (const gpu::GpuSubmesh &submesh : submeshes) {
               if (submesh.blend)
                 continue;
               mesh_pipeline_->SetInstancedPrepass(*ctx.cmd, submesh.alpha_mask);
-              const BindingSetHandle material =
+              const gpu::BindingSetHandle material =
                   material_system_->set(submesh.material);
               if (!(material == bound_material)) {
                 mesh_pipeline_->BindMaterial(*ctx.cmd, material);
@@ -5737,10 +5737,10 @@ void Renderer::BuildFrameGraph(FrameResources &frame, u32 image_index,
             ctx.cmd->BindPipeline(msaa_resolve_pipeline_);
             ctx.cmd->BindTransient(
                 0,
-                {Bind::SampledView(0, ctx.graph->image(geom_normals).view),
-                 Bind::SampledView(1, ctx.graph->image(geom_depth_export).view),
-                 Bind::Storage(2, ctx.graph->image(normals)),
-                 Bind::Storage(3, ctx.graph->image(depth_export))});
+                {gpu::Bind::SampledView(0, ctx.graph->image(geom_normals).view),
+                 gpu::Bind::SampledView(1, ctx.graph->image(geom_depth_export).view),
+                 gpu::Bind::Storage(2, ctx.graph->image(normals)),
+                 gpu::Bind::Storage(3, ctx.graph->image(depth_export))});
             ctx.cmd->Push(push);
             ctx.cmd->Dispatch2D({render_width_, render_height_});
           });
@@ -5751,14 +5751,14 @@ void Renderer::BuildFrameGraph(FrameResources &frame, u32 image_index,
             builder.Write(depth, ResourceUsage::kDepthAttachment);
           },
           [this, depth_export, depth](PassContext &ctx) {
-            DepthAttachment depth_attachment{.view =
+            gpu::DepthAttachment depth_attachment{.view =
                                                  ctx.graph->image(depth).view,
-                                             .load = LoadOp::kDontCare};
+                                             .load = gpu::LoadOp::kDontCare};
             ctx.cmd->BeginRendering({.extent = {render_width_, render_height_},
                                      .depth = &depth_attachment});
             ctx.cmd->BindPipeline(depth_copy_pipeline_);
             ctx.cmd->BindTransient(
-                0, {Bind::SampledView(0, ctx.graph->image(depth_export).view)});
+                0, {gpu::Bind::SampledView(0, ctx.graph->image(depth_export).view)});
             ctx.cmd->Draw(3, 1, 0, 0);
             ctx.cmd->EndRendering();
           });
@@ -5803,8 +5803,8 @@ void Renderer::BuildFrameGraph(FrameResources &frame, u32 image_index,
       wf.render_size[1] = static_cast<f32>(render_height_);
       water_field_.AddToGraph(
           graph_, wf,
-          fft_ocean_active ? ocean_.normal_foam_view() : TextureView{},
-          fft_ocean_active ? ocean_.displacement_view() : TextureView{},
+          fft_ocean_active ? ocean_.normal_foam_view() : gpu::TextureView{},
+          fft_ocean_active ? ocean_.displacement_view() : gpu::TextureView{},
           depth_export);
     }
 
@@ -5841,7 +5841,7 @@ void Renderer::BuildFrameGraph(FrameResources &frame, u32 image_index,
     // are NRD-gated, so this is only consumed under RX_HAS_NRD).
     ResourceHandle refl_sh[3] = {kInvalidResource, kInvalidResource,
                                  kInvalidResource};
-    Extent2D refl_sh_extent{};
+    gpu::Extent2D refl_sh_extent{};
 #endif
     if (rcgi_world && depth_export != kInvalidResource &&
         normals != kInvalidResource) {
@@ -5864,7 +5864,7 @@ void Renderer::BuildFrameGraph(FrameResources &frame, u32 image_index,
             frame_index_, first_frame);
 #if defined(RX_HAS_NRD)
         ResourceHandle sh[3];
-        Extent2D e{};
+        gpu::Extent2D e{};
         if (rcgi_->denoised_sh(sh, e)) {
           refl_sh[0] = sh[0];
           refl_sh[1] = sh[1];
@@ -5949,9 +5949,9 @@ void Renderer::BuildFrameGraph(FrameResources &frame, u32 image_index,
               p.frame_index = frame_index_;
               ctx.cmd->BindPipeline(contact_shadow_pipeline_);
               ctx.cmd->BindTransient(
-                  0, {Bind::Storage(0, ctx.graph->image(sun_shadow)),
-                      Bind::Sampled(1, ctx.graph->image(depth_export)),
-                      Bind::Uniform(2, contact_camera_[frame_slot], 0,
+                  0, {gpu::Bind::Storage(0, ctx.graph->image(sun_shadow)),
+                      gpu::Bind::Sampled(1, ctx.graph->image(depth_export)),
+                      gpu::Bind::Uniform(2, contact_camera_[frame_slot], 0,
                                     sizeof(ContactCamera))});
               ctx.cmd->Push(p);
               ctx.cmd->Dispatch2D({render_width_, render_height_});
@@ -6017,8 +6017,8 @@ void Renderer::BuildFrameGraph(FrameResources &frame, u32 image_index,
                 p.strength = 0.75f;
                 ctx.cmd->BindPipeline(cloud_shadow_pipeline_);
                 ctx.cmd->BindTransient(
-                    0, {Bind::Storage(0, ctx.graph->image(sun_shadow)),
-                        Bind::Sampled(1, ctx.graph->image(depth_export))});
+                    0, {gpu::Bind::Storage(0, ctx.graph->image(sun_shadow)),
+                        gpu::Bind::Sampled(1, ctx.graph->image(depth_export))});
                 ctx.cmd->Push(p);
                 ctx.cmd->Dispatch2D({render_width_, render_height_});
               });
@@ -6201,17 +6201,17 @@ void Renderer::BuildFrameGraph(FrameResources &frame, u32 image_index,
           ctx.cmd->BindPipeline(light_cluster_pipeline_);
           ctx.cmd->BindTransient(
               0,
-              {Bind::StorageBuffer(0, frame.lights, 0, frame.lights.size),
-               Bind::StorageBuffer(1, cluster_counts_, 0, cluster_counts_.size),
-               Bind::StorageBuffer(2, cluster_indices_, 0,
+              {gpu::Bind::StorageBuffer(0, frame.lights, 0, frame.lights.size),
+               gpu::Bind::StorageBuffer(1, cluster_counts_, 0, cluster_counts_.size),
+               gpu::Bind::StorageBuffer(2, cluster_indices_, 0,
                                    cluster_indices_.size),
-               Bind::StorageBuffer(3, frame.decals, 0, frame.decals.size),
-               Bind::StorageBuffer(4, decal_cluster_indices_, 0,
+               gpu::Bind::StorageBuffer(3, frame.decals, 0, frame.decals.size),
+               gpu::Bind::StorageBuffer(4, decal_cluster_indices_, 0,
                                    decal_cluster_indices_.size)});
           ctx.cmd->Push(p);
           ctx.cmd->Dispatch((kClusterCount + 63) / 64, 1, 1);
-          ctx.cmd->MemoryBarrier(BarrierScope::kComputeWrite,
-                                 BarrierScope::kGraphicsRead);
+          ctx.cmd->MemoryBarrier(gpu::BarrierScope::kComputeWrite,
+                                 gpu::BarrierScope::kGraphicsRead);
         });
 
     graph_.AddPass(
@@ -6250,19 +6250,19 @@ void Renderer::BuildFrameGraph(FrameResources &frame, u32 image_index,
          globals_set, frame_slot, restir_active, restir_out, &frame, &view,
           draw_meshlet_instances, view_proj, force_lod0_for_tlas,
           grass_active, msaa_samples](PassContext &ctx) {
-          BindingSetHandle env_set = env_scene_sets_[frame_slot];
-          TextureView ao_view = ao != kInvalidResource
+          gpu::BindingSetHandle env_set = env_scene_sets_[frame_slot];
+          gpu::TextureView ao_view = ao != kInvalidResource
                                     ? ctx.graph->image(ao).view
-                                    : TextureView{};
-          TextureView rcgi_irr_view = rcgi_irr != kInvalidResource
+                                    : gpu::TextureView{};
+          gpu::TextureView rcgi_irr_view = rcgi_irr != kInvalidResource
                                           ? ctx.graph->image(rcgi_irr).view
-                                          : TextureView{};
-          TextureView sun_shadow_view = sun_shadow != kInvalidResource
+                                          : gpu::TextureView{};
+          gpu::TextureView sun_shadow_view = sun_shadow != kInvalidResource
                                             ? ctx.graph->image(sun_shadow).view
-                                            : TextureView{};
-          TextureView spec_refl_view = spec_refl != kInvalidResource
+                                            : gpu::TextureView{};
+          gpu::TextureView spec_refl_view = spec_refl != kInvalidResource
                                            ? ctx.graph->image(spec_refl).view
-                                           : TextureView{};
+                                           : gpu::TextureView{};
           // The hair transmittance volume, so skin under a groom is shadowed
           // by the fibres over it (see HairStrands::AddTransmittanceToGraph).
           // Null params = no hair this frame, which the forward pass reads as
@@ -6294,63 +6294,63 @@ void Renderer::BuildFrameGraph(FrameResources &frame, u32 image_index,
           }
           environment_->WriteEnvSet(
               env_set, ao_view, ddgi_active ? &ddgi_binding : nullptr,
-              csm_active ? ctx.graph->image(shadow_atlas).view : TextureView{},
-              csm_active ? shadow_.cascade_buffer(shadow_slot) : GpuBuffer{},
-              shadow_.cascade_buffer_size(), TextureView{}, sun_shadow_view,
+              csm_active ? ctx.graph->image(shadow_atlas).view : gpu::TextureView{},
+              csm_active ? shadow_.cascade_buffer(shadow_slot) : gpu::GpuBuffer{},
+              shadow_.cascade_buffer_size(), gpu::TextureView{}, sun_shadow_view,
               frame.lights, frame.lights.size, spec_refl_view, cluster_counts_,
               cluster_indices_, frame.decals, decal_cluster_indices_,
               decal_atlas_view_,
               local_shadows_active_ ? local_shadows_.face_buffer(frame_slot)
-                                    : GpuBuffer{},
+                                    : gpu::GpuBuffer{},
               local_shadows_active_ ? local_shadows_.atlas().view
-                                    : TextureView{},
+                                    : gpu::TextureView{},
               decal_normal_atlas_view_,
               restir_active ? ctx.graph->image(restir_out.diffuse).view
-                            : TextureView{},
+                            : gpu::TextureView{},
               restir_active ? ctx.graph->image(restir_out.spec).view
-                            : TextureView{},
+                            : gpu::TextureView{},
               virtual_texture_.available() ? virtual_texture_.feedback_buffer()
-                                           : GpuBuffer{},
+                                           : gpu::GpuBuffer{},
               virtual_texture_.available() ? virtual_texture_.indirection_view()
-                                           : TextureView{},
+                                           : gpu::TextureView{},
               virtual_texture_.available() ? virtual_texture_.atlas_view()
-                                           : TextureView{},
-              fft_ocean_active_ ? ocean_.displacement_view() : TextureView{},
-              fft_ocean_active_ ? ocean_.normal_foam_view() : TextureView{},
-              TextureView{}, TextureView{},
-              GpuBuffer{}, // water field rings: transparent pass only
+                                           : gpu::TextureView{},
+              fft_ocean_active_ ? ocean_.displacement_view() : gpu::TextureView{},
+              fft_ocean_active_ ? ocean_.normal_foam_view() : gpu::TextureView{},
+              gpu::TextureView{}, gpu::TextureView{},
+              gpu::GpuBuffer{}, // water field rings: transparent pass only
               shore_wetting_active_ ? shore_wetting_.current_view()
-                                    : TextureView{},
+                                    : gpu::TextureView{},
               water_caustics_active_ ? water_caustics_.current_view()
-                                     : TextureView{},
+                                     : gpu::TextureView{},
               rcgi_irr_view,
               rcgi_world_src.valid ? &rcgi_world_binding : nullptr,
               decal_baker_.available() ? decal_baker_.albedo_view()
-                                       : TextureView{},
+                                       : gpu::TextureView{},
               decal_baker_.available() ? decal_baker_.fx_view()
-                                       : TextureView{},
+                                       : gpu::TextureView{},
               decal_baker_.available() ? decal_baker_.tile_uv_buffer(frame_slot)
-                                       : GpuBuffer{},
+                                       : gpu::GpuBuffer{},
               hair_env_binding.params ? &hair_env_binding : nullptr);
 
-          ColorAttachment colors[3];
+          gpu::ColorAttachment colors[3];
           colors[0] = {.view = ctx.graph->image(geom_scene).view,
-                       .load = LoadOp::kClear,
+                       .load = gpu::LoadOp::kClear,
                        .clear = {0.02f, 0.02f, 0.05f, 1.0f}};
           colors[1] = {.view = ctx.graph->image(geom_motion).view,
-                       .load = LoadOp::kLoad}; // the prepass wrote motion
+                       .load = gpu::LoadOp::kLoad}; // the prepass wrote motion
           colors[2] = {.view = ctx.graph->image(geom_skin).view,
-                       .load = LoadOp::kClear,
+                       .load = gpu::LoadOp::kClear,
                        .clear = {0.0f, 0.0f, 0.0f, 0.0f}};
-          DepthAttachment depth_attachment{
+          gpu::DepthAttachment depth_attachment{
               .view = ctx.graph->image(geom_depth).view,
-              .load = LoadOp::kLoad}; // prepass depth, tested EQUAL
+              .load = gpu::LoadOp::kLoad}; // prepass depth, tested EQUAL
           ctx.cmd->BeginRendering({.extent = {render_width_, render_height_},
                                    .colors = base::Span(colors, 3),
                                    .depth = &depth_attachment});
 
-          BindingSetHandle bindless_set =
-              bindless_ ? bindless_->set() : BindingSetHandle{};
+          gpu::BindingSetHandle bindless_set =
+              bindless_ ? bindless_->set() : gpu::BindingSetHandle{};
 
           // Mesh-shader sub-pass: static opaque meshes, finest lod,
           // cluster-culled.
@@ -6362,11 +6362,11 @@ void Renderer::BuildFrameGraph(FrameResources &frame, u32 image_index,
 
           mesh_pipeline_->Bind(*ctx.cmd, globals_set, env_set, bindless_set,
                                use_rt_frag, settings_.wireframe);
-          BindingSetHandle bound_material{};
+          gpu::BindingSetHandle bound_material{};
           bool skinned_bound = false;
           u32 cull_cmd_index = 0; // matches the cull build + prepass order
           for (const DrawItem &item : view.draws) {
-            const GpuMesh *mesh = meshes_.find(item.mesh);
+            const gpu::GpuMesh *mesh = meshes_.find(item.mesh);
             if (!mesh || mesh->all_blend)
               continue;
             if (cull_cmd_index >= cull_total_commands_)
@@ -6406,13 +6406,13 @@ void Renderer::BuildFrameGraph(FrameResources &frame, u32 image_index,
                   (decal_baker_.tile_slot(item.decal_receiver) << 24);
               mesh_pipeline_->Draw(*ctx.cmd, *mesh, push);
             }
-            for (const GpuSubmesh &submesh : mesh->submeshes) {
+            for (const gpu::GpuSubmesh &submesh : mesh->submeshes) {
               if (submesh.blend)
                 continue;
               if (cull_cmd_index >= cull_total_commands_)
                 break; // partial-mesh boundary
               if (!ms_handled) {
-                BindingSetHandle material =
+                gpu::BindingSetHandle material =
                     material_system_->set(submesh.material);
                 if (!(material == bound_material)) {
                   mesh_pipeline_->BindMaterial(*ctx.cmd, material);
@@ -6434,7 +6434,7 @@ void Renderer::BuildFrameGraph(FrameResources &frame, u32 image_index,
                                       group.bounds_radius))) {
               continue;
             }
-            const GpuMesh *mesh = meshes_.find(group.mesh);
+            const gpu::GpuMesh *mesh = meshes_.find(group.mesh);
             if (!mesh || mesh->all_blend)
               continue;
             const u32 lod =
@@ -6442,7 +6442,7 @@ void Renderer::BuildFrameGraph(FrameResources &frame, u32 image_index,
                     ? 0
                     : SelectLod(*mesh,
                                 InstanceGroupDistance(group, view.camera.eye));
-            const base::Vector<GpuSubmesh> &submeshes =
+            const base::Vector<gpu::GpuSubmesh> &submeshes =
                 lod == 0 ? mesh->submeshes : mesh->lods[lod - 1].submeshes;
             const i32 vertex_offset =
                 lod == 0 ? 0
@@ -6450,14 +6450,14 @@ void Renderer::BuildFrameGraph(FrameResources &frame, u32 image_index,
             mesh_pipeline_->SetInstanced(*ctx.cmd, use_rt_frag,
                                          settings_.wireframe);
             MeshPushConstants push{};
-            const GpuBuffer &previous =
+            const gpu::GpuBuffer &previous =
                 group.previous_buffer ? group.previous_buffer : group.buffer;
             mesh_pipeline_->DrawInstances(*ctx.cmd, *mesh, group.buffer,
                                           previous, push);
-            for (const GpuSubmesh &submesh : submeshes) {
+            for (const gpu::GpuSubmesh &submesh : submeshes) {
               if (submesh.blend)
                 continue;
-              const BindingSetHandle material =
+              const gpu::BindingSetHandle material =
                   material_system_->set(submesh.material);
               if (!(material == bound_material)) {
                 mesh_pipeline_->BindMaterial(*ctx.cmd, material);
@@ -6513,15 +6513,15 @@ void Renderer::BuildFrameGraph(FrameResources &frame, u32 image_index,
             },
             [this, scene_color, motion, skin_diffuse, depth,
              globals_set](PassContext &ctx) {
-              ColorAttachment colors[3];
+              gpu::ColorAttachment colors[3];
               colors[0] = {.view = ctx.graph->image(scene_color).view,
-                           .load = LoadOp::kLoad};
+                           .load = gpu::LoadOp::kLoad};
               colors[1] = {.view = ctx.graph->image(motion).view,
-                           .load = LoadOp::kLoad};
+                           .load = gpu::LoadOp::kLoad};
               colors[2] = {.view = ctx.graph->image(skin_diffuse).view,
-                           .load = LoadOp::kLoad};
-              DepthAttachment depth_attachment{
-                  .view = ctx.graph->image(depth).view, .load = LoadOp::kLoad};
+                           .load = gpu::LoadOp::kLoad};
+              gpu::DepthAttachment depth_attachment{
+                  .view = ctx.graph->image(depth).view, .load = gpu::LoadOp::kLoad};
               ctx.cmd->BeginRendering(
                   {.extent = {render_width_, render_height_},
                    .colors = base::Span(colors, 3),
@@ -6564,22 +6564,22 @@ void Renderer::BuildFrameGraph(FrameResources &frame, u32 image_index,
                 hc.phase = phase;
                 hc.cmd = ctx.cmd;
                 hc.device = ctx.device;
-                const GpuImage &color_img = ctx.graph->image(color_h);
+                const gpu::GpuImage &color_img = ctx.graph->image(color_h);
                 hc.color = &color_img;
                 hc.color_view = color_img.view;
                 hc.color_format = color_img.format;
-                const GpuImage &depth_img = ctx.graph->image(depth_h);
+                const gpu::GpuImage &depth_img = ctx.graph->image(depth_h);
                 hc.depth = &depth_img;
                 hc.depth_view = depth_img.view;
                 hc.depth_format = depth_img.format;
                 if (export_h != kInvalidResource) {
-                  const GpuImage &export_img = ctx.graph->image(export_h);
+                  const gpu::GpuImage &export_img = ctx.graph->image(export_h);
                   hc.depth_export = &export_img;
                   hc.depth_export_view = export_img.view;
                   hc.depth_export_format = export_img.format;
                 }
                 if (motion_h != kInvalidResource) {
-                  const GpuImage &motion_img = ctx.graph->image(motion_h);
+                  const gpu::GpuImage &motion_img = ctx.graph->image(motion_h);
                   hc.motion = &motion_img;
                   hc.motion_view = motion_img.view;
                   hc.motion_format = motion_img.format;
@@ -6656,12 +6656,12 @@ void Renderer::BuildFrameGraph(FrameResources &frame, u32 image_index,
             p.composite = 0;
             ctx.cmd->BindPipeline(sss_pipeline_);
             ctx.cmd->BindTransient(
-                0, {Bind::Storage(0, ctx.graph->image(sss_tmp)),
-                    Bind::Combined(1, ctx.graph->image(skin_diffuse).view,
+                0, {gpu::Bind::Storage(0, ctx.graph->image(sss_tmp)),
+                    gpu::Bind::Combined(1, ctx.graph->image(skin_diffuse).view,
                                    sss_sampler_),
-                    Bind::Combined(2, ctx.graph->image(depth_export).view,
+                    gpu::Bind::Combined(2, ctx.graph->image(depth_export).view,
                                    sss_sampler_),
-                    Bind::Combined(3, ctx.graph->image(skin_diffuse).view,
+                    gpu::Bind::Combined(3, ctx.graph->image(skin_diffuse).view,
                                    sss_sampler_)});
             ctx.cmd->Push(p);
             ctx.cmd->Dispatch2D({render_width_, render_height_});
@@ -6682,12 +6682,12 @@ void Renderer::BuildFrameGraph(FrameResources &frame, u32 image_index,
             p.composite = 1;
             ctx.cmd->BindPipeline(sss_pipeline_);
             ctx.cmd->BindTransient(
-                0, {Bind::Storage(0, ctx.graph->image(scene_color)),
-                    Bind::Combined(1, ctx.graph->image(sss_tmp).view,
+                0, {gpu::Bind::Storage(0, ctx.graph->image(scene_color)),
+                    gpu::Bind::Combined(1, ctx.graph->image(sss_tmp).view,
                                    sss_sampler_),
-                    Bind::Combined(2, ctx.graph->image(depth_export).view,
+                    gpu::Bind::Combined(2, ctx.graph->image(depth_export).view,
                                    sss_sampler_),
-                    Bind::Combined(3, ctx.graph->image(skin_diffuse).view,
+                    gpu::Bind::Combined(3, ctx.graph->image(skin_diffuse).view,
                                    sss_sampler_)});
             ctx.cmd->Push(p);
             ctx.cmd->Dispatch2D({render_width_, render_height_});
@@ -6929,7 +6929,7 @@ void Renderer::BuildFrameGraph(FrameResources &frame, u32 image_index,
                                   ? local_shadows_.atlas().view
                                   : environment_->shadow_dummy_view();
       ff.cascade_buffer =
-          csm_active ? shadow_.cascade_buffer(shadow_slot) : GpuBuffer{};
+          csm_active ? shadow_.cascade_buffer(shadow_slot) : gpu::GpuBuffer{};
       ff.cascade_size = shadow_.cascade_buffer_size();
       ff.comparison_sampler = environment_->comparison_sampler();
       froxel_fog_.AddToGraph(graph_, lit, depth_export,
@@ -7102,8 +7102,8 @@ void Renderer::BuildFrameGraph(FrameResources &frame, u32 image_index,
         sim.intensity = view.gpu_particle_intensity;
         sim.time = static_cast<f32>(time_seconds_);
         pf.emissive = view.gpu_particle_mode == 1;
-        BindingSetHandle particle_bindless =
-            bindless_ ? bindless_->set() : BindingSetHandle{};
+        gpu::BindingSetHandle particle_bindless =
+            bindless_ ? bindless_->set() : gpu::BindingSetHandle{};
         particles_.SimulateAndDraw(graph_, lit, depth_export, motion, sim, pf,
                                    frame_index_ % 2, particle_bindless);
       } else {
@@ -7111,8 +7111,8 @@ void Renderer::BuildFrameGraph(FrameResources &frame, u32 image_index,
             view.particles_emissive ? emitter_additive : emitter_lit;
         for (const ParticleInstance &inst : view.particles)
           demo_particles.push_back(inst);
-        BindingSetHandle particle_bindless =
-            bindless_ ? bindless_->set() : BindingSetHandle{};
+        gpu::BindingSetHandle particle_bindless =
+            bindless_ ? bindless_->set() : gpu::BindingSetHandle{};
         particles_.AddToGraph(graph_, lit, depth_export, motion, emitter_lit,
                               emitter_additive, pf, frame_index_ % 2,
                               particle_bindless);
@@ -7219,13 +7219,13 @@ void Renderer::BuildFrameGraph(FrameResources &frame, u32 image_index,
             overdraw_.Render(
                 *ctx.cmd, ctx.graph->image(lit).view,
                 {render_width_, render_height_}, view_proj,
-                [this, &frame, &view, view_proj](CommandList &cmd) {
+                [this, &frame, &view, view_proj](gpu::CommandList &cmd) {
                   // This pass borrows shadow.vs, so it borrows its arena too.
                   cmd.BindTransient(
                       ShadowPass::kDrawRecordSet,
-                      {Bind::StorageBuffer(0, frame.draw_records)});
+                      {gpu::Bind::StorageBuffer(0, frame.draw_records)});
                   for (const DrawItem &item : view.draws) {
-                    const GpuMesh *mesh = meshes_.find(item.mesh);
+                    const gpu::GpuMesh *mesh = meshes_.find(item.mesh);
                     if (!mesh || !mesh->indices)
                       continue;
                     // view_proj sits where the cascade matrix goes (pushed by
@@ -7235,8 +7235,8 @@ void Renderer::BuildFrameGraph(FrameResources &frame, u32 image_index,
                         static_cast<u32>(&item - view.draws.data()) + 1u;
                     cmd.PushConstants(&draw_push, sizeof(draw_push));
                     cmd.BindVertexBuffer(0, mesh->vertices);
-                    cmd.BindIndexBuffer(mesh->indices, 0, IndexType::kUint32);
-                    for (const GpuSubmesh &submesh : mesh->submeshes) {
+                    cmd.BindIndexBuffer(mesh->indices, 0, gpu::IndexType::kUint32);
+                    for (const gpu::GpuSubmesh &submesh : mesh->submeshes) {
                       cmd.DrawIndexed(submesh.index_count, 1,
                                       submesh.index_offset, 0, 0);
                     }
@@ -7246,13 +7246,13 @@ void Renderer::BuildFrameGraph(FrameResources &frame, u32 image_index,
                        instances_.groups()) {
                     if (!group.alive)
                       continue;
-                    const GpuMesh *mesh = meshes_.find(group.mesh);
+                    const gpu::GpuMesh *mesh = meshes_.find(group.mesh);
                     if (!mesh || !mesh->indices)
                       continue;
                     cmd.BindVertexBuffer(0, mesh->vertices);
                     cmd.BindVertexBuffer(1, group.buffer);
-                    cmd.BindIndexBuffer(mesh->indices, 0, IndexType::kUint32);
-                    for (const GpuSubmesh &submesh : mesh->submeshes) {
+                    cmd.BindIndexBuffer(mesh->indices, 0, gpu::IndexType::kUint32);
+                    for (const gpu::GpuSubmesh &submesh : mesh->submeshes) {
                       cmd.DrawIndexed(submesh.index_count,
                                       static_cast<u32>(group.transforms.size()),
                                       submesh.index_offset, 0, 0);
@@ -7273,13 +7273,13 @@ void Renderer::BuildFrameGraph(FrameResources &frame, u32 image_index,
               builder.Write(depth, ResourceUsage::kDepthAttachment);
           },
           [this, lit, depth, view_proj, &view](PassContext &ctx) {
-            const GpuImage &color = ctx.graph->image(lit);
-            ColorAttachment ca{.view = color.view, .load = LoadOp::kLoad};
+            const gpu::GpuImage &color = ctx.graph->image(lit);
+            gpu::ColorAttachment ca{.view = color.view, .load = gpu::LoadOp::kLoad};
             const bool have_depth = depth != kInvalidResource;
-            DepthAttachment da{};
+            gpu::DepthAttachment da{};
             if (have_depth)
               da = {.view = ctx.graph->image(depth).view,
-                    .load = LoadOp::kLoad};
+                    .load = gpu::LoadOp::kLoad};
             ctx.cmd->BeginRendering({.extent = {render_width_, render_height_},
                                      .colors = base::Span(&ca, 1),
                                      .depth = have_depth ? &da : nullptr});
@@ -7324,7 +7324,7 @@ void Renderer::BuildFrameGraph(FrameResources &frame, u32 image_index,
                                                     .height = render_height_});
     ResourceHandle pt_depth_export =
         graph_.CreateTexture({.name = "pt_water_depth_export",
-                              .format = Format::kR32Float,
+                              .format = gpu::Format::kR32Float,
                               .width = render_width_,
                               .height = render_height_});
     graph_.AddPass(
@@ -7343,11 +7343,11 @@ void Renderer::BuildFrameGraph(FrameResources &frame, u32 image_index,
           // reflections).
           update_globals_set(ctx, kInvalidResource, false, /*want_tlas=*/true);
 
-          ColorAttachment colors[3];
+          gpu::ColorAttachment colors[3];
           colors[0] = {.view = ctx.graph->image(pt_normals).view};
           colors[1] = {.view = ctx.graph->image(pt_motion).view};
           colors[2] = {.view = ctx.graph->image(pt_depth_export).view};
-          DepthAttachment depth_attachment{
+          gpu::DepthAttachment depth_attachment{
               .view = ctx.graph->image(pt_depth).view,
               .clear = 0.0f}; // reversed z clears to far = 0
           ctx.cmd->BeginRendering({.extent = {render_width_, render_height_},
@@ -7355,22 +7355,22 @@ void Renderer::BuildFrameGraph(FrameResources &frame, u32 image_index,
                                    .depth = &depth_attachment});
 
           environment_->WriteEnvSet(
-              env_prepass_sets_[frame_slot], TextureView{}, nullptr,
-              TextureView{}, GpuBuffer{}, 0, TextureView{}, TextureView{},
-              GpuBuffer{}, 0, TextureView{}, GpuBuffer{}, GpuBuffer{},
-              GpuBuffer{}, GpuBuffer{}, TextureView{}, GpuBuffer{},
-              TextureView{}, TextureView{}, TextureView{}, TextureView{},
-              GpuBuffer{}, TextureView{}, TextureView{},
-              fft_ocean_active_ ? ocean_.displacement_view() : TextureView{},
-              fft_ocean_active_ ? ocean_.normal_foam_view() : TextureView{});
+              env_prepass_sets_[frame_slot], gpu::TextureView{}, nullptr,
+              gpu::TextureView{}, gpu::GpuBuffer{}, 0, gpu::TextureView{}, gpu::TextureView{},
+              gpu::GpuBuffer{}, 0, gpu::TextureView{}, gpu::GpuBuffer{}, gpu::GpuBuffer{},
+              gpu::GpuBuffer{}, gpu::GpuBuffer{}, gpu::TextureView{}, gpu::GpuBuffer{},
+              gpu::TextureView{}, gpu::TextureView{}, gpu::TextureView{}, gpu::TextureView{},
+              gpu::GpuBuffer{}, gpu::TextureView{}, gpu::TextureView{},
+              fft_ocean_active_ ? ocean_.displacement_view() : gpu::TextureView{},
+              fft_ocean_active_ ? ocean_.normal_foam_view() : gpu::TextureView{});
           mesh_pipeline_->BindPrepass(*ctx.cmd, globals_set,
                                       env_prepass_sets_[frame_slot]);
-          BindingSetHandle bound_material{};
+          gpu::BindingSetHandle bound_material{};
           bool skinned_bound = false;
           bool masked_bound =
               false; // BindPrepass bound the opaque static variant
           for (const DrawItem &item : view.draws) {
-            const GpuMesh *mesh = meshes_.find(item.mesh);
+            const gpu::GpuMesh *mesh = meshes_.find(item.mesh);
             if (!mesh || mesh->all_blend)
               continue;
             bool draw_skinned = mesh->skinned && mesh_pipeline_->has_skinning();
@@ -7394,7 +7394,7 @@ void Renderer::BuildFrameGraph(FrameResources &frame, u32 image_index,
               push.morph_vertex_count = mesh->vertex_count;
             }
             mesh_pipeline_->Draw(*ctx.cmd, *mesh, push);
-            for (const GpuSubmesh &submesh : mesh->submeshes) {
+            for (const gpu::GpuSubmesh &submesh : mesh->submeshes) {
               if (submesh.blend)
                 continue; // transparency owns its own depth
               if (draw_skinned != skinned_bound ||
@@ -7404,7 +7404,7 @@ void Renderer::BuildFrameGraph(FrameResources &frame, u32 image_index,
                 skinned_bound = draw_skinned;
                 masked_bound = submesh.alpha_mask;
               }
-              BindingSetHandle material =
+              gpu::BindingSetHandle material =
                   material_system_->set(submesh.material);
               if (!(material == bound_material)) {
                 mesh_pipeline_->BindMaterial(*ctx.cmd, material);
@@ -7422,19 +7422,19 @@ void Renderer::BuildFrameGraph(FrameResources &frame, u32 image_index,
                                       group.bounds_radius))) {
               continue;
             }
-            const GpuMesh *mesh = meshes_.find(group.mesh);
+            const gpu::GpuMesh *mesh = meshes_.find(group.mesh);
             if (!mesh || mesh->all_blend)
               continue;
             MeshPushConstants push{};
-            const GpuBuffer &previous =
+            const gpu::GpuBuffer &previous =
                 group.previous_buffer ? group.previous_buffer : group.buffer;
             mesh_pipeline_->DrawInstances(*ctx.cmd, *mesh, group.buffer,
                                           previous, push);
-            for (const GpuSubmesh &submesh : mesh->submeshes) {
+            for (const gpu::GpuSubmesh &submesh : mesh->submeshes) {
               if (submesh.blend)
                 continue;
               mesh_pipeline_->SetInstancedPrepass(*ctx.cmd, submesh.alpha_mask);
-              const BindingSetHandle material =
+              const gpu::BindingSetHandle material =
                   material_system_->set(submesh.material);
               if (!(material == bound_material)) {
                 mesh_pipeline_->BindMaterial(*ctx.cmd, material);
@@ -7568,16 +7568,16 @@ void Renderer::BuildFrameGraph(FrameResources &frame, u32 image_index,
         },
         [this, overlay_source, overlay_target, post_width,
          post_height](PassContext& ctx) {
-          const GpuImage& source = ctx.graph->image(overlay_source);
-          const GpuImage& color = ctx.graph->image(overlay_target);
-          ColorAttachment copy{.view = color.view,
-                               .load = LoadOp::kDontCare,
-                               .store = StoreOp::kStore};
+          const gpu::GpuImage& source = ctx.graph->image(overlay_source);
+          const gpu::GpuImage& color = ctx.graph->image(overlay_target);
+          gpu::ColorAttachment copy{.view = color.view,
+                               .load = gpu::LoadOp::kDontCare,
+                               .store = gpu::StoreOp::kStore};
           ctx.cmd->BeginRendering(
               {.extent = {post_width, post_height}, .colors = base::Span(&copy, 1)});
           ctx.cmd->BindPipeline(hdr_overlay_copy_pipeline_);
           ctx.cmd->BindTransient(
-              0, {Bind::Combined(0, source.view, hdr_overlay_sampler_)});
+              0, {gpu::Bind::Combined(0, source.view, hdr_overlay_sampler_)});
           ctx.cmd->Draw(3);
           ctx.cmd->EndRendering();
         });
@@ -7588,7 +7588,7 @@ void Renderer::BuildFrameGraph(FrameResources &frame, u32 image_index,
         },
         [this, overlay = base::move(overlay), overlay_target, post_width,
          post_height](PassContext& ctx) {
-          const GpuImage& color = ctx.graph->image(overlay_target);
+          const gpu::GpuImage& color = ctx.graph->image(overlay_target);
           HdrOverlayContext hc;
           hc.cmd = ctx.cmd;
           hc.device = ctx.device;
@@ -7610,7 +7610,7 @@ void Renderer::BuildFrameGraph(FrameResources &frame, u32 image_index,
     u64 need = static_cast<u64>(post_width) * post_height * sizeof(f32) * 4;
     if (hdr_readback_.size != need) {
       device_->DestroyBuffer(hdr_readback_);
-      hdr_readback_ = device_->CreateBuffer(need, kBufferUsageStorage, true);
+      hdr_readback_ = device_->CreateBuffer(need, gpu::kBufferUsageStorage, true);
     }
     hdr_width_ = post_width;
     hdr_height_ = post_height;
@@ -7625,12 +7625,12 @@ void Renderer::BuildFrameGraph(FrameResources &frame, u32 image_index,
             u32 push[2] = {post_width, post_height};
             ctx.cmd->BindPipeline(hdr_pipeline_);
             ctx.cmd->BindTransient(
-                0, {Bind::StorageBuffer(0, hdr_readback_),
-                    Bind::Sampled(1, ctx.graph->image(post_input))});
+                0, {gpu::Bind::StorageBuffer(0, hdr_readback_),
+                    gpu::Bind::Sampled(1, ctx.graph->image(post_input))});
             ctx.cmd->PushConstants(push, sizeof(push));
             ctx.cmd->Dispatch2D({post_width, post_height});
-            ctx.cmd->MemoryBarrier(BarrierScope::kComputeWrite,
-                                   BarrierScope::kHostRead);
+            ctx.cmd->MemoryBarrier(gpu::BarrierScope::kComputeWrite,
+                                   gpu::BarrierScope::kHostRead);
           });
     }
   }
@@ -7653,7 +7653,7 @@ void Renderer::BuildFrameGraph(FrameResources &frame, u32 image_index,
 
   ResourceHandle backbuffer =
       capture_offscreen_
-          ? graph_.ImportBackbuffer(capture_image_, ResourceState::kCopySrc)
+          ? graph_.ImportBackbuffer(capture_image_, gpu::ResourceState::kCopySrc)
           : graph_.ImportBackbuffer(swapchain_->image(image_index));
 
   post_->SetGrade(
@@ -7663,10 +7663,10 @@ void Renderer::BuildFrameGraph(FrameResources &frame, u32 image_index,
       bloom != kInvalidResource ? 1u : 0u,
       settings_.color_grade != ColorGrade::kNeutral ? 1u : 0u};
   switch (swapchain_->color_space()) {
-  case ColorSpace::kHdr10Pq:
+  case gpu::ColorSpace::kHdr10Pq:
     post_params.output_transfer = 1;
     break;
-  case ColorSpace::kScRgbLinear:
+  case gpu::ColorSpace::kScRgbLinear:
     post_params.output_transfer = 2;
     break;
   default:
@@ -7699,10 +7699,10 @@ void Renderer::BuildFrameGraph(FrameResources &frame, u32 image_index,
       },
       [this, post_input, bloom, flare_src, backbuffer,
        post_params](PassContext &ctx) {
-        TextureView bloom_view = bloom != kInvalidResource
+        gpu::TextureView bloom_view = bloom != kInvalidResource
                                      ? ctx.graph->image(bloom).view
                                      : ctx.graph->image(post_input).view;
-        TextureView flare_view = flare_src != kInvalidResource
+        gpu::TextureView flare_view = flare_src != kInvalidResource
                                      ? ctx.graph->image(flare_src).view
                                      : bloom_view;
         post_->Record(ctx, ctx.graph->image(post_input).view, bloom_view,
@@ -7723,20 +7723,20 @@ void Renderer::BuildFrameGraph(FrameResources &frame, u32 image_index,
           b.Write(backbuffer, ResourceUsage::kColorAttachment);
         },
         [this, backbuffer](PassContext &ctx) {
-          const GpuImage &src = ctx.graph->image(backbuffer);
-          const GpuImage &dst = framegen_->hudless();
-          TextureBarrier pre[] = {Transition(src, ResourceState::kColorTarget,
-                                             ResourceState::kCopySrc),
-                                  Transition(dst,
-                                             ResourceState::kShaderReadCompute,
-                                             ResourceState::kCopyDst)};
+          const gpu::GpuImage &src = ctx.graph->image(backbuffer);
+          const gpu::GpuImage &dst = framegen_->hudless();
+          gpu::TextureBarrier pre[] = {gpu::Transition(src, gpu::ResourceState::kColorTarget,
+                                             gpu::ResourceState::kCopySrc),
+                                  gpu::Transition(dst,
+                                             gpu::ResourceState::kShaderReadCompute,
+                                             gpu::ResourceState::kCopyDst)};
           ctx.cmd->TextureBarriers(pre);
           ctx.cmd->CopyTexture(src, dst);
-          TextureBarrier post[] = {
-              Transition(src, ResourceState::kCopySrc,
-                         ResourceState::kColorTarget),
-              Transition(dst, ResourceState::kCopyDst,
-                         ResourceState::kShaderReadCompute)};
+          gpu::TextureBarrier post[] = {
+              gpu::Transition(src, gpu::ResourceState::kCopySrc,
+                         gpu::ResourceState::kColorTarget),
+              gpu::Transition(dst, gpu::ResourceState::kCopyDst,
+                         gpu::ResourceState::kShaderReadCompute)};
           ctx.cmd->TextureBarriers(post);
         });
   }
@@ -7760,15 +7760,15 @@ void Renderer::BuildFrameGraph(FrameResources &frame, u32 image_index,
           builder.Write(backbuffer, ResourceUsage::kColorAttachment);
         },
         [this, backbuffer, ui_frost, &view](PassContext &ctx) {
-          ColorAttachment color{.view = ctx.graph->image(backbuffer).view,
-                                .load = LoadOp::kLoad};
+          gpu::ColorAttachment color{.view = ctx.graph->image(backbuffer).view,
+                                .load = gpu::LoadOp::kLoad};
           // Hand the blurred backdrop to the UI before it records (the closure
           // reads view.blur_source); null when blur is not in play this frame.
           view.blur_source = ui_frost != kInvalidResource
                                  ? ctx.graph->image(ui_frost).view
-                                 : TextureView{};
+                                 : gpu::TextureView{};
           view.blur_sampler = ui_frost != kInvalidResource ? ui_blur_->sampler()
-                                                           : SamplerHandle{};
+                                                           : gpu::SamplerHandle{};
           ctx.cmd->BeginRendering(
               {.extent = ctx.graph->image(backbuffer).extent,
                .colors = base::Span(&color, 1)});
@@ -7784,7 +7784,7 @@ void Renderer::BuildFrameGraph(FrameResources &frame, u32 image_index,
 bool Renderer::CreateFrameResources() {
   for (FrameResources &frame : frames_) {
     frame.globals =
-        device_->CreateBuffer(sizeof(FrameGlobals), kBufferUsageUniform, true);
+        device_->CreateBuffer(sizeof(FrameGlobals), gpu::kBufferUsageUniform, true);
     if (!frame.globals.mapped)
       return false;
 
@@ -7795,25 +7795,25 @@ bool Renderer::CreateFrameResources() {
     // no history - the cliff would show up as smearing on the busiest frame.
     frame.bone_palette = device_->CreateBuffer(
         static_cast<u64>(kMaxFrameBones) * 2 * sizeof(Mat4),
-        kBufferUsageStorage | kBufferUsageDeviceAddress, true);
+        gpu::kBufferUsageStorage | gpu::kBufferUsageDeviceAddress, true);
     if (!frame.bone_palette.mapped)
       return false;
 
     // Morph weights: host visible (target, weight) pairs, read like the bones.
     frame.morph_weights = device_->CreateBuffer(
         static_cast<u64>(kMaxFrameMorphWeights) * sizeof(MorphWeight),
-        kBufferUsageStorage | kBufferUsageDeviceAddress, true);
+        gpu::kBufferUsageStorage | gpu::kBufferUsageDeviceAddress, true);
     if (!frame.morph_weights.mapped)
       return false;
 
     frame.lights = device_->CreateBuffer(static_cast<u64>(kMaxFrameLights) *
                                              sizeof(PointLight),
-                                         kBufferUsageStorage, true);
+                                         gpu::kBufferUsageStorage, true);
     if (!frame.lights.mapped)
       return false;
     frame.decals =
         device_->CreateBuffer(static_cast<u64>(kMaxFrameDecals) * sizeof(Decal),
-                              kBufferUsageStorage, true);
+                              gpu::kBufferUsageStorage, true);
     if (!frame.decals.mapped)
       return false;
 
@@ -7822,14 +7822,14 @@ bool Renderer::CreateFrameResources() {
     frame.draw_record_capacity = 1024;
     frame.draw_records = device_->CreateBuffer(
         static_cast<u64>(frame.draw_record_capacity) * sizeof(DrawRecord),
-        kBufferUsageStorage, true);
+        gpu::kBufferUsageStorage, true);
     if (!frame.draw_records.mapped)
       return false;
   }
   return true;
 }
 
-const GpuBuffer &Renderer::UploadDrawRecords(FrameResources &frame,
+const gpu::GpuBuffer &Renderer::UploadDrawRecords(FrameResources &frame,
                                              const FrameView &view) {
   // Record 0 is the kNoDrawRecord slot an instanced draw points at, so the arena
   // is one longer than the draw list and every draw's record is 1 + its index.
@@ -7843,7 +7843,7 @@ const GpuBuffer &Renderer::UploadDrawRecords(FrameResources &frame,
     device_->DestroyBufferDeferred(frame.draw_records);
     frame.draw_records =
         device_->CreateBuffer(static_cast<u64>(cap) * sizeof(DrawRecord),
-                              kBufferUsageStorage, true);
+                              gpu::kBufferUsageStorage, true);
     frame.draw_record_capacity = frame.draw_records.mapped ? cap : 0;
   }
   if (!frame.draw_records.mapped)
@@ -7976,7 +7976,7 @@ void Renderer::Shutdown() {
         device_->DestroyBuffer(kv.value.rt_approx_vertices);
       if (kv.value.rt_approx_indices)
         device_->DestroyBuffer(kv.value.rt_approx_indices);
-      for (GpuMesh::LodRt &rt : kv.value.lod_rt)
+      for (gpu::GpuMesh::LodRt &rt : kv.value.lod_rt)
         if (rt.indices)
           device_->DestroyBuffer(rt.indices);
     }
@@ -8033,7 +8033,7 @@ void Renderer::Shutdown() {
       device_->DestroyPipeline(debug_line_pipeline_);
     if (debug_line_overlay_pipeline_)
       device_->DestroyPipeline(debug_line_overlay_pipeline_);
-    for (GpuBuffer &vbo : debug_line_vbo_)
+    for (gpu::GpuBuffer &vbo : debug_line_vbo_)
       if (vbo)
         device_->DestroyBuffer(vbo);
     if (pick_pipeline_)
@@ -8048,7 +8048,7 @@ void Renderer::Shutdown() {
       device_->DestroyBuffer(cluster_indices_);
     if (decal_cluster_indices_)
       device_->DestroyBuffer(decal_cluster_indices_);
-    for (GpuBuffer &camera : contact_camera_) {
+    for (gpu::GpuBuffer &camera : contact_camera_) {
       if (camera)
         device_->DestroyBuffer(camera);
       camera = {};
@@ -8146,14 +8146,14 @@ void Renderer::LogTextureMemory() const {
   }
 }
 
-const DeviceCaps *Renderer::caps() const {
+const gpu::DeviceCaps *Renderer::caps() const {
   return device_ ? &device_->caps() : nullptr;
 }
 
 void Renderer::ClearFrameCallbacks() { graph_.Reset(); }
 
-Format Renderer::swapchain_format() const {
-  return swapchain_ ? swapchain_->format() : Format::kUnknown;
+gpu::Format Renderer::swapchain_format() const {
+  return swapchain_ ? swapchain_->format() : gpu::Format::kUnknown;
 }
 
 u32 Renderer::swapchain_image_count() const {

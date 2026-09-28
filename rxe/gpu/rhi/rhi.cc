@@ -3,7 +3,7 @@
 #include "rxe/gpu/rhi/device.h"
 #include "rxe/gpu/rhi/swapchain.h"
 
-namespace rx::render {
+namespace rx::gpu {
 
 // Backend factories, defined in their backend directories. Availability is a
 // build-time property (RX_RHI_*); returning null means "not available
@@ -145,4 +145,4 @@ u32 FormatTexelBytes(Format format) {
   return 4;
 }
 
-}  // namespace rx::render
+}  // namespace rx::gpu

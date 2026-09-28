@@ -1,6 +1,6 @@
 #include "rxe/gpu/d3d12/d3d12_backend.h"
 
-namespace rx::render::d3d12 {
+namespace rx::gpu::d3d12 {
 namespace {
 
 // Indexed by Format; kept in declaration order and size-checked so adding a
@@ -148,4 +148,4 @@ D3D12_RAYTRACING_GEOMETRY_DESC ToD3dTriangles(const AccelTriangles& t) {
   return geometry;
 }
 
-}  // namespace rx::render::d3d12
+}  // namespace rx::gpu::d3d12

@@ -5,9 +5,12 @@
 #include "rxe/render/core/render_graph.h"
 #include "rxe/gpu/rhi/resources.h"
 
+namespace rx::gpu {
+class Device;
+}  // namespace rx::gpu
+
 namespace rx::render {
 
-class Device;
 
 // Aerial perspective: composites the atmospheric scattering between the camera
 // and each lit surface over the scene, so distant geometry hazes/blue-shifts
@@ -26,19 +29,19 @@ class AerialPerspective {
     u32 steps = 12;
   };
 
-  bool Initialize(Device& device);
-  void Destroy(Device& device);
+  bool Initialize(gpu::Device& device);
+  void Destroy(gpu::Device& device);
 
   // Composites aerial perspective onto `color` (the lit scene) against `depth`,
   // sampling the atmosphere LUTs; returns the result. `transmittance` and
   // `multiscatter` are the EnvironmentSystem LUT views.
   ResourceHandle AddToGraph(RenderGraph& graph, ResourceHandle color, ResourceHandle depth,
-                            TextureView transmittance, TextureView multiscatter, Extent2D extent,
+                            gpu::TextureView transmittance, gpu::TextureView multiscatter, gpu::Extent2D extent,
                             const Frame& frame);
 
  private:
-  PipelineHandle pipeline_;
-  SamplerHandle sampler_;  // linear clamp, for the LUTs
+  gpu::PipelineHandle pipeline_;
+  gpu::SamplerHandle sampler_;  // linear clamp, for the LUTs
 };
 
 }  // namespace rx::render

@@ -74,12 +74,12 @@ class DebugUi {
   // of options is split into navigable submenus.
   void DrawDisplayTab(render::Renderer& renderer, render::RenderSettings& settings);
   void DrawRayTracingTab(render::Renderer& renderer, render::RenderSettings& settings,
-                         const render::DeviceCaps* caps);
-  void DrawLightingTab(render::RenderSettings& settings, const render::DeviceCaps* caps);
-  void DrawGiTab(render::RenderSettings& settings, const render::DeviceCaps* caps);
+                         const gpu::DeviceCaps* caps);
+  void DrawLightingTab(render::RenderSettings& settings, const gpu::DeviceCaps* caps);
+  void DrawGiTab(render::RenderSettings& settings, const gpu::DeviceCaps* caps);
   void DrawPostTab(render::RenderSettings& settings);
   void DrawDiagnosticsTab(render::Renderer& renderer, scene::FlyCamera& camera,
-                          render::RenderSettings& settings, const render::DeviceCaps* caps);
+                          render::RenderSettings& settings, const gpu::DeviceCaps* caps);
 
   // Refreshes preset_files_ from the .ini files in the presets directory.
   void ScanPresetFiles();

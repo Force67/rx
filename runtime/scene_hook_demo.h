@@ -36,12 +36,12 @@ class SceneHookDemo {
   void Record(const render::SceneHookContext& ctx);
 
   render::Renderer* renderer_ = nullptr;
-  render::Device* device_ = nullptr;
+  gpu::Device* device_ = nullptr;
   VkDevice vk_ = VK_NULL_HANDLE;
   VkPipelineLayout layout_ = VK_NULL_HANDLE;
   VkPipeline compute_ = VK_NULL_HANDLE;
   VkPipeline graphics_ = VK_NULL_HANDLE;
-  base::Vector<render::GpuBuffer> arenas_;  // one BDA arena per frame-in-flight
+  base::Vector<gpu::GpuBuffer> arenas_;  // one BDA arena per frame-in-flight
   u32 instance_count_ = 12;
   f32 time_ = 0;
   bool ready_ = false;

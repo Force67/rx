@@ -92,8 +92,8 @@ void GuiRenderBackend::UploadBuffer(GpuBuffer& b, VkBufferUsageFlags usage, cons
 VkPipeline GuiRenderBackend::CreatePipeline(const unsigned char* vs, size_t vs_size,
                                             const unsigned char* fs, size_t fs_size,
                                             uint32_t attr_count) {
-  VkShaderModule vert = rx::render::CreateShaderModule(info_.device, vs, vs_size);
-  VkShaderModule frag = rx::render::CreateShaderModule(info_.device, fs, fs_size);
+  VkShaderModule vert = rx::gpu::CreateShaderModule(info_.device, vs, vs_size);
+  VkShaderModule frag = rx::gpu::CreateShaderModule(info_.device, fs, fs_size);
   if (vert == VK_NULL_HANDLE || frag == VK_NULL_HANDLE) return VK_NULL_HANDLE;
 
   VkPipelineShaderStageCreateInfo stages[2]{};

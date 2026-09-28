@@ -27,14 +27,14 @@ static_assert(sizeof(asset::SkinnedVertexExtra) == 8,
 
 }  // namespace
 
-bool SkinnedRayTracing::Initialize(Device& device) {
+bool SkinnedRayTracing::Initialize(gpu::Device& device) {
   pipeline_ = device.CreateComputePipeline({
       .shader = RX_SHADER(k_skin_cs_hlsl),
-      .sets = {{.slots = {{0, BindingType::kByteBuffer},
-                          {1, BindingType::kByteBuffer},
-                          {2, BindingType::kByteBuffer},
-                          {3, BindingType::kStorageBuffer}}}},
-      .push_constant_size = PushSize<SkinPush>(),
+      .sets = {{.slots = {{0, gpu::BindingType::kByteBuffer},
+                          {1, gpu::BindingType::kByteBuffer},
+                          {2, gpu::BindingType::kByteBuffer},
+                          {3, gpu::BindingType::kStorageBuffer}}}},
+      .push_constant_size = gpu::PushSize<SkinPush>(),
       .debug_name = "skin_deform",
   });
   if (!pipeline_) {
@@ -44,7 +44,7 @@ bool SkinnedRayTracing::Initialize(Device& device) {
   return true;
 }
 
-void SkinnedRayTracing::Destroy(Device& device) {
+void SkinnedRayTracing::Destroy(gpu::Device& device) {
   for (Actor& actor : actors_) {
     for (Slot& slot : actor.slots)
       if (slot.posed) device.DestroyBuffer(slot.posed);
@@ -71,7 +71,7 @@ u32 SkinnedRayTracing::Acquire() {
   return static_cast<u32>(actors_.size());
 }
 
-void SkinnedRayTracing::Release(Device& device, RayTracingContext* raytracing, u32 handle,
+void SkinnedRayTracing::Release(gpu::Device& device, RayTracingContext* raytracing, u32 handle,
                                 base::Vector<u32>& retire_to) {
   if (handle == 0 || handle > actors_.size()) return;
   if (!actors_[handle - 1].allocated) return;
@@ -80,7 +80,7 @@ void SkinnedRayTracing::Release(Device& device, RayTracingContext* raytracing, u
   free_handles_.push_back(handle);
 }
 
-void SkinnedRayTracing::RetireActor(Device& device, RayTracingContext* raytracing, u32 handle,
+void SkinnedRayTracing::RetireActor(gpu::Device& device, RayTracingContext* raytracing, u32 handle,
                                    base::Vector<u32>& retire_to) {
   Actor& actor = actors_[handle - 1];
   for (u32 i = 0; i < 2; ++i) {
@@ -92,7 +92,7 @@ void SkinnedRayTracing::RetireActor(Device& device, RayTracingContext* raytracin
   actor.allocated = true;
 }
 
-void SkinnedRayTracing::InvalidateMesh(Device& device, RayTracingContext* raytracing,
+void SkinnedRayTracing::InvalidateMesh(gpu::Device& device, RayTracingContext* raytracing,
                                       u64 mesh_key, base::Vector<u32>& retire_to) {
   for (u32 i = 0; i < actors_.size(); ++i)
     if (actors_[i].live && actors_[i].mesh_key == mesh_key)
@@ -126,9 +126,9 @@ bool SkinnedRayTracing::active(u32 handle) const {
   return handle != 0 && handle <= actors_.size() && actors_[handle - 1].active;
 }
 
-u32 SkinnedRayTracing::Prepare(Device& device, BindlessRegistry& bindless,
+u32 SkinnedRayTracing::Prepare(gpu::Device& device, BindlessRegistry& bindless,
                                const MaterialSystem& materials, RayTracingContext& raytracing,
-                               const base::UnorderedMap<u64, GpuMesh>& meshes,
+                               const base::UnorderedMap<u64, gpu::GpuMesh>& meshes,
                                const base::Vector<Request>& requests) {
   BeginFrame();
   if (!pipeline_) return 0;
@@ -141,7 +141,7 @@ u32 SkinnedRayTracing::Prepare(Device& device, BindlessRegistry& bindless,
     // twice in one frame. One handle per skinned draw is what the header asks
     // for; honour the first request and skip the redundant work.
     if (actor.active) continue;
-    const GpuMesh* mesh = meshes.find(request.mesh_key);
+    const gpu::GpuMesh* mesh = meshes.find(request.mesh_key);
     // The bind-pose buffers must be readable by compute and by an AS build.
     // UploadMesh gives every mesh those usages whenever ray tracing exists, so
     // a miss here means the draw's mesh is not uploaded or is not skinned.
@@ -175,8 +175,8 @@ u32 SkinnedRayTracing::Prepare(Device& device, BindlessRegistry& bindless,
       bool ok = true;
       for (u32 i = 0; i < 2 && ok; ++i) {
         slots[i].posed = device.CreateBuffer(
-            bytes, kBufferUsageStorage | kBufferUsageDeviceAddress |
-                       kBufferUsageAccelBuildInput);
+            bytes, gpu::kBufferUsageStorage | gpu::kBufferUsageDeviceAddress |
+                       gpu::kBufferUsageAccelBuildInput);
         if (!slots[i].posed) {
           RX_ERROR("skinned-rt: {} byte deformed buffer allocation failed", bytes);
           ok = false;
@@ -187,19 +187,19 @@ u32 SkinnedRayTracing::Prepare(Device& device, BindlessRegistry& bindless,
         // resolve the material from CommittedGeometryIndex through that table.
         // Only the vertex address differs between the slots, which is exactly
         // what a refit is allowed to change.
-        base::Vector<AccelTriangles> geometries;
+        base::Vector<gpu::AccelTriangles> geometries;
         base::Vector<BindlessRegistry::GeometryRecord> records;
-        for (const GpuSubmesh& submesh : mesh->submeshes) {
+        for (const gpu::GpuSubmesh& submesh : mesh->submeshes) {
           if (submesh.blend || submesh.index_count == 0) continue;
           records.push_back({submesh.index_offset, materials.bindless_material(submesh.material)});
           geometries.push_back({.vertex_address = slots[i].posed.address,
                                 .vertex_stride = sizeof(asset::Vertex),
                                 .vertex_count = mesh->vertex_count,
-                                .vertex_format = Format::kRGB32Float,
+                                .vertex_format = gpu::Format::kRGB32Float,
                                 .index_address =
                                     mesh->indices.address + submesh.index_offset * sizeof(u32),
                                 .index_count = submesh.index_count,
-                                .index_type = IndexType::kUint32,
+                                .index_type = gpu::IndexType::kUint32,
                                 .opaque = !submesh.alpha_mask});
         }
         if (geometries.empty()) {  // nothing but blended submeshes
@@ -261,8 +261,8 @@ u32 SkinnedRayTracing::Prepare(Device& device, BindlessRegistry& bindless,
   return static_cast<u32>(recording_.size());
 }
 
-void SkinnedRayTracing::Record(CommandList& cmd, RayTracingContext& raytracing,
-                               const GpuBuffer& bone_palette) {
+void SkinnedRayTracing::Record(gpu::CommandList& cmd, RayTracingContext& raytracing,
+                               const gpu::GpuBuffer& bone_palette) {
   if (recording_.empty() || !pipeline_ || !bone_palette) return;
 
   cmd.BeginDebugLabel("skin_deform");
@@ -270,21 +270,21 @@ void SkinnedRayTracing::Record(CommandList& cmd, RayTracingContext& raytracing,
   // one frame ago, by ray queries and by hit shading. Widest scope on both
   // sides because the two writes below differ in kind: the dispatches overwrite
   // a vertex buffer, the builds overwrite an acceleration structure.
-  cmd.MemoryBarrier(BarrierScope::kAllCommands, BarrierScope::kAllCommands);
+  cmd.MemoryBarrier(gpu::BarrierScope::kAllCommands, gpu::BarrierScope::kAllCommands);
   cmd.BindPipeline(pipeline_);
   for (u32 handle : recording_) {
     const Actor& actor = actors_[handle - 1];
-    cmd.BindTransient(0, {Bind::ByteBuffer(0, actor.base_vertices),
-                          Bind::ByteBuffer(1, actor.skin_stream),
-                          Bind::ByteBuffer(2, bone_palette),
-                          Bind::StorageBuffer(3, actor.slots[actor.current].posed)});
+    cmd.BindTransient(0, {gpu::Bind::ByteBuffer(0, actor.base_vertices),
+                          gpu::Bind::ByteBuffer(1, actor.skin_stream),
+                          gpu::Bind::ByteBuffer(2, bone_palette),
+                          gpu::Bind::StorageBuffer(3, actor.slots[actor.current].posed)});
     cmd.Push(SkinPush{actor.vertex_count, actor.skin_offset});
     cmd.Dispatch((actor.vertex_count + kThreads - 1) / kThreads, 1, 1);
   }
   // Two consumers of the same write, hence the widest destination: the builds
   // below read the posed vertices as build input, and hit shading reads them
   // through the bindless geometry table in compute AND fragment.
-  cmd.MemoryBarrier(BarrierScope::kComputeWrite, BarrierScope::kAllCommands);
+  cmd.MemoryBarrier(gpu::BarrierScope::kComputeWrite, gpu::BarrierScope::kAllCommands);
   for (u32 handle : recording_) {
     Actor& actor = actors_[handle - 1];
     actor.slots[actor.current].valid = true;
@@ -295,7 +295,7 @@ void SkinnedRayTracing::Record(CommandList& cmd, RayTracingContext& raytracing,
   // stage rather than through a ray query. When that build runs on the async
   // queue the fork semaphore carries the same edge across queues, which is why
   // this pass MUST be recorded before the first async pass (see the caller).
-  cmd.MemoryBarrier(BarrierScope::kAccelBuildWrite, BarrierScope::kAccelBuildWrite);
+  cmd.MemoryBarrier(gpu::BarrierScope::kAccelBuildWrite, gpu::BarrierScope::kAccelBuildWrite);
   cmd.EndDebugLabel();
 }
 

@@ -11,9 +11,12 @@
 #include "rxe/gpu/rhi/command_list.h"
 #include "rxe/gpu/rhi/resources.h"
 
+namespace rx::gpu {
+class Device;
+}  // namespace rx::gpu
+
 namespace rx::render {
 
-class Device;
 class RenderGraph;
 
 using ResourceHandle = u32;
@@ -35,7 +38,7 @@ enum class ResourceUsage : u8 {
 
 struct TransientTextureDesc {
   base::String name;
-  Format format = Format::kRGBA16Float;
+  gpu::Format format = gpu::Format::kRGBA16Float;
   u32 width = 0;
   u32 height = 0;
   u32 samples = 1;  // >1 = multisampled geometry target (kMsaa mode)
@@ -46,14 +49,14 @@ struct TransientTextureDesc {
 // starts in kUndefined and the first barrier discards.
 class TransientPool {
  public:
-  explicit TransientPool(Device& device) : device_(device) {}
+  explicit TransientPool(gpu::Device& device) : device_(device) {}
   ~TransientPool();
 
   TransientPool(const TransientPool&) = delete;
   TransientPool& operator=(const TransientPool&) = delete;
 
   void BeginFrame();
-  const GpuImage* Acquire(Format format, Extent2D extent, TextureUsageFlags usage,
+  const gpu::GpuImage* Acquire(gpu::Format format, gpu::Extent2D extent, gpu::TextureUsageFlags usage,
                           u32 samples = 1);
 
   // Frees every cached image. Call after WaitIdle, e.g. on resize.
@@ -61,19 +64,19 @@ class TransientPool {
 
  private:
   struct Entry {
-    GpuImage image;
-    TextureUsageFlags usage = 0;
+    gpu::GpuImage image;
+    gpu::TextureUsageFlags usage = 0;
     bool in_use = false;
   };
 
-  Device& device_;
+  gpu::Device& device_;
   base::Vector<Entry> entries_;
 };
 
 // Handed to pass execute callbacks.
 struct PassContext {
-  CommandList* cmd = nullptr;
-  Device* device = nullptr;
+  gpu::CommandList* cmd = nullptr;
+  gpu::Device* device = nullptr;
   RenderGraph* graph = nullptr;
 };
 
@@ -113,35 +116,35 @@ class RenderGraph {
   // Persistent images (TAA history, path-trace ping-pongs) enter the graph
   // here. The graph reads the starting state from *state and writes the state
   // the image is left in back to it, so the owner can re-import next frame.
-  ResourceHandle ImportImage(base::String name, const GpuImage& image, ResourceState* state);
+  ResourceHandle ImportImage(base::String name, const gpu::GpuImage& image, gpu::ResourceState* state);
 
   // Imported swapchain image. Contents are discarded on first use and the
   // graph appends a transition to `final_state` after the last pass. Override
   // it when the "backbuffer" is an offscreen capture image that is copied from
   // rather than presented (PRESENT_SRC is only legal for swapchain images).
-  ResourceHandle ImportBackbuffer(const GpuImage& image,
-                                  ResourceState final_state = ResourceState::kPresent);
+  ResourceHandle ImportBackbuffer(const gpu::GpuImage& image,
+                                  gpu::ResourceState final_state = gpu::ResourceState::kPresent);
 
   void AddPass(base::String name, SetupFn setup, ExecuteFn execute);
 
   // Optional per-pass brackets (gpu profiler timestamps + debug labels). Begin
   // runs before the pass barriers, end after the pass executes.
-  using PassBegin = base::Function<void(CommandList&, const char*)>;
-  using PassEnd = base::Function<void(CommandList&)>;
+  using PassBegin = base::Function<void(gpu::CommandList&, const char*)>;
+  using PassEnd = base::Function<void(gpu::CommandList&)>;
   void SetPassHooks(PassBegin begin, PassEnd end) {
     pass_begin_ = base::move(begin);
     pass_end_ = base::move(end);
   }
 
-  bool Compile(Device& device, TransientPool& pool);
+  bool Compile(gpu::Device& device, TransientPool& pool);
   // Executes the passes. With async-flagged passes and a capable device the
   // frame is split into segments (fork -> async compute overlap -> join) and
   // the returned list is the final segment; hand THAT to SubmitFrame. Without
   // async the input list is returned unchanged.
-  CommandList* Execute(PassContext& ctx);
+  gpu::CommandList* Execute(PassContext& ctx);
   void Reset();
 
-  const GpuImage& image(ResourceHandle handle) const { return resources_[handle - 1].image; }
+  const gpu::GpuImage& image(ResourceHandle handle) const { return resources_[handle - 1].image; }
 
   // A snapshot of the compiled frame graph for the debug inspector: passes with
   // their read/write/barrier counts, transient resources with their footprint,
@@ -178,15 +181,15 @@ class RenderGraph {
  private:
   struct Resource {
     TransientTextureDesc desc;
-    GpuImage image;
+    gpu::GpuImage image;
     bool imported = false;
     bool is_backbuffer = false;
     // Where the graph leaves a backbuffer after the last pass. kPresent for a
     // real swapchain image; an offscreen stand-in must not enter PRESENT_SRC.
-    ResourceState backbuffer_final_state = ResourceState::kPresent;
-    ResourceState* external_state = nullptr;
+    gpu::ResourceState backbuffer_final_state = gpu::ResourceState::kPresent;
+    gpu::ResourceState* external_state = nullptr;
     // Walked during Compile to derive barriers.
-    ResourceState state = ResourceState::kUndefined;
+    gpu::ResourceState state = gpu::ResourceState::kUndefined;
     bool last_was_write = false;
   };
 
@@ -194,13 +197,13 @@ class RenderGraph {
     base::String name;
     PassBuilder builder;
     ExecuteFn execute;
-    base::Vector<TextureBarrier> barriers;
+    base::Vector<gpu::TextureBarrier> barriers;
   };
 
   base::Vector<Resource> resources_;
   base::Vector<Pass> passes_;
-  base::Vector<TextureBarrier> final_barriers_;
-  base::Vector<TextureUsageFlags> usage_scratch_;  // reused across Compiles
+  base::Vector<gpu::TextureBarrier> final_barriers_;
+  base::Vector<gpu::TextureUsageFlags> usage_scratch_;  // reused across Compiles
   Stats stats_;
   bool stats_enabled_ = false;
   PassBegin pass_begin_;

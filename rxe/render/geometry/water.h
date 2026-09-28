@@ -18,12 +18,12 @@ class WaterPass {
  public:
   // Set layouts mirror the water.ps bindings: 0 mesh globals (+tlas),
   // 1 material, 2 environment, 3 bindless, 4 the opaque snapshot.
-  static base::UniquePointer<WaterPass> Create(Device& device, Format color_format,
-                                           Format motion_format, Format depth_format,
-                                           BindingLayoutHandle globals_layout,
-                                           BindingLayoutHandle material_layout,
-                                           BindingLayoutHandle environment_layout,
-                                           BindingLayoutHandle bindless_layout);
+  static base::UniquePointer<WaterPass> Create(gpu::Device& device, gpu::Format color_format,
+                                           gpu::Format motion_format, gpu::Format depth_format,
+                                           gpu::BindingLayoutHandle globals_layout,
+                                           gpu::BindingLayoutHandle material_layout,
+                                           gpu::BindingLayoutHandle environment_layout,
+                                           gpu::BindingLayoutHandle bindless_layout);
   ~WaterPass();
 
   WaterPass(const WaterPass&) = delete;
@@ -35,23 +35,23 @@ class WaterPass {
 
   // Binds the water pipeline; sets 0-2 are the frame's globals/material-less
   // environment sets, set 4 is written from the snapshot views.
-  void Bind(PassContext& ctx, BindingSetHandle globals, BindingSetHandle environment,
-            BindingSetHandle bindless, ResourceHandle opaque_color, ResourceHandle opaque_depth);
-  void BindMaterial(CommandList& cmd, BindingSetHandle material);
+  void Bind(PassContext& ctx, gpu::BindingSetHandle globals, gpu::BindingSetHandle environment,
+            gpu::BindingSetHandle bindless, ResourceHandle opaque_color, ResourceHandle opaque_depth);
+  void BindMaterial(gpu::CommandList& cmd, gpu::BindingSetHandle material);
 
   bool adaptive_available() const { return adaptive_.available(); }
-  void UpdateAdaptive(CommandList& cmd, const AdaptiveWaterMesh::UpdateParams& params) {
+  void UpdateAdaptive(gpu::CommandList& cmd, const AdaptiveWaterMesh::UpdateParams& params) {
     adaptive_.Update(cmd, params);
   }
-  void DrawAdaptive(CommandList& cmd) const { adaptive_.Draw(cmd); }
+  void DrawAdaptive(gpu::CommandList& cmd) const { adaptive_.Draw(cmd); }
 
  private:
-  explicit WaterPass(Device& device) : device_(device) {}
+  explicit WaterPass(gpu::Device& device) : device_(device) {}
 
-  Device& device_;
-  SamplerHandle sampler_;
-  PipelineHandle pipeline_;
-  PipelineHandle copy_pipeline_;
+  gpu::Device& device_;
+  gpu::SamplerHandle sampler_;
+  gpu::PipelineHandle pipeline_;
+  gpu::PipelineHandle copy_pipeline_;
   AdaptiveWaterMesh adaptive_;
 };
 

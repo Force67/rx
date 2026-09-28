@@ -17,7 +17,7 @@
 #include "rxe/gpu/rhi/types.h"
 #include "rxe/ui/window/window.h"
 
-namespace rx::render {
+namespace rx::gpu {
 
 class Swapchain;
 
@@ -386,6 +386,6 @@ class Device {
   DeviceCaps caps_;
 };
 
-}  // namespace rx::render
+}  // namespace rx::gpu
 
 #endif  // RX_RENDER_RHI_DEVICE_H_

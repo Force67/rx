@@ -7,7 +7,7 @@
 #include "rxe/gpu/rhi/resources.h"
 #include "rxe/gpu/rhi/types.h"
 
-namespace rx::render {
+namespace rx::gpu {
 
 // Resource classes a shader can bind. Maps to Vulkan descriptor types and
 // D3D12 UAV/SRV/CBV/sampler ranges. kCombinedTextureSampler exists because the
@@ -111,6 +111,6 @@ inline BindingItem ByteBuffer(u32 slot, const GpuBuffer& buffer, u64 offset = 0,
 
 }  // namespace Bind
 
-}  // namespace rx::render
+}  // namespace rx::gpu
 
 #endif  // RX_RENDER_RHI_BINDINGS_H_

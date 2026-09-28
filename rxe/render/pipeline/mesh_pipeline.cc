@@ -17,12 +17,12 @@
 
 namespace rx::render {
 
-base::UniquePointer<MeshPipeline> MeshPipeline::Create(Device& device, Format color_format,
-                                                   Format motion_format,
-                                                   Format normal_format, Format depth_format,
-                                                   BindingLayoutHandle material_layout,
-                                                   BindingLayoutHandle environment_layout,
-                                                   BindingLayoutHandle bindless_layout,
+base::UniquePointer<MeshPipeline> MeshPipeline::Create(gpu::Device& device, gpu::Format color_format,
+                                                   gpu::Format motion_format,
+                                                   gpu::Format normal_format, gpu::Format depth_format,
+                                                   gpu::BindingLayoutHandle material_layout,
+                                                   gpu::BindingLayoutHandle environment_layout,
+                                                   gpu::BindingLayoutHandle bindless_layout,
                                                    u32 samples) {
   auto pipeline = base::UniquePointer<MeshPipeline>(new MeshPipeline(device));
   bool rt = device.caps().ray_query;
@@ -34,61 +34,61 @@ base::UniquePointer<MeshPipeline> MeshPipeline::Create(Device& device, Format co
   // globals from the task and mesh stages too; binding 2 is last frame's hi-z,
   // sampled by the task stage for instance occlusion cull, and binding 3 the
   // frame's per-draw transform arena every stage indexes with the pushed record.
-  BindingLayoutDesc set0{};
-  set0.stages = kShaderStageVertex | kShaderStageFragment |
-                (mesh_caps ? (kShaderStageTask | kShaderStageMesh) : 0u);
-  set0.slots.push_back({0, BindingType::kUniformBuffer});
-  if (rt) set0.slots.push_back({1, BindingType::kAccelStruct});
-  if (mesh_caps) set0.slots.push_back({2, BindingType::kSampledImage});
-  set0.slots.push_back({3, BindingType::kStorageBuffer});
+  gpu::BindingLayoutDesc set0{};
+  set0.stages = gpu::kShaderStageVertex | gpu::kShaderStageFragment |
+                (mesh_caps ? (gpu::kShaderStageTask | gpu::kShaderStageMesh) : 0u);
+  set0.slots.push_back({0, gpu::BindingType::kUniformBuffer});
+  if (rt) set0.slots.push_back({1, gpu::BindingType::kAccelStruct});
+  if (mesh_caps) set0.slots.push_back({2, gpu::BindingType::kSampledImage});
+  set0.slots.push_back({3, gpu::BindingType::kStorageBuffer});
   pipeline->set_layout_ = device.CreateBindingLayout(set0);
   if (!pipeline->set_layout_) return nullptr;
 
   // Shared set interface: 0 = frame globals, 1 = material, 2 = environment,
   // 3 = bindless (rt hit shading), mirroring the old pipeline layout.
-  base::Vector<PipelineBindings> sets;
+  base::Vector<gpu::PipelineBindings> sets;
   sets.push_back({.shared = pipeline->set_layout_});
   sets.push_back({.shared = material_layout});
   sets.push_back({.shared = environment_layout});
   if (pipeline->has_bindless_) sets.push_back({.shared = bindless_layout});
 
-  VertexBufferLayout static_stream{
+  gpu::VertexBufferLayout static_stream{
       .stride = sizeof(asset::Vertex),
-      .attributes = {{0, Format::kRGB32Float, offsetof(asset::Vertex, position)},
-                     {1, Format::kRGB32Float, offsetof(asset::Vertex, normal)},
-                     {2, Format::kRGBA32Float, offsetof(asset::Vertex, tangent)},
-                     {3, Format::kRG32Float, offsetof(asset::Vertex, uv)},
-                     {4, Format::kRGBA8Unorm, offsetof(asset::Vertex, color)}}};
+      .attributes = {{0, gpu::Format::kRGB32Float, offsetof(asset::Vertex, position)},
+                     {1, gpu::Format::kRGB32Float, offsetof(asset::Vertex, normal)},
+                     {2, gpu::Format::kRGBA32Float, offsetof(asset::Vertex, tangent)},
+                     {3, gpu::Format::kRG32Float, offsetof(asset::Vertex, uv)},
+                     {4, gpu::Format::kRGBA8Unorm, offsetof(asset::Vertex, color)}}};
   // Skinned variant: a second vertex stream (binding 1) carries 4 bone indices
   // and 4 normalized weights per vertex.
-  VertexBufferLayout skin_stream{
+  gpu::VertexBufferLayout skin_stream{
       .stride = sizeof(asset::SkinnedVertexExtra),
-      .attributes = {{5, Format::kRGBA8Uint, offsetof(asset::SkinnedVertexExtra, bone_indices)},
-                     {6, Format::kRGBA8Unorm, offsetof(asset::SkinnedVertexExtra, bone_weights)}}};
-  VertexBufferLayout instance_stream{
+      .attributes = {{5, gpu::Format::kRGBA8Uint, offsetof(asset::SkinnedVertexExtra, bone_indices)},
+                     {6, gpu::Format::kRGBA8Unorm, offsetof(asset::SkinnedVertexExtra, bone_weights)}}};
+  gpu::VertexBufferLayout instance_stream{
       .stride = sizeof(Mat4),
       .per_instance = true,
-      .attributes = {{7, Format::kRGBA32Float, 0},
-                     {8, Format::kRGBA32Float, 16},
-                     {9, Format::kRGBA32Float, 32},
-                     {10, Format::kRGBA32Float, 48}}};
-  VertexBufferLayout previous_instance_stream{
+      .attributes = {{7, gpu::Format::kRGBA32Float, 0},
+                     {8, gpu::Format::kRGBA32Float, 16},
+                     {9, gpu::Format::kRGBA32Float, 32},
+                     {10, gpu::Format::kRGBA32Float, 48}}};
+  gpu::VertexBufferLayout previous_instance_stream{
       .stride = sizeof(Mat4),
       .per_instance = true,
-      .attributes = {{11, Format::kRGBA32Float, 0},
-                     {12, Format::kRGBA32Float, 16},
-                     {13, Format::kRGBA32Float, 32},
-                     {14, Format::kRGBA32Float, 48}}};
+      .attributes = {{11, gpu::Format::kRGBA32Float, 0},
+                     {12, gpu::Format::kRGBA32Float, 16},
+                     {13, gpu::Format::kRGBA32Float, 32},
+                     {14, gpu::Format::kRGBA32Float, 48}}};
 
   // The prepass owns depth; main variants test EQUAL against it and leave
   // motion alone (the prepass already wrote it).
-  GraphicsPipelineDesc scene{};
+  gpu::GraphicsPipelineDesc scene{};
   scene.vertex = RX_SHADER(k_mesh_vs_hlsl);
   scene.fragment = RX_SHADER(k_mesh_sss_ps_hlsl);
   scene.vertex_buffers = {static_stream};
   // TODO: back face culling once converted content settles winding order.
-  scene.raster = {.cull = CullMode::kNone};
-  scene.depth = {.test = true, .write = false, .compare = CompareOp::kEqual,
+  scene.raster = {.cull = gpu::CullMode::kNone};
+  scene.depth = {.test = true, .write = false, .compare = gpu::CompareOp::kEqual,
                  .format = depth_format};
   // Third target: skin diffuse export for the screen-space sss blur. The
   // scene-pass fragment variants (mesh_sss/mesh_rt_sss) write it; the blend
@@ -97,10 +97,10 @@ base::UniquePointer<MeshPipeline> MeshPipeline::Create(Device& device, Format co
   // TODO(rhi): blend preset mismatch: the motion target (attachment 1) had
   // colorWriteMask 0 (motion comes from the prepass); presets always write
   // RGBA. Closest is kOpaque.
-  scene.blend = {BlendMode::kOpaque, BlendMode::kOpaque, BlendMode::kOpaque};
+  scene.blend = {gpu::BlendMode::kOpaque, gpu::BlendMode::kOpaque, gpu::BlendMode::kOpaque};
   scene.sets = sets;
-  scene.push_constant_size = PushSize<MeshPushConstants>();
-  scene.push_bda = PushBdaHeader::kMeshDraw;
+  scene.push_constant_size = gpu::PushSize<MeshPushConstants>();
+  scene.push_bda = gpu::PushBdaHeader::kMeshDraw;
   // kMsaa mode: opaque scene + prepass raster multisampled; the blend
   // pipelines below stay at 1 sample (the transparent pass runs post-resolve).
   scene.samples = samples;
@@ -110,10 +110,10 @@ base::UniquePointer<MeshPipeline> MeshPipeline::Create(Device& device, Format co
   for (u32 variant = 0; variant < 4; ++variant) {
     if ((variant & kRt) && !rt) continue;
     if ((variant & kWire) && !wire_capable) continue;
-    GraphicsPipelineDesc desc = scene;
+    gpu::GraphicsPipelineDesc desc = scene;
     desc.fragment =
         (variant & kRt) ? RX_SHADER(k_mesh_rt_sss_ps_hlsl) : RX_SHADER(k_mesh_sss_ps_hlsl);
-    desc.raster.polygon = (variant & kWire) ? PolygonMode::kLine : PolygonMode::kFill;
+    desc.raster.polygon = (variant & kWire) ? gpu::PolygonMode::kLine : gpu::PolygonMode::kFill;
     pipeline->pipelines_[variant] = device.CreateGraphicsPipeline(desc);
     if (!pipeline->pipelines_[variant]) {
       RX_ERROR("mesh pipeline creation failed (variant {})", variant);
@@ -123,7 +123,7 @@ base::UniquePointer<MeshPipeline> MeshPipeline::Create(Device& device, Format co
   // Persistent static instance groups: identical scene state and fragment
   // variants, with a second vertex stream supplying one model matrix per prop.
   {
-    GraphicsPipelineDesc desc = scene;
+    gpu::GraphicsPipelineDesc desc = scene;
     desc.vertex = RX_SHADER(k_mesh_instance_vs_hlsl);
     desc.vertex_buffers = {static_stream, instance_stream, previous_instance_stream};
     desc.debug_name = "mesh_scene_instanced";
@@ -132,7 +132,7 @@ base::UniquePointer<MeshPipeline> MeshPipeline::Create(Device& device, Format co
       if ((variant & kWire) && !wire_capable) continue;
       desc.fragment =
           (variant & kRt) ? RX_SHADER(k_mesh_rt_sss_ps_hlsl) : RX_SHADER(k_mesh_sss_ps_hlsl);
-      desc.raster.polygon = (variant & kWire) ? PolygonMode::kLine : PolygonMode::kFill;
+      desc.raster.polygon = (variant & kWire) ? gpu::PolygonMode::kLine : gpu::PolygonMode::kFill;
       pipeline->instanced_pipelines_[variant] = device.CreateGraphicsPipeline(desc);
       if (!pipeline->instanced_pipelines_[variant]) {
         RX_ERROR("mesh instanced pipeline creation failed (variant {})", variant);
@@ -143,7 +143,7 @@ base::UniquePointer<MeshPipeline> MeshPipeline::Create(Device& device, Format co
   // Skinned main variants: same fragment shaders and main pass state, skinned
   // vertex stage + the bone weight stream. Wireframe is not skinned.
   {
-    GraphicsPipelineDesc desc = scene;
+    gpu::GraphicsPipelineDesc desc = scene;
     desc.vertex = RX_SHADER(k_mesh_skin_vs_hlsl);
     desc.vertex_buffers = {static_stream, skin_stream};
     desc.debug_name = "mesh_scene_skinned";
@@ -161,8 +161,8 @@ base::UniquePointer<MeshPipeline> MeshPipeline::Create(Device& device, Format co
   // Transparent variants: blend over the opaque pass, test against its
   // depth without writing, shade with the same pbr shaders.
   {
-    GraphicsPipelineDesc desc = scene;
-    desc.depth.compare = CompareOp::kGreater;  // reversed z
+    gpu::GraphicsPipelineDesc desc = scene;
+    desc.depth.compare = gpu::CompareOp::kGreater;  // reversed z
     // The transparent pass always runs after the kMsaa resolve, on
     // single-sampled targets.
     desc.samples = 1;
@@ -172,7 +172,7 @@ base::UniquePointer<MeshPipeline> MeshPipeline::Create(Device& device, Format co
     // TODO(rhi): blend preset mismatch: old alpha factors were ONE/ZERO;
     // kAlpha uses ONE/ONE_MINUS_SRC_ALPHA. Color factors (SRC_ALPHA,
     // ONE_MINUS_SRC_ALPHA) match; kAlpha is the closest preset.
-    desc.blend = {BlendMode::kAlpha, BlendMode::kOpaque};
+    desc.blend = {gpu::BlendMode::kAlpha, gpu::BlendMode::kOpaque};
     desc.debug_name = "mesh_blend";
     for (u32 variant = 0; variant < 2; ++variant) {
       if (variant == 1 && !rt) continue;
@@ -184,7 +184,7 @@ base::UniquePointer<MeshPipeline> MeshPipeline::Create(Device& device, Format co
     }
     // Additive (one, one) variant for HDR effect-shader fire/glows: same shaders
     // (the unlit branch premultiplies its coverage into the colour).
-    desc.blend = {BlendMode::kAdditive, BlendMode::kOpaque};
+    desc.blend = {gpu::BlendMode::kAdditive, gpu::BlendMode::kOpaque};
     desc.debug_name = "mesh_blend_additive";
     for (u32 variant = 0; variant < 2; ++variant) {
       if (variant == 1 && !rt) continue;
@@ -198,14 +198,14 @@ base::UniquePointer<MeshPipeline> MeshPipeline::Create(Device& device, Format co
 
   // Prepass: depth write + normals/motion/depth-export targets, same layout.
   {
-    GraphicsPipelineDesc desc = scene;
+    gpu::GraphicsPipelineDesc desc = scene;
     desc.fragment = RX_SHADER(k_prepass_ps_hlsl);
-    desc.depth = {.test = true, .write = true, .compare = CompareOp::kGreater,  // reversed z
+    desc.depth = {.test = true, .write = true, .compare = gpu::CompareOp::kGreater,  // reversed z
                   .format = depth_format};
-    desc.color_formats = {normal_format, motion_format, Format::kR32Float};
+    desc.color_formats = {normal_format, motion_format, gpu::Format::kR32Float};
     // TODO(rhi): blend preset mismatch: prepass targets wrote RG/RG/R color
     // masks; presets always write RGBA. Closest is kOpaque.
-    desc.blend = {BlendMode::kOpaque, BlendMode::kOpaque, BlendMode::kOpaque};
+    desc.blend = {gpu::BlendMode::kOpaque, gpu::BlendMode::kOpaque, gpu::BlendMode::kOpaque};
     desc.debug_name = "mesh_prepass";
     pipeline->prepass_pipeline_ = device.CreateGraphicsPipeline(desc);
     if (!pipeline->prepass_pipeline_) {
@@ -260,23 +260,23 @@ base::UniquePointer<MeshPipeline> MeshPipeline::Create(Device& device, Format co
   // descriptor set layouts and fragment shaders, and indexing the same per-draw
   // transform arena with the same pushed record.
   if (mesh_caps) {
-    GraphicsPipelineDesc ms{};
+    gpu::GraphicsPipelineDesc ms{};
     ms.task = RX_SHADER(k_mesh_scene_as_hlsl);
     ms.mesh = RX_SHADER(k_mesh_scene_ms_hlsl);
-    ms.raster = {.cull = CullMode::kNone};  // matches the raster path's winding policy
+    ms.raster = {.cull = gpu::CullMode::kNone};  // matches the raster path's winding policy
     ms.sets = sets;
-    ms.push_constant_size = PushSize<MeshShaderPush>();
+    ms.push_constant_size = gpu::PushSize<MeshShaderPush>();
 
     // Scene variants: depth EQUAL against the prepass, lit color + masked
     // motion target, like the raster main variants.
     {
-      GraphicsPipelineDesc desc = ms;
-      desc.depth = {.test = true, .write = false, .compare = CompareOp::kEqual,
+      gpu::GraphicsPipelineDesc desc = ms;
+      desc.depth = {.test = true, .write = false, .compare = gpu::CompareOp::kEqual,
                     .format = depth_format};
       desc.color_formats = {color_format, motion_format, kSkinDiffuseFormat};
       // TODO(rhi): blend preset mismatch: motion target had colorWriteMask 0;
       // closest is kOpaque (see the raster scene variants).
-      desc.blend = {BlendMode::kOpaque, BlendMode::kOpaque, BlendMode::kOpaque};
+      desc.blend = {gpu::BlendMode::kOpaque, gpu::BlendMode::kOpaque, gpu::BlendMode::kOpaque};
       desc.debug_name = "mesh_ms_scene";
       for (u32 variant = 0; variant < 2; ++variant) {
         if (variant == kRt && !rt) continue;
@@ -294,14 +294,14 @@ base::UniquePointer<MeshPipeline> MeshPipeline::Create(Device& device, Format co
     // it keeps the alpha-test (runtime-flag) fragment; the early-Z split only
     // applies to the raster prepass, which bins per submesh.
     {
-      GraphicsPipelineDesc desc = ms;
+      gpu::GraphicsPipelineDesc desc = ms;
       desc.fragment = RX_SHADER(k_prepass_masked_ps_hlsl);
-      desc.depth = {.test = true, .write = true, .compare = CompareOp::kGreater,  // reversed z
+      desc.depth = {.test = true, .write = true, .compare = gpu::CompareOp::kGreater,  // reversed z
                     .format = depth_format};
-      desc.color_formats = {normal_format, motion_format, Format::kR32Float};
+      desc.color_formats = {normal_format, motion_format, gpu::Format::kR32Float};
       // TODO(rhi): blend preset mismatch: prepass targets wrote RG/RG/R color
       // masks; closest is kOpaque (see the raster prepass).
-      desc.blend = {BlendMode::kOpaque, BlendMode::kOpaque, BlendMode::kOpaque};
+      desc.blend = {gpu::BlendMode::kOpaque, gpu::BlendMode::kOpaque, gpu::BlendMode::kOpaque};
       desc.debug_name = "mesh_ms_prepass";
       pipeline->ms_prepass_ = device.CreateGraphicsPipeline(desc);
       if (!pipeline->ms_prepass_) {
@@ -319,19 +319,19 @@ base::UniquePointer<MeshPipeline> MeshPipeline::Create(Device& device, Format co
 }
 
 MeshPipeline::~MeshPipeline() {
-  for (PipelineHandle pipeline : pipelines_) {
+  for (gpu::PipelineHandle pipeline : pipelines_) {
     if (pipeline) device_.DestroyPipeline(pipeline);
   }
-  for (PipelineHandle pipeline : blend_pipelines_) {
+  for (gpu::PipelineHandle pipeline : blend_pipelines_) {
     if (pipeline) device_.DestroyPipeline(pipeline);
   }
-  for (PipelineHandle pipeline : blend_additive_pipelines_) {
+  for (gpu::PipelineHandle pipeline : blend_additive_pipelines_) {
     if (pipeline) device_.DestroyPipeline(pipeline);
   }
-  for (PipelineHandle pipeline : skinned_pipelines_) {
+  for (gpu::PipelineHandle pipeline : skinned_pipelines_) {
     if (pipeline) device_.DestroyPipeline(pipeline);
   }
-  for (PipelineHandle pipeline : instanced_pipelines_) {
+  for (gpu::PipelineHandle pipeline : instanced_pipelines_) {
     if (pipeline) device_.DestroyPipeline(pipeline);
   }
   if (skinned_prepass_pipeline_) device_.DestroyPipeline(skinned_prepass_pipeline_);
@@ -341,15 +341,15 @@ MeshPipeline::~MeshPipeline() {
   if (instanced_prepass_pipeline_) device_.DestroyPipeline(instanced_prepass_pipeline_);
   if (instanced_prepass_masked_pipeline_)
     device_.DestroyPipeline(instanced_prepass_masked_pipeline_);
-  for (PipelineHandle pipeline : ms_scene_) {
+  for (gpu::PipelineHandle pipeline : ms_scene_) {
     if (pipeline) device_.DestroyPipeline(pipeline);
   }
   if (ms_prepass_) device_.DestroyPipeline(ms_prepass_);
   if (set_layout_) device_.DestroyBindingLayout(set_layout_);
 }
 
-void MeshPipeline::Bind(CommandList& cmd, BindingSetHandle globals,
-                        BindingSetHandle environment, BindingSetHandle bindless, bool use_rt,
+void MeshPipeline::Bind(gpu::CommandList& cmd, gpu::BindingSetHandle globals,
+                        gpu::BindingSetHandle environment, gpu::BindingSetHandle bindless, bool use_rt,
                         bool wireframe) {
   u32 variant = (use_rt ? kRt : 0) | (wireframe ? kWire : 0);
   if (!pipelines_[variant]) variant &= ~kWire;
@@ -362,8 +362,8 @@ void MeshPipeline::Bind(CommandList& cmd, BindingSetHandle globals,
   }
 }
 
-void MeshPipeline::BindBlend(CommandList& cmd, BindingSetHandle globals,
-                             BindingSetHandle environment, BindingSetHandle bindless,
+void MeshPipeline::BindBlend(gpu::CommandList& cmd, gpu::BindingSetHandle globals,
+                             gpu::BindingSetHandle environment, gpu::BindingSetHandle bindless,
                              bool use_rt) {
   u32 variant = use_rt && blend_pipelines_[1] ? 1 : 0;
   cmd.BindPipeline(blend_pipelines_[variant]);
@@ -374,8 +374,8 @@ void MeshPipeline::BindBlend(CommandList& cmd, BindingSetHandle globals,
   }
 }
 
-void MeshPipeline::BindBlendAdditive(CommandList& cmd, BindingSetHandle globals,
-                                     BindingSetHandle environment, BindingSetHandle bindless,
+void MeshPipeline::BindBlendAdditive(gpu::CommandList& cmd, gpu::BindingSetHandle globals,
+                                     gpu::BindingSetHandle environment, gpu::BindingSetHandle bindless,
                                      bool use_rt) {
   u32 variant = use_rt && blend_additive_pipelines_[1] ? 1 : 0;
   cmd.BindPipeline(blend_additive_pipelines_[variant]);
@@ -386,8 +386,8 @@ void MeshPipeline::BindBlendAdditive(CommandList& cmd, BindingSetHandle globals,
   }
 }
 
-void MeshPipeline::BindPrepass(CommandList& cmd, BindingSetHandle globals,
-                               BindingSetHandle environment) {
+void MeshPipeline::BindPrepass(gpu::CommandList& cmd, gpu::BindingSetHandle globals,
+                               gpu::BindingSetHandle environment) {
   cmd.BindPipeline(prepass_pipeline_);
   cmd.BindSet(0, globals);
   // mesh.vs statically uses the env set (fft-ocean displacement sample), so
@@ -395,13 +395,13 @@ void MeshPipeline::BindPrepass(CommandList& cmd, BindingSetHandle globals,
   if (environment) cmd.BindSet(2, environment);
 }
 
-void MeshPipeline::BindMaterial(CommandList& cmd, BindingSetHandle material) {
+void MeshPipeline::BindMaterial(gpu::CommandList& cmd, gpu::BindingSetHandle material) {
   cmd.BindSet(1, material);
 }
 
-void MeshPipeline::SetSkinned(CommandList& cmd, bool skinned, bool use_rt, bool wireframe) {
+void MeshPipeline::SetSkinned(gpu::CommandList& cmd, bool skinned, bool use_rt, bool wireframe) {
   if (skinned) {
-    PipelineHandle p = skinned_pipelines_[use_rt ? kRt : 0];
+    gpu::PipelineHandle p = skinned_pipelines_[use_rt ? kRt : 0];
     if (!p) p = skinned_pipelines_[0];
     if (p) cmd.BindPipeline(p);
     return;
@@ -412,8 +412,8 @@ void MeshPipeline::SetSkinned(CommandList& cmd, bool skinned, bool use_rt, bool 
   cmd.BindPipeline(pipelines_[variant]);
 }
 
-void MeshPipeline::SetPrepassVariant(CommandList& cmd, bool skinned, bool masked) {
-  PipelineHandle p;
+void MeshPipeline::SetPrepassVariant(gpu::CommandList& cmd, bool skinned, bool masked) {
+  gpu::PipelineHandle p;
   if (skinned && skinned_prepass_pipeline_) {
     p = masked && skinned_prepass_masked_pipeline_ ? skinned_prepass_masked_pipeline_
                                                    : skinned_prepass_pipeline_;
@@ -423,47 +423,47 @@ void MeshPipeline::SetPrepassVariant(CommandList& cmd, bool skinned, bool masked
   cmd.BindPipeline(p);
 }
 
-void MeshPipeline::Draw(CommandList& cmd, const GpuMesh& mesh, const MeshPushConstants& push) {
+void MeshPipeline::Draw(gpu::CommandList& cmd, const gpu::GpuMesh& mesh, const MeshPushConstants& push) {
   cmd.Push(push);
   cmd.BindVertexBuffer(0, mesh.vertices);
   if (mesh.skinned && mesh.skinning) {
     cmd.BindVertexBuffer(1, mesh.skinning);
   }
-  cmd.BindIndexBuffer(mesh.indices, 0, IndexType::kUint32);
+  cmd.BindIndexBuffer(mesh.indices, 0, gpu::IndexType::kUint32);
 }
 
-void MeshPipeline::DrawSubmesh(CommandList& cmd, const GpuSubmesh& submesh) {
+void MeshPipeline::DrawSubmesh(gpu::CommandList& cmd, const gpu::GpuSubmesh& submesh) {
   cmd.DrawIndexed(submesh.index_count, 1, submesh.index_offset, 0, 0);
 }
 
-void MeshPipeline::SetInstanced(CommandList& cmd, bool use_rt, bool wireframe) {
+void MeshPipeline::SetInstanced(gpu::CommandList& cmd, bool use_rt, bool wireframe) {
   u32 variant = (use_rt ? kRt : 0) | (wireframe ? kWire : 0);
   if (!instanced_pipelines_[variant]) variant &= ~kWire;
   if (!instanced_pipelines_[variant]) variant = 0;
   cmd.BindPipeline(instanced_pipelines_[variant]);
 }
 
-void MeshPipeline::SetInstancedPrepass(CommandList& cmd, bool masked) {
-  PipelineHandle pipeline = masked && instanced_prepass_masked_pipeline_
+void MeshPipeline::SetInstancedPrepass(gpu::CommandList& cmd, bool masked) {
+  gpu::PipelineHandle pipeline = masked && instanced_prepass_masked_pipeline_
                                 ? instanced_prepass_masked_pipeline_
                                 : instanced_prepass_pipeline_;
   cmd.BindPipeline(pipeline);
 }
 
-void MeshPipeline::DrawInstances(CommandList& cmd, const GpuMesh& mesh,
-                                 const GpuBuffer& instances, const GpuBuffer& previous_instances,
+void MeshPipeline::DrawInstances(gpu::CommandList& cmd, const gpu::GpuMesh& mesh,
+                                 const gpu::GpuBuffer& instances, const gpu::GpuBuffer& previous_instances,
                                  const MeshPushConstants& push) {
   cmd.Push(push);
   cmd.BindVertexBuffer(0, mesh.vertices);
   cmd.BindVertexBuffer(1, instances);
   cmd.BindVertexBuffer(2, previous_instances);
-  cmd.BindIndexBuffer(mesh.indices, 0, IndexType::kUint32);
+  cmd.BindIndexBuffer(mesh.indices, 0, gpu::IndexType::kUint32);
 }
 
-void MeshPipeline::BindMeshScene(CommandList& cmd, BindingSetHandle globals,
-                                 BindingSetHandle environment, BindingSetHandle bindless,
+void MeshPipeline::BindMeshScene(gpu::CommandList& cmd, gpu::BindingSetHandle globals,
+                                 gpu::BindingSetHandle environment, gpu::BindingSetHandle bindless,
                                  bool use_rt) {
-  PipelineHandle p = (use_rt && ms_scene_[kRt]) ? ms_scene_[kRt] : ms_scene_[0];
+  gpu::PipelineHandle p = (use_rt && ms_scene_[kRt]) ? ms_scene_[kRt] : ms_scene_[0];
   cmd.BindPipeline(p);
   cmd.BindSet(0, globals);
   cmd.BindSet(2, environment);
@@ -472,16 +472,16 @@ void MeshPipeline::BindMeshScene(CommandList& cmd, BindingSetHandle globals,
   }
 }
 
-void MeshPipeline::BindMeshPrepass(CommandList& cmd, BindingSetHandle globals) {
+void MeshPipeline::BindMeshPrepass(gpu::CommandList& cmd, gpu::BindingSetHandle globals) {
   cmd.BindPipeline(ms_prepass_);
   cmd.BindSet(0, globals);
 }
 
-void MeshPipeline::BindMeshMaterial(CommandList& cmd, BindingSetHandle material) {
+void MeshPipeline::BindMeshMaterial(gpu::CommandList& cmd, gpu::BindingSetHandle material) {
   cmd.BindSet(1, material);
 }
 
-void MeshPipeline::DrawMeshlets(CommandList& cmd, const MeshShaderPush& push) {
+void MeshPipeline::DrawMeshlets(gpu::CommandList& cmd, const MeshShaderPush& push) {
   cmd.Push(push);
   // One task workgroup (32 threads) per 32 meshlets; the task stage culls and
   // compacts, then dispatches the surviving mesh workgroups.

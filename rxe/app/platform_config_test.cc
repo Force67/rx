@@ -116,7 +116,7 @@ void TestAndroidDetection() {
       {"PowerVR Rogue GE8320", "android_low"},
   };
   for (const Case& c : cases) {
-    rx::render::DeviceCaps caps{};
+    rx::gpu::DeviceCaps caps{};
     caps.ray_query = true;
     caps.adapter_name = c.adapter;
     Check(::strcmp(rx::render::PresetName(rx::render::DetectPreset(caps)), c.tier) == 0,

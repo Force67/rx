@@ -50,27 +50,27 @@ constexpr f32 kLavaColdDrag = 4.0f;     // extra drag scale as lava cools
 
 }  // namespace
 
-bool FluidSim::Initialize(Device& device) {
+bool FluidSim::Initialize(gpu::Device& device) {
   // Single compute pipeline; the phase (lava/water flux/integrate) is selected
   // by a push constant. Five storage images (bed, state in/out, active flux,
   // velocity) plus the bounded source buffer. State/velocity/bed are read as
   // storage loads here; the surface renderer samples them downstream.
   pipeline_ = device.CreateComputePipeline({
       .shader = RX_SHADER(k_fluid_sim_cs_hlsl),
-      .sets = {{.slots = {{0, BindingType::kStorageImage},
-                          {1, BindingType::kStorageImage},
-                          {2, BindingType::kStorageImage},
-                          {3, BindingType::kStorageImage},
-                          {4, BindingType::kStorageImage},
-                          {5, BindingType::kStorageBuffer}}}},
-      .push_constant_size = PushSize<FluidPush>(),
+      .sets = {{.slots = {{0, gpu::BindingType::kStorageImage},
+                          {1, gpu::BindingType::kStorageImage},
+                          {2, gpu::BindingType::kStorageImage},
+                          {3, gpu::BindingType::kStorageImage},
+                          {4, gpu::BindingType::kStorageImage},
+                          {5, gpu::BindingType::kStorageBuffer}}}},
+      .push_constant_size = gpu::PushSize<FluidPush>(),
       .debug_name = "fluid_sim",
   });
   if (!pipeline_) return false;
 
-  for (u32 f = 0; f < Device::kMaxFramesInFlight; ++f) {
-    params_[f] = device.CreateBuffer(sizeof(GpuParams), kBufferUsageUniform, true);
-    sources_[f] = device.CreateBuffer(kMaxSources * sizeof(GpuSource), kBufferUsageStorage, true);
+  for (u32 f = 0; f < gpu::Device::kMaxFramesInFlight; ++f) {
+    params_[f] = device.CreateBuffer(sizeof(GpuParams), gpu::kBufferUsageUniform, true);
+    sources_[f] = device.CreateBuffer(kMaxSources * sizeof(GpuSource), gpu::kBufferUsageStorage, true);
     if (!params_[f].mapped || !sources_[f].mapped) {
       RX_WARN("fluid sim buffer mapping failed; feature disabled");
       Destroy(device);
@@ -81,11 +81,11 @@ bool FluidSim::Initialize(Device& device) {
   return true;
 }
 
-void FluidSim::Destroy(Device& device) {
+void FluidSim::Destroy(gpu::Device& device) {
   if (pipeline_) device.DestroyPipeline(pipeline_);
   pipeline_ = {};
   DestroyImages(device);
-  for (u32 f = 0; f < Device::kMaxFramesInFlight; ++f) {
+  for (u32 f = 0; f < gpu::Device::kMaxFramesInFlight; ++f) {
     device.DestroyBuffer(params_[f]);
     device.DestroyBuffer(sources_[f]);
   }
@@ -97,13 +97,13 @@ void FluidSim::Destroy(Device& device) {
   device_ = nullptr;
 }
 
-void FluidSim::DestroyImages(Device& device) {
+void FluidSim::DestroyImages(gpu::Device& device) {
   // Deferred: a reconfigure of a live domain runs while the previous frame's
   // transparent pass may still sample these images; immediate destruction
   // would pull them out from under in-flight work.
   if (bed_) device.DestroyImageDeferred(bed_);
   bed_ = {};
-  for (GpuImage& s : state_) {
+  for (gpu::GpuImage& s : state_) {
     if (s) device.DestroyImageDeferred(s);
     s = {};
   }
@@ -115,23 +115,23 @@ void FluidSim::DestroyImages(Device& device) {
   velocity_ = {};
 }
 
-void FluidSim::Configure(Device& device, const FluidDomainDesc& desc) {
+void FluidSim::Configure(gpu::Device& device, const FluidDomainDesc& desc) {
   DestroyImages(device);
 
-  const Extent2D ext{desc.resolution, desc.resolution};
+  const gpu::Extent2D ext{desc.resolution, desc.resolution};
   // All fields live in GENERAL (storage read/write) and are sampled by the
   // surface renderer downstream. TransferDst: bed (CPU upload), state (initial
   // water), flux/velocity (cleared to zero). TransferSrc: state + velocity, so
   // the solver output is host-readable (offscreen test, GPU debugging).
-  const TextureUsageFlags kBase = kTextureUsageStorage | kTextureUsageSampled;
-  bed_ = device.CreateImage2D(Format::kR32Float, ext, kBase | kTextureUsageTransferDst);
-  for (GpuImage& s : state_)
-    s = device.CreateImage2D(Format::kRGBA32Float, ext,
-                             kBase | kTextureUsageTransferDst | kTextureUsageTransferSrc);
-  flux_water_ = device.CreateImage2D(Format::kRGBA32Float, ext, kBase | kTextureUsageTransferDst);
-  flux_lava_ = device.CreateImage2D(Format::kRGBA32Float, ext, kBase | kTextureUsageTransferDst);
-  velocity_ = device.CreateImage2D(Format::kRGBA16Float, ext,
-                                   kBase | kTextureUsageTransferDst | kTextureUsageTransferSrc);
+  const gpu::TextureUsageFlags kBase = gpu::kTextureUsageStorage | gpu::kTextureUsageSampled;
+  bed_ = device.CreateImage2D(gpu::Format::kR32Float, ext, kBase | gpu::kTextureUsageTransferDst);
+  for (gpu::GpuImage& s : state_)
+    s = device.CreateImage2D(gpu::Format::kRGBA32Float, ext,
+                             kBase | gpu::kTextureUsageTransferDst | gpu::kTextureUsageTransferSrc);
+  flux_water_ = device.CreateImage2D(gpu::Format::kRGBA32Float, ext, kBase | gpu::kTextureUsageTransferDst);
+  flux_lava_ = device.CreateImage2D(gpu::Format::kRGBA32Float, ext, kBase | gpu::kTextureUsageTransferDst);
+  velocity_ = device.CreateImage2D(gpu::Format::kRGBA16Float, ext,
+                                   kBase | gpu::kTextureUsageTransferDst | gpu::kTextureUsageTransferSrc);
   if (!bed_ || !state_[0] || !state_[1] || !flux_water_ || !flux_lava_ || !velocity_) {
     RX_WARN("fluid sim image allocation failed; feature disabled until Destroy");
     DestroyImages(device);
@@ -147,10 +147,10 @@ void FluidSim::Configure(Device& device, const FluidDomainDesc& desc) {
     init[i * 4 + 0] = desc.initial_water ? desc.initial_water[i] : 0.0f;
     init[i * 4 + 2] = desc.ambient_temperature;
   }
-  GpuBuffer bed_stage =
-      device.CreateBuffer(static_cast<u64>(cells) * sizeof(f32), kBufferUsageTransferSrc, true);
-  GpuBuffer state_stage =
-      device.CreateBuffer(init.size() * sizeof(f32), kBufferUsageTransferSrc, true);
+  gpu::GpuBuffer bed_stage =
+      device.CreateBuffer(static_cast<u64>(cells) * sizeof(f32), gpu::kBufferUsageTransferSrc, true);
+  gpu::GpuBuffer state_stage =
+      device.CreateBuffer(init.size() * sizeof(f32), gpu::kBufferUsageTransferSrc, true);
   if (!bed_stage.mapped || !state_stage.mapped) {
     // Recording a copy from an invalid/unmapped staging buffer is a backend
     // crash; treat it like the image-allocation failure above.
@@ -165,25 +165,25 @@ void FluidSim::Configure(Device& device, const FluidDomainDesc& desc) {
   base::MemCopy(bed_stage.mapped, desc.bed, static_cast<size_t>(cells) * sizeof(f32));
   base::MemCopy(state_stage.mapped, init.data(), init.size() * sizeof(f32));
 
-  device.ImmediateSubmit([&](CommandList& cmd) {
+  device.ImmediateSubmit([&](gpu::CommandList& cmd) {
     const f32 zero[4] = {0, 0, 0, 0};
-    BufferTextureCopy copy;
+    gpu::BufferTextureCopy copy;
 
-    cmd.Barrier(Transition(bed_, ResourceState::kUndefined, ResourceState::kCopyDst));
+    cmd.Barrier(gpu::Transition(bed_, gpu::ResourceState::kUndefined, gpu::ResourceState::kCopyDst));
     cmd.CopyBufferToTexture(bed_stage, bed_, base::Span(&copy, 1));
-    cmd.Barrier(Transition(bed_, ResourceState::kCopyDst, ResourceState::kGeneral));
+    cmd.Barrier(gpu::Transition(bed_, gpu::ResourceState::kCopyDst, gpu::ResourceState::kGeneral));
 
     // Seed both ping-pong slots (each substep writes B then A, but a clean
     // start keeps the very first sampled reads well defined).
-    for (GpuImage& s : state_) {
-      cmd.Barrier(Transition(s, ResourceState::kUndefined, ResourceState::kCopyDst));
+    for (gpu::GpuImage& s : state_) {
+      cmd.Barrier(gpu::Transition(s, gpu::ResourceState::kUndefined, gpu::ResourceState::kCopyDst));
       cmd.CopyBufferToTexture(state_stage, s, base::Span(&copy, 1));
-      cmd.Barrier(Transition(s, ResourceState::kCopyDst, ResourceState::kGeneral));
+      cmd.Barrier(gpu::Transition(s, gpu::ResourceState::kCopyDst, gpu::ResourceState::kGeneral));
     }
-    for (GpuImage* img : {&flux_water_, &flux_lava_, &velocity_}) {
-      cmd.Barrier(Transition(*img, ResourceState::kUndefined, ResourceState::kCopyDst));
+    for (gpu::GpuImage* img : {&flux_water_, &flux_lava_, &velocity_}) {
+      cmd.Barrier(gpu::Transition(*img, gpu::ResourceState::kUndefined, gpu::ResourceState::kCopyDst));
       cmd.ClearColor(*img, zero);
-      cmd.Barrier(Transition(*img, ResourceState::kCopyDst, ResourceState::kGeneral));
+      cmd.Barrier(gpu::Transition(*img, gpu::ResourceState::kCopyDst, gpu::ResourceState::kGeneral));
     }
   });
   device.DestroyBuffer(bed_stage);
@@ -198,10 +198,10 @@ void FluidSim::Configure(Device& device, const FluidDomainDesc& desc) {
   configured_ = true;
 }
 
-void FluidSim::UploadBed(Device& device, const FluidDomainDesc& desc) {
+void FluidSim::UploadBed(gpu::Device& device, const FluidDomainDesc& desc) {
   const u32 cells = desc.resolution * desc.resolution;
-  GpuBuffer stage =
-      device.CreateBuffer(static_cast<u64>(cells) * sizeof(f32), kBufferUsageTransferSrc, true);
+  gpu::GpuBuffer stage =
+      device.CreateBuffer(static_cast<u64>(cells) * sizeof(f32), gpu::kBufferUsageTransferSrc, true);
   if (!stage.mapped) {
     RX_WARN("fluid sim bed staging failed; keeping the previous bed");
     device.DestroyBuffer(stage);
@@ -209,16 +209,16 @@ void FluidSim::UploadBed(Device& device, const FluidDomainDesc& desc) {
     return;
   }
   base::MemCopy(stage.mapped, desc.bed, static_cast<size_t>(cells) * sizeof(f32));
-  device.ImmediateSubmit([&](CommandList& cmd) {
-    BufferTextureCopy copy;
+  device.ImmediateSubmit([&](gpu::CommandList& cmd) {
+    gpu::BufferTextureCopy copy;
     // kUndefined-as-source orders behind ALL prior work (the engine's
     // convention for full-image rewrites): the previous frame's vertex and
     // fragment stages sample bed_, and a kGeneral-source transition would only
     // wait on compute. Contents are discarded, but the copy rewrites the whole
     // image.
-    cmd.Barrier(Transition(bed_, ResourceState::kUndefined, ResourceState::kCopyDst));
+    cmd.Barrier(gpu::Transition(bed_, gpu::ResourceState::kUndefined, gpu::ResourceState::kCopyDst));
     cmd.CopyBufferToTexture(stage, bed_, base::Span(&copy, 1));
-    cmd.Barrier(Transition(bed_, ResourceState::kCopyDst, ResourceState::kGeneral));
+    cmd.Barrier(gpu::Transition(bed_, gpu::ResourceState::kCopyDst, gpu::ResourceState::kGeneral));
   });
   device.DestroyBuffer(stage);
   bed_version_ = desc.bed_version;
@@ -243,7 +243,7 @@ void FluidSim::AddToGraph(RenderGraph& graph, const UpdateParams& params) {
   }
   have_domain_ = true;
 
-  const u32 slot = params.frame_slot % Device::kMaxFramesInFlight;
+  const u32 slot = params.frame_slot % gpu::Device::kMaxFramesInFlight;
   const f32 l = desc.extent / static_cast<f32>(desc.resolution);
 
   // Params CB for the surface renderer.
@@ -318,7 +318,7 @@ void FluidSim::AddToGraph(RenderGraph& graph, const UpdateParams& params) {
         // vertex/fragment stages sampled state/bed/velocity (write-after-read).
         // The frame fence only covers frame N-2 and this pass declares no graph
         // resources, so without this barrier adjacent frames' GPU work overlaps.
-        ctx.cmd->MemoryBarrier(BarrierScope::kAllCommands, BarrierScope::kComputeReadWrite);
+        ctx.cmd->MemoryBarrier(gpu::BarrierScope::kAllCommands, gpu::BarrierScope::kComputeReadWrite);
         const u32 a = read;        // input / final output slot
         const u32 b = read ^ 1u;   // lava scratch slot
 
@@ -326,49 +326,49 @@ void FluidSim::AddToGraph(RenderGraph& graph, const UpdateParams& params) {
           // Phase 0: lava flux. Reads state[A], writes flux_lava in place.
           push.control[1] = kPhaseLavaFlux;
           ctx.cmd->BindTransient(
-              0, {InGeneral(Bind::Storage(0, state_[a])), InGeneral(Bind::Storage(1, state_[b])),
-                  InGeneral(Bind::Storage(2, bed_)), InGeneral(Bind::Storage(3, flux_lava_)),
-                  InGeneral(Bind::Storage(4, velocity_)), Bind::StorageBuffer(5, sources_[slot])});
+              0, {gpu::InGeneral(gpu::Bind::Storage(0, state_[a])), gpu::InGeneral(gpu::Bind::Storage(1, state_[b])),
+                  gpu::InGeneral(gpu::Bind::Storage(2, bed_)), gpu::InGeneral(gpu::Bind::Storage(3, flux_lava_)),
+                  gpu::InGeneral(gpu::Bind::Storage(4, velocity_)), gpu::Bind::StorageBuffer(5, sources_[slot])});
           ctx.cmd->Push(push);
           ctx.cmd->Dispatch(groups, groups, 1);
-          ctx.cmd->MemoryBarrier(BarrierScope::kComputeWrite, BarrierScope::kComputeRead);
+          ctx.cmd->MemoryBarrier(gpu::BarrierScope::kComputeWrite, gpu::BarrierScope::kComputeRead);
 
           // Phase 1: lava integrate (+thermal +solidify). state[A] -> state[B].
           push.control[1] = kPhaseLavaIntegrate;
           ctx.cmd->BindTransient(
-              0, {InGeneral(Bind::Storage(0, state_[a])), InGeneral(Bind::Storage(1, state_[b])),
-                  InGeneral(Bind::Storage(2, bed_)), InGeneral(Bind::Storage(3, flux_lava_)),
-                  InGeneral(Bind::Storage(4, velocity_)), Bind::StorageBuffer(5, sources_[slot])});
+              0, {gpu::InGeneral(gpu::Bind::Storage(0, state_[a])), gpu::InGeneral(gpu::Bind::Storage(1, state_[b])),
+                  gpu::InGeneral(gpu::Bind::Storage(2, bed_)), gpu::InGeneral(gpu::Bind::Storage(3, flux_lava_)),
+                  gpu::InGeneral(gpu::Bind::Storage(4, velocity_)), gpu::Bind::StorageBuffer(5, sources_[slot])});
           ctx.cmd->Push(push);
           ctx.cmd->Dispatch(groups, groups, 1);
-          ctx.cmd->MemoryBarrier(BarrierScope::kComputeWrite, BarrierScope::kComputeRead);
+          ctx.cmd->MemoryBarrier(gpu::BarrierScope::kComputeWrite, gpu::BarrierScope::kComputeRead);
 
           // Phase 2: water flux. Reads state[B] (sees lava as bed), writes
           // flux_water in place.
           push.control[1] = kPhaseWaterFlux;
           ctx.cmd->BindTransient(
-              0, {InGeneral(Bind::Storage(0, state_[b])), InGeneral(Bind::Storage(1, state_[a])),
-                  InGeneral(Bind::Storage(2, bed_)), InGeneral(Bind::Storage(3, flux_water_)),
-                  InGeneral(Bind::Storage(4, velocity_)), Bind::StorageBuffer(5, sources_[slot])});
+              0, {gpu::InGeneral(gpu::Bind::Storage(0, state_[b])), gpu::InGeneral(gpu::Bind::Storage(1, state_[a])),
+                  gpu::InGeneral(gpu::Bind::Storage(2, bed_)), gpu::InGeneral(gpu::Bind::Storage(3, flux_water_)),
+                  gpu::InGeneral(gpu::Bind::Storage(4, velocity_)), gpu::Bind::StorageBuffer(5, sources_[slot])});
           ctx.cmd->Push(push);
           ctx.cmd->Dispatch(groups, groups, 1);
-          ctx.cmd->MemoryBarrier(BarrierScope::kComputeWrite, BarrierScope::kComputeRead);
+          ctx.cmd->MemoryBarrier(gpu::BarrierScope::kComputeWrite, gpu::BarrierScope::kComputeRead);
 
           // Phase 3: water integrate (+quench). state[B] -> state[A]; owns the
           // full RGBA write, so quench editing g/a is race-free.
           push.control[1] = kPhaseWaterIntegrate;
           ctx.cmd->BindTransient(
-              0, {InGeneral(Bind::Storage(0, state_[b])), InGeneral(Bind::Storage(1, state_[a])),
-                  InGeneral(Bind::Storage(2, bed_)), InGeneral(Bind::Storage(3, flux_water_)),
-                  InGeneral(Bind::Storage(4, velocity_)), Bind::StorageBuffer(5, sources_[slot])});
+              0, {gpu::InGeneral(gpu::Bind::Storage(0, state_[b])), gpu::InGeneral(gpu::Bind::Storage(1, state_[a])),
+                  gpu::InGeneral(gpu::Bind::Storage(2, bed_)), gpu::InGeneral(gpu::Bind::Storage(3, flux_water_)),
+                  gpu::InGeneral(gpu::Bind::Storage(4, velocity_)), gpu::Bind::StorageBuffer(5, sources_[slot])});
           ctx.cmd->Push(push);
           ctx.cmd->Dispatch(groups, groups, 1);
           // Between substeps another compute read follows; after the last the
           // surface renderer samples state/velocity in the graphics stages.
           if (step + 1 < substeps)
-            ctx.cmd->MemoryBarrier(BarrierScope::kComputeWrite, BarrierScope::kComputeRead);
+            ctx.cmd->MemoryBarrier(gpu::BarrierScope::kComputeWrite, gpu::BarrierScope::kComputeRead);
           else
-            ctx.cmd->MemoryBarrier(BarrierScope::kComputeWrite, BarrierScope::kGraphicsRead);
+            ctx.cmd->MemoryBarrier(gpu::BarrierScope::kComputeWrite, gpu::BarrierScope::kGraphicsRead);
         }
       });
   // Each substep returns the authoritative state to slot A, so the read side is
@@ -376,7 +376,7 @@ void FluidSim::AddToGraph(RenderGraph& graph, const UpdateParams& params) {
 }
 
 // test seam (readback of the solver output)
-const GpuImage& FluidSimProbe::state(const FluidSim& sim) { return sim.state_[sim.read_]; }
-const GpuImage& FluidSimProbe::velocity(const FluidSim& sim) { return sim.velocity_; }
+const gpu::GpuImage& FluidSimProbe::state(const FluidSim& sim) { return sim.state_[sim.read_]; }
+const gpu::GpuImage& FluidSimProbe::velocity(const FluidSim& sim) { return sim.velocity_; }
 
 }  // namespace rx::render

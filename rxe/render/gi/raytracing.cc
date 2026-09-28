@@ -30,17 +30,17 @@ void ToInstanceTransform(const Mat4& m, f32 out[3][4]) {
 // written in the same order. Blend submeshes stay out entirely. Alpha-masked
 // (cutout) submeshes go in non-opaque so a ray query can alpha-test them; the
 // realtime paths trace RAY_FLAG_FORCE_OPAQUE which overrides that to opaque.
-base::Vector<AccelTriangles> BlasGeometries(const GpuMesh& mesh) {
-  base::Vector<AccelTriangles> geometries;
-  for (const GpuSubmesh& submesh : mesh.submeshes) {
+base::Vector<gpu::AccelTriangles> BlasGeometries(const gpu::GpuMesh& mesh) {
+  base::Vector<gpu::AccelTriangles> geometries;
+  for (const gpu::GpuSubmesh& submesh : mesh.submeshes) {
     if (submesh.blend || submesh.index_count == 0) continue;
     geometries.push_back({.vertex_address = mesh.vertices.address,
                           .vertex_stride = sizeof(asset::Vertex),
                           .vertex_count = mesh.vertex_count,
-                          .vertex_format = Format::kRGB32Float,
+                          .vertex_format = gpu::Format::kRGB32Float,
                           .index_address = mesh.indices.address + submesh.index_offset * sizeof(u32),
                           .index_count = submesh.index_count,
-                          .index_type = IndexType::kUint32,
+                          .index_type = gpu::IndexType::kUint32,
                           .opaque = !submesh.alpha_mask});
   }
   return geometries;
@@ -48,17 +48,17 @@ base::Vector<AccelTriangles> BlasGeometries(const GpuMesh& mesh) {
 
 }  // namespace
 
-base::UniquePointer<RayTracingContext> RayTracingContext::Create(Device& device) {
+base::UniquePointer<RayTracingContext> RayTracingContext::Create(gpu::Device& device) {
   if (!device.caps().raytracing) return nullptr;
   auto context = base::UniquePointer<RayTracingContext>(new RayTracingContext(device));
   if (!context->EnsureTlasCapacity(context->fallback_tlas_, 1)) {
     RX_ERROR("fallback tlas allocation failed");
     return nullptr;
   }
-  device.ImmediateSubmit([&](CommandList& cmd) {
+  device.ImmediateSubmit([&](gpu::CommandList& cmd) {
     cmd.BuildTlas(context->fallback_tlas_.handle, context->fallback_tlas_.instances, 0,
                   context->fallback_tlas_.scratch);
-    cmd.MemoryBarrier(BarrierScope::kAccelBuildWrite, BarrierScope::kAccelRead);
+    cmd.MemoryBarrier(gpu::BarrierScope::kAccelBuildWrite, gpu::BarrierScope::kAccelRead);
   });
   return context;
 }
@@ -82,7 +82,7 @@ bool RayTracingContext::EnsureBlasScratch(u64 size) {
   if (blas_scratch_ && blas_scratch_.size >= size) return true;
   device_.WaitIdle();
   device_.DestroyBuffer(blas_scratch_);
-  blas_scratch_ = device_.CreateBuffer(size, kBufferUsageAccelScratch);
+  blas_scratch_ = device_.CreateBuffer(size, gpu::kBufferUsageAccelScratch);
   return static_cast<bool>(blas_scratch_);
 }
 
@@ -95,23 +95,23 @@ void RayTracingContext::DestroyTlas(Tlas& tlas) {
 }
 
 bool RayTracingContext::BuildBlasFromGeometries(
-    const base::Vector<AccelTriangles>& geometries, Blas& out, bool skip_compaction) {
+    const base::Vector<gpu::AccelTriangles>& geometries, Blas& out, bool skip_compaction) {
   if (geometries.empty()) return false;
 
   // Static meshes compact once after upload. Dynamic terrain is rebuilt at
   // stroke boundaries, so avoid a second blocking submit for compaction there.
-  AccelCompactionQueryHandle query =
-      skip_compaction ? AccelCompactionQueryHandle{} : device_.CreateCompactionQuery(1);
-  BlasBuildDesc desc{.geometries = base::Span(geometries.data(), geometries.size()),
+  gpu::AccelCompactionQueryHandle query =
+      skip_compaction ? gpu::AccelCompactionQueryHandle{} : device_.CreateCompactionQuery(1);
+  gpu::BlasBuildDesc desc{.geometries = base::Span(geometries.data(), geometries.size()),
                      .allow_compaction = static_cast<bool>(query)};
-  AccelSizes sizes = device_.GetBlasSizes(desc);
+  gpu::AccelSizes sizes = device_.GetBlasSizes(desc);
   if (sizes.accel_bytes == 0) {
     if (query) device_.DestroyCompactionQuery(query);
     return false;
   }
 
   Blas blas;
-  blas.handle = device_.CreateAccelStruct(AccelStructType::kBlas, sizes.accel_bytes);
+  blas.handle = device_.CreateAccelStruct(gpu::AccelStructType::kBlas, sizes.accel_bytes);
   if (!blas.handle) {
     if (query) device_.DestroyCompactionQuery(query);
     return false;
@@ -125,7 +125,7 @@ bool RayTracingContext::BuildBlasFromGeometries(
   }
   u64 scratch_offset = AlignUp(blas_scratch_.address, alignment) - blas_scratch_.address;
 
-  device_.ImmediateSubmit([&](CommandList& cmd) {
+  device_.ImmediateSubmit([&](gpu::CommandList& cmd) {
     cmd.BuildBlas(blas.handle, desc, blas_scratch_, scratch_offset);
     if (query) cmd.QueryCompactedSizes(query, &blas.handle, 1);
   });
@@ -134,10 +134,10 @@ bool RayTracingContext::BuildBlasFromGeometries(
     u64 compacted = 0;
     if (device_.GetCompactedSizes(query, &compacted, 1) && compacted > 0 &&
         compacted < sizes.accel_bytes) {
-      if (AccelStructHandle lean =
-              device_.CreateAccelStruct(AccelStructType::kBlas, compacted)) {
+      if (gpu::AccelStructHandle lean =
+              device_.CreateAccelStruct(gpu::AccelStructType::kBlas, compacted)) {
         device_.ImmediateSubmit(
-            [&](CommandList& cmd) { cmd.CopyAccelStruct(lean, blas.handle, /*compact=*/true); });
+            [&](gpu::CommandList& cmd) { cmd.CopyAccelStruct(lean, blas.handle, /*compact=*/true); });
         device_.DestroyAccelStruct(blas.handle);
         blas.handle = lean;
         compacted_saved_bytes_ += sizes.accel_bytes - compacted;
@@ -150,12 +150,12 @@ bool RayTracingContext::BuildBlasFromGeometries(
   return true;
 }
 
-bool RayTracingContext::BuildBlas(u64 mesh_key, const GpuMesh& mesh) {
+bool RayTracingContext::BuildBlas(u64 mesh_key, const gpu::GpuMesh& mesh) {
   if (blas_.contains(mesh_key)) return true;
   if (mesh.vertex_count == 0 || mesh.index_count == 0) return false;
   if (mesh.vertices.address == 0 || mesh.indices.address == 0) return false;
 
-  base::Vector<AccelTriangles> geometries = BlasGeometries(mesh);
+  base::Vector<gpu::AccelTriangles> geometries = BlasGeometries(mesh);
   Blas blas;
   if (!BuildBlasFromGeometries(geometries, blas, mesh.dynamic_vertices)) return false;
   blas_.emplace(mesh_key, blas);
@@ -163,7 +163,7 @@ bool RayTracingContext::BuildBlas(u64 mesh_key, const GpuMesh& mesh) {
 }
 
 bool RayTracingContext::BuildApproxBlas(u64 mesh_key,
-                                        const base::Vector<AccelTriangles>& geometries) {
+                                        const base::Vector<gpu::AccelTriangles>& geometries) {
   if (approx_blas_.contains(mesh_key)) return true;
   Blas blas;
   if (!BuildBlasFromGeometries(geometries, blas)) return false;
@@ -188,7 +188,7 @@ void RayTracingContext::RemoveApproxBlas(u64 mesh_key) {
 }
 
 bool RayTracingContext::BuildLodBlas(u64 mesh_key, u32 lod,
-                                     const base::Vector<AccelTriangles>& geometries) {
+                                     const base::Vector<gpu::AccelTriangles>& geometries) {
   if (lod == 0) return false;
   base::Vector<Blas>* lods = lod_blas_.find(mesh_key);
   if (!lods) {
@@ -247,26 +247,26 @@ void RayTracingContext::RemoveLodBlasDeferred(u64 mesh_key) {
 }
 
 bool RayTracingContext::ReserveSkinnedBlas(u64 key,
-                                           const base::Vector<AccelTriangles>& geometries) {
+                                           const base::Vector<gpu::AccelTriangles>& geometries) {
   if (skinned_blas_.contains(key)) return true;
   if (geometries.empty()) return false;
 
   // No compaction: a compacted structure cannot be refit, which is the whole
   // point of this path.
-  BlasBuildDesc desc{.geometries = base::Span(geometries.data(), geometries.size()),
+  gpu::BlasBuildDesc desc{.geometries = base::Span(geometries.data(), geometries.size()),
                      .allow_update = true};
-  AccelSizes sizes = device_.GetBlasSizes(desc);
+  gpu::AccelSizes sizes = device_.GetBlasSizes(desc);
   if (sizes.accel_bytes == 0) return false;
 
   SkinnedBlas entry;
-  entry.blas.handle = device_.CreateAccelStruct(AccelStructType::kBlas, sizes.accel_bytes);
+  entry.blas.handle = device_.CreateAccelStruct(gpu::AccelStructType::kBlas, sizes.accel_bytes);
   if (!entry.blas.handle) return false;
 
   // One arena covering both the initial full build and every later refit; the
   // refit is the smaller of the two, so this is dominated by the one-off build.
   const u32 alignment = device_.caps().accel_scratch_alignment;
   const u64 scratch_bytes = rx::Max(sizes.scratch_bytes, sizes.update_scratch_bytes);
-  entry.scratch = device_.CreateBuffer(scratch_bytes + alignment, kBufferUsageAccelScratch);
+  entry.scratch = device_.CreateBuffer(scratch_bytes + alignment, gpu::kBufferUsageAccelScratch);
   if (!entry.scratch) {
     device_.DestroyAccelStruct(entry.blas.handle);
     return false;
@@ -278,10 +278,10 @@ bool RayTracingContext::ReserveSkinnedBlas(u64 key,
   return true;
 }
 
-void RayTracingContext::RecordSkinnedBlas(CommandList& cmd, u64 key, u64 src_key) {
+void RayTracingContext::RecordSkinnedBlas(gpu::CommandList& cmd, u64 key, u64 src_key) {
   SkinnedBlas* entry = skinned_blas_.find(key);
   if (!entry) return;
-  BlasBuildDesc desc{.geometries = base::Span(entry->geometries.data(), entry->geometries.size()),
+  gpu::BlasBuildDesc desc{.geometries = base::Span(entry->geometries.data(), entry->geometries.size()),
                      .allow_update = true};
   // Refit from the partner slot when it holds a completed build; a full build
   // otherwise, which is the case for an actor's first two frames (neither slot
@@ -289,8 +289,8 @@ void RayTracingContext::RecordSkinnedBlas(CommandList& cmd, u64 key, u64 src_key
   // against either structure stay valid. The two structures are separate
   // allocations, which is what makes updating across them legal.
   const SkinnedBlas* src = skinned_blas_.find(src_key);
-  const AccelStructHandle from =
-      (src && src->built) ? src->blas.handle : AccelStructHandle{};
+  const gpu::AccelStructHandle from =
+      (src && src->built) ? src->blas.handle : gpu::AccelStructHandle{};
   cmd.BuildBlas(entry->blas.handle, desc, entry->scratch, entry->scratch_offset, from);
   entry->built = true;
 }
@@ -316,23 +316,23 @@ bool RayTracingContext::EnsureTlasCapacity(Tlas& tlas, u32 instance_count) {
   // Build the replacement transactionally. Allocation failure preserves the
   // old resources; the slot tracker decides whether they are safe to read.
   Tlas replacement;
-  replacement.instances = device_.CreateBuffer(capacity * sizeof(TlasInstance),
-                                                kBufferUsageAccelBuildInput, true);
-  replacement.motion = device_.CreateBuffer(capacity * sizeof(MotionRecord), kBufferUsageStorage, true);
+  replacement.instances = device_.CreateBuffer(capacity * sizeof(gpu::TlasInstance),
+                                                gpu::kBufferUsageAccelBuildInput, true);
+  replacement.motion = device_.CreateBuffer(capacity * sizeof(MotionRecord), gpu::kBufferUsageStorage, true);
   if (!replacement.instances.mapped || !replacement.motion.mapped) {
     DestroyTlas(replacement);
     return false;
   }
 
-  AccelSizes sizes = device_.GetTlasSizes(capacity);
+  gpu::AccelSizes sizes = device_.GetTlasSizes(capacity);
   if (sizes.accel_bytes == 0) {
     DestroyTlas(replacement);
     return false;
   }
-  replacement.handle = device_.CreateAccelStruct(AccelStructType::kTlas, sizes.accel_bytes);
+  replacement.handle = device_.CreateAccelStruct(gpu::AccelStructType::kTlas, sizes.accel_bytes);
   u32 alignment = device_.caps().accel_scratch_alignment;
   replacement.scratch =
-      device_.CreateBuffer(sizes.scratch_bytes + alignment, kBufferUsageAccelScratch);
+      device_.CreateBuffer(sizes.scratch_bytes + alignment, gpu::kBufferUsageAccelScratch);
   if (!replacement.handle || !replacement.scratch) {
     DestroyTlas(replacement);
     return false;
@@ -349,7 +349,7 @@ bool RayTracingContext::ReserveTlas(u32 slot, u32 instance_count) {
   if (slot >= kSlots) return false;
   // Reserve for the upper bound (some instances may lack a BLAS and drop out in
   // BuildTlas, but never more than this); a stall/realloc here is safe.
-  const AccelStructHandle previous = tlas_[slot].handle;
+  const gpu::AccelStructHandle previous = tlas_[slot].handle;
   if (EnsureTlasCapacity(tlas_[slot], rx::Max(instance_count, 1u))) {
     if (tlas_[slot].handle != previous) slot_tracker_.Invalidate(slot);
     return true;
@@ -359,12 +359,12 @@ bool RayTracingContext::ReserveTlas(u32 slot, u32 instance_count) {
   return false;
 }
 
-void RayTracingContext::BuildTlas(CommandList& cmd, u32 slot, u32 frame_index,
+void RayTracingContext::BuildTlas(gpu::CommandList& cmd, u32 slot, u32 frame_index,
                                   const base::Vector<Instance>& instances) {
   if (slot >= kSlots) return;
   Tlas& tlas = tlas_[slot];
 
-  base::Vector<TlasInstance> gpu_instances;
+  base::Vector<gpu::TlasInstance> gpu_instances;
   gpu_instances.reserve(instances.size());
   base::Vector<MotionRecord> motion;
   motion.reserve(instances.size());
@@ -383,11 +383,11 @@ void RayTracingContext::BuildTlas(CommandList& cmd, u32 slot, u32 frame_index,
       blas = blas_.find(instance.mesh_key);
     }
     if (!blas || !blas->handle) continue;
-    TlasInstance gpu{};
+    gpu::TlasInstance gpu{};
     ToInstanceTransform(instance.transform, gpu.transform);
     gpu.custom_index = instance.custom_index & 0xffffffu;
     gpu.mask = instance.mask;
-    gpu.flags = kTlasInstanceTriangleCullDisable;
+    gpu.flags = gpu::kTlasInstanceTriangleCullDisable;
     gpu.blas_address = blas->address;
     gpu_instances.push_back(gpu);
     motion.push_back({instance.previous_transform, instance.previous_mesh, instance.history_id});
@@ -401,14 +401,14 @@ void RayTracingContext::BuildTlas(CommandList& cmd, u32 slot, u32 frame_index,
     return;
   }
   if (count > 0) {
-    base::MemCopy(tlas.instances.mapped, gpu_instances.data(), count * sizeof(TlasInstance));
+    base::MemCopy(tlas.instances.mapped, gpu_instances.data(), count * sizeof(gpu::TlasInstance));
     base::MemCopy(tlas.motion.mapped, motion.data(), count * sizeof(MotionRecord));
-    device_.FlushBuffer(tlas.instances, 0, count * sizeof(TlasInstance));
+    device_.FlushBuffer(tlas.instances, 0, count * sizeof(gpu::TlasInstance));
     device_.FlushBuffer(tlas.motion, 0, count * sizeof(MotionRecord));
   }
 
   cmd.BuildTlas(tlas.handle, tlas.instances, count, tlas.scratch);
-  cmd.MemoryBarrier(BarrierScope::kAccelBuildWrite, BarrierScope::kAccelRead);
+  cmd.MemoryBarrier(gpu::BarrierScope::kAccelBuildWrite, gpu::BarrierScope::kAccelRead);
   // The slot now holds a valid build against the current BLAS set; consumers may
   // read it next frame (async) or this frame (sync). Marked after the successful
   // record so the allocation-failure early-out above leaves the slot invalid.

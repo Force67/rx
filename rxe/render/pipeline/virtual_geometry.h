@@ -62,11 +62,11 @@ class VirtualGeometryPass {
  public:
   static constexpr u32 kMaxInstances = 256;
 
-  bool Initialize(Device& device, Format color_format, Format depth_format);
-  void Destroy(Device& device);
+  bool Initialize(gpu::Device& device, gpu::Format color_format, gpu::Format depth_format);
+  void Destroy(gpu::Device& device);
 
   // Builds the full cluster DAG from the mesh's lod 0 and uploads it.
-  void Upload(Device& device, const asset::Mesh& mesh);
+  void Upload(gpu::Device& device, const asset::Mesh& mesh);
   // World transforms drawn next frame; empty keeps a single identity instance.
   // Mirrored (negative determinant) transforms are dropped with a warning: the
   // cluster rasterizers cull by winding and cannot flip it per instance.
@@ -75,7 +75,7 @@ class VirtualGeometryPass {
   // (uv = world.xz * world_to_uv + 0.5): rgba_mips is a full RGBA8 mip chain,
   // size x size at mip 0, levels concatenated. The pass owns the upload.
   // Textures the debug=0 mode; heightmap-style content needs no vertex uvs.
-  void SetAlbedo(Device& device, ByteSpan rgba_mips, u32 size, f32 world_to_uv);
+  void SetAlbedo(gpu::Device& device, ByteSpan rgba_mips, u32 size, f32 world_to_uv);
 
   bool active() const { return meshlet_count_ > 0; }
   bool gpu_driven() const { return gpu_driven_; }
@@ -109,7 +109,7 @@ class VirtualGeometryPass {
     u32 debug = 0;  // resolve tint: 0 shaded, 1 cluster, 2 lod, 3 sw/hw
     u32 slot = 0;
   };
-  void AddToGraph(Device& device, RenderGraph& graph, const Frame& frame);
+  void AddToGraph(gpu::Device& device, RenderGraph& graph, const Frame& frame);
 
  private:
   static constexpr u32 kFramesInFlight = 2;
@@ -118,51 +118,51 @@ class VirtualGeometryPass {
   static constexpr u32 kCounterSlots = 8;
 
   void AddLegacyPass(RenderGraph& graph, const Frame& frame);
-  void EnsureTargets(Device& device, u32 width, u32 height);
+  void EnsureTargets(gpu::Device& device, u32 width, u32 height);
 
   bool available_ = false;   // mesh shaders present
   bool gpu_driven_ = false;  // + 64-bit buffer atomics
-  PipelineHandle legacy_pipeline_;
-  PipelineHandle cull_pipeline_;
-  PipelineHandle args_pipeline_;
-  PipelineHandle clear_pipeline_;
-  PipelineHandle sw_pipeline_;
-  PipelineHandle hzb_pipeline_;
-  PipelineHandle vis_pipeline_;
-  PipelineHandle resolve_pipeline_;
+  gpu::PipelineHandle legacy_pipeline_;
+  gpu::PipelineHandle cull_pipeline_;
+  gpu::PipelineHandle args_pipeline_;
+  gpu::PipelineHandle clear_pipeline_;
+  gpu::PipelineHandle sw_pipeline_;
+  gpu::PipelineHandle hzb_pipeline_;
+  gpu::PipelineHandle vis_pipeline_;
+  gpu::PipelineHandle resolve_pipeline_;
 
   // DAG (rebuilt per Upload)
-  GpuBuffer meshlets_;
-  GpuBuffer meshlet_vertices_;
-  GpuBuffer meshlet_triangles_;
-  GpuBuffer vertices_;
+  gpu::GpuBuffer meshlets_;
+  gpu::GpuBuffer meshlet_vertices_;
+  gpu::GpuBuffer meshlet_triangles_;
+  gpu::GpuBuffer vertices_;
   u32 meshlet_count_ = 0;
   u32 lod_count_ = 0;
 
   // Frame plumbing
-  GpuBuffer params_[kFramesInFlight];     // host-visible, mirrors VgeoParams
-  GpuBuffer instances_[kFramesInFlight];  // host-visible instance transforms
-  GpuBuffer visible_;
-  GpuBuffer sw_list_;
-  GpuBuffer hw_list_;
-  GpuBuffer occluded_;
-  GpuBuffer counters_;
-  GpuBuffer args_;
-  GpuBuffer readback_[kFramesInFlight];
-  GpuBuffer legacy_counters_[kFramesInFlight];
-  GpuBuffer legacy_camera_[kFramesInFlight];  // view_proj, too big for the push block
-  GpuBuffer visbuffer_;
-  GpuImage dummy_hiz_;
-  GpuImage albedo_;
-  SamplerHandle albedo_sampler_;
+  gpu::GpuBuffer params_[kFramesInFlight];     // host-visible, mirrors VgeoParams
+  gpu::GpuBuffer instances_[kFramesInFlight];  // host-visible instance transforms
+  gpu::GpuBuffer visible_;
+  gpu::GpuBuffer sw_list_;
+  gpu::GpuBuffer hw_list_;
+  gpu::GpuBuffer occluded_;
+  gpu::GpuBuffer counters_;
+  gpu::GpuBuffer args_;
+  gpu::GpuBuffer readback_[kFramesInFlight];
+  gpu::GpuBuffer legacy_counters_[kFramesInFlight];
+  gpu::GpuBuffer legacy_camera_[kFramesInFlight];  // view_proj, too big for the push block
+  gpu::GpuBuffer visbuffer_;
+  gpu::GpuImage dummy_hiz_;
+  gpu::GpuImage albedo_;
+  gpu::SamplerHandle albedo_sampler_;
   f32 world_to_uv_ = 0;
   // Own hi-z ping-pong: the map built this frame (scene depth + visibility
   // buffer, rebuilt again after the post raster so it is complete) is next
   // frame's main-pass occlusion source. Self-contained: no dependency on when
   // the renderer snapshots depth, and it always includes our own geometry.
-  GpuImage hiz_img_[kFramesInFlight];
-  ResourceState hiz_state_[kFramesInFlight] = {ResourceState::kUndefined,
-                                               ResourceState::kUndefined};
+  gpu::GpuImage hiz_img_[kFramesInFlight];
+  gpu::ResourceState hiz_state_[kFramesInFlight] = {gpu::ResourceState::kUndefined,
+                                               gpu::ResourceState::kUndefined};
   u32 hiz_dims_[kFramesInFlight][2] = {{0, 0}, {0, 0}};
   u32 vis_width_ = 0;
   u32 vis_height_ = 0;

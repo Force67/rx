@@ -202,7 +202,7 @@ MeshletGeometry BuildMeshletGeometry(const asset::Vertex* vertices, u32 vertex_c
   return BuildImpl(vertices, vertex_count, indices, index_count, cone_split);
 }
 
-bool MeshletPass::Initialize(Device& device, Format color_format, Format depth_format) {
+bool MeshletPass::Initialize(gpu::Device& device, gpu::Format color_format, gpu::Format depth_format) {
   available_ = device.caps().mesh_shaders;
   if (!available_) return true;  // no mesh-shader support: pass stays inert, demo skips it
 
@@ -212,18 +212,18 @@ bool MeshletPass::Initialize(Device& device, Format color_format, Format depth_f
       // The pass has no model transform at all: uploaded positions are world
       // space and the mesh shader only applies view_proj, so no caller can hand
       // it a mirror and reverse the winding this cull assumes.
-      .raster = {.cull = CullMode::kBack},
-      .depth = {.test = true, .write = true, .compare = CompareOp::kGreaterEqual,  // reversed z
+      .raster = {.cull = gpu::CullMode::kBack},
+      .depth = {.test = true, .write = true, .compare = gpu::CompareOp::kGreaterEqual,  // reversed z
                 .format = depth_format},
       .color_formats = {color_format},
-      .sets = {{.slots = {{0, BindingType::kStorageBuffer},
-                          {1, BindingType::kStorageBuffer},
-                          {2, BindingType::kStorageBuffer},
-                          {3, BindingType::kStorageBuffer},
-                          {4, BindingType::kStorageBuffer},
-                          {5, BindingType::kUniformBuffer}},  // MeshletCamera
-                .stages = kShaderStageMesh}},
-      .push_constant_size = PushSize<MeshletPush>(),
+      .sets = {{.slots = {{0, gpu::BindingType::kStorageBuffer},
+                          {1, gpu::BindingType::kStorageBuffer},
+                          {2, gpu::BindingType::kStorageBuffer},
+                          {3, gpu::BindingType::kStorageBuffer},
+                          {4, gpu::BindingType::kStorageBuffer},
+                          {5, gpu::BindingType::kUniformBuffer}},  // MeshletCamera
+                .stages = gpu::kShaderStageMesh}},
+      .push_constant_size = gpu::PushSize<MeshletPush>(),
       .debug_name = "meshlet",
   });
   if (!pipeline_) {
@@ -236,16 +236,16 @@ bool MeshletPass::Initialize(Device& device, Format color_format, Format depth_f
   }
 
   for (u32 i = 0; i < kFramesInFlight; ++i) {
-    counters_[i] = device.CreateBuffer(16, kBufferUsageStorage, true);
+    counters_[i] = device.CreateBuffer(16, gpu::kBufferUsageStorage, true);
     // One per in-flight frame: the pass rewrites it while the previous frame
     // may still be reading its own copy.
-    camera_[i] = device.CreateBuffer(sizeof(MeshletCamera), kBufferUsageUniform, true);
+    camera_[i] = device.CreateBuffer(sizeof(MeshletCamera), gpu::kBufferUsageUniform, true);
     if (!camera_[i].mapped) return false;
   }
   return true;
 }
 
-void MeshletPass::Upload(Device& device, const asset::Mesh& mesh) {
+void MeshletPass::Upload(gpu::Device& device, const asset::Mesh& mesh) {
   if (!available_ || mesh.lods.empty()) return;
   device.DestroyBuffer(meshlets_);
   device.DestroyBuffer(meshlet_vertices_);
@@ -268,7 +268,7 @@ void MeshletPass::Upload(Device& device, const asset::Mesh& mesh) {
                      v.normal[2]});
   }
 
-  const BufferUsageFlags storage = kBufferUsageStorage;
+  const gpu::BufferUsageFlags storage = gpu::kBufferUsageStorage;
   meshlets_ = device.CreateBufferWithData(
       Span(built.meshlets.data(), built.meshlets.size() * sizeof(Meshlet)), storage);
   meshlet_vertices_ = device.CreateBufferWithData(
@@ -301,8 +301,8 @@ void MeshletPass::AddToGraph(RenderGraph& graph, ResourceHandle color, ResourceH
   push.camera[0] = camera.x;
   push.camera[1] = camera.y;
   push.camera[2] = camera.z;
-  GpuBuffer counter = counters_[slot];
-  GpuBuffer cam_buffer = camera_[slot];
+  gpu::GpuBuffer counter = counters_[slot];
+  gpu::GpuBuffer cam_buffer = camera_[slot];
 
   graph.AddPass(
       "meshlet",
@@ -311,25 +311,25 @@ void MeshletPass::AddToGraph(RenderGraph& graph, ResourceHandle color, ResourceH
         builder.Write(depth, ResourceUsage::kDepthAttachment);
       },
       [this, color, depth, push, counter, cam_buffer](PassContext& ctx) {
-        const GpuImage& target = ctx.graph->image(color);
-        ColorAttachment color_att{.view = target.view, .load = LoadOp::kLoad};
-        DepthAttachment depth_att{.view = ctx.graph->image(depth).view, .load = LoadOp::kLoad};
+        const gpu::GpuImage& target = ctx.graph->image(color);
+        gpu::ColorAttachment color_att{.view = target.view, .load = gpu::LoadOp::kLoad};
+        gpu::DepthAttachment depth_att{.view = ctx.graph->image(depth).view, .load = gpu::LoadOp::kLoad};
         ctx.cmd->BeginRendering(
             {.extent = target.extent, .colors = base::Span(&color_att, 1), .depth = &depth_att});
         ctx.cmd->BindPipeline(pipeline_);
-        ctx.cmd->BindTransient(0, {Bind::StorageBuffer(0, meshlets_),
-                                   Bind::StorageBuffer(1, meshlet_vertices_),
-                                   Bind::StorageBuffer(2, meshlet_triangles_),
-                                   Bind::StorageBuffer(3, vertices_),
-                                   Bind::StorageBuffer(4, counter),
-                                   Bind::Uniform(5, cam_buffer, 0, sizeof(MeshletCamera))});
+        ctx.cmd->BindTransient(0, {gpu::Bind::StorageBuffer(0, meshlets_),
+                                   gpu::Bind::StorageBuffer(1, meshlet_vertices_),
+                                   gpu::Bind::StorageBuffer(2, meshlet_triangles_),
+                                   gpu::Bind::StorageBuffer(3, vertices_),
+                                   gpu::Bind::StorageBuffer(4, counter),
+                                   gpu::Bind::Uniform(5, cam_buffer, 0, sizeof(MeshletCamera))});
         ctx.cmd->Push(push);
         ctx.cmd->DrawMeshTasks(meshlet_count_, 1, 1);
         ctx.cmd->EndRendering();
       });
 }
 
-void MeshletPass::Destroy(Device& device) {
+void MeshletPass::Destroy(gpu::Device& device) {
   if (pipeline_) device.DestroyPipeline(pipeline_);
   device.DestroyBuffer(meshlets_);
   device.DestroyBuffer(meshlet_vertices_);

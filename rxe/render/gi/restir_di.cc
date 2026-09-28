@@ -32,33 +32,33 @@ struct SpatialPush {
 
 }  // namespace
 
-bool RestirDi::Initialize(Device& device) {
+bool RestirDi::Initialize(gpu::Device& device) {
   temporal_pipeline_ = device.CreateComputePipeline({
       .shader = RX_SHADER(k_restir_di_temporal_cs_hlsl),
-      .sets = {{.slots = {{0, BindingType::kStorageImage},
-                          {1, BindingType::kSampledImage},
-                          {2, BindingType::kSampledImage},
-                          {3, BindingType::kSampledImage},
-                          {4, BindingType::kSampledImage},
-                          {5, BindingType::kSampledImage},
-                          {6, BindingType::kSampledImage},
-                          {7, BindingType::kStorageBuffer}}}},
-      .push_constant_size = PushSize<TemporalPush>(),
+      .sets = {{.slots = {{0, gpu::BindingType::kStorageImage},
+                          {1, gpu::BindingType::kSampledImage},
+                          {2, gpu::BindingType::kSampledImage},
+                          {3, gpu::BindingType::kSampledImage},
+                          {4, gpu::BindingType::kSampledImage},
+                          {5, gpu::BindingType::kSampledImage},
+                          {6, gpu::BindingType::kSampledImage},
+                          {7, gpu::BindingType::kStorageBuffer}}}},
+      .push_constant_size = gpu::PushSize<TemporalPush>(),
       .debug_name = "restir_di_temporal",
   });
   spatial_pipeline_ = device.CreateComputePipeline({
       .shader = RX_SHADER(k_restir_di_spatial_cs_hlsl),
-      .sets = {{.slots = {{0, BindingType::kStorageImage},
-                          {1, BindingType::kStorageImage},
-                          {2, BindingType::kSampledImage},
-                          {3, BindingType::kSampledImage},
-                          {4, BindingType::kSampledImage},
-                          {5, BindingType::kStorageBuffer},
-                          {6, BindingType::kAccelStruct},
-                          {7, BindingType::kStorageImage},
-                          {8, BindingType::kStorageImage},
-                          {9, BindingType::kStorageImage}}}},
-      .push_constant_size = PushSize<SpatialPush>(),
+      .sets = {{.slots = {{0, gpu::BindingType::kStorageImage},
+                          {1, gpu::BindingType::kStorageImage},
+                          {2, gpu::BindingType::kSampledImage},
+                          {3, gpu::BindingType::kSampledImage},
+                          {4, gpu::BindingType::kSampledImage},
+                          {5, gpu::BindingType::kStorageBuffer},
+                          {6, gpu::BindingType::kAccelStruct},
+                          {7, gpu::BindingType::kStorageImage},
+                          {8, gpu::BindingType::kStorageImage},
+                          {9, gpu::BindingType::kStorageImage}}}},
+      .push_constant_size = gpu::PushSize<SpatialPush>(),
       .debug_name = "restir_di_spatial",
   });
   if (!temporal_pipeline_ || !spatial_pipeline_) {
@@ -69,12 +69,12 @@ bool RestirDi::Initialize(Device& device) {
   return true;
 }
 
-void RestirDi::Destroy(Device& device) {
-  for (PipelineHandle* p : {&temporal_pipeline_, &spatial_pipeline_}) {
+void RestirDi::Destroy(gpu::Device& device) {
+  for (gpu::PipelineHandle* p : {&temporal_pipeline_, &spatial_pipeline_}) {
     if (*p) device.DestroyPipeline(*p);
     *p = {};
   }
-  for (GpuImage& image : reservoir_) {
+  for (gpu::GpuImage& image : reservoir_) {
     if (image) device.DestroyImage(image);
     image = {};
   }
@@ -84,13 +84,13 @@ void RestirDi::Destroy(Device& device) {
   prev_normal_ = {};
 }
 
-bool RestirDi::Resize(Device& device, Extent2D extent) {
+bool RestirDi::Resize(gpu::Device& device, gpu::Extent2D extent) {
   if (!temporal_pipeline_ || !spatial_pipeline_) return false;
   if (available() && extent.width == extent_.width && extent.height == extent_.height) {
     return true;
   }
   if (available()) device.WaitIdle();
-  for (GpuImage& image : reservoir_) {
+  for (gpu::GpuImage& image : reservoir_) {
     if (image) device.DestroyImage(image);
   }
   if (prev_depth_) device.DestroyImage(prev_depth_);
@@ -98,24 +98,24 @@ bool RestirDi::Resize(Device& device, Extent2D extent) {
   extent_ = extent;
   if (extent.width == 0 || extent.height == 0) return false;
 
-  const TextureUsageFlags usage = kTextureUsageStorage | kTextureUsageSampled;
-  reservoir_[0] = device.CreateImage2D(Format::kRGBA32Float, extent, usage);
-  reservoir_[1] = device.CreateImage2D(Format::kRGBA32Float, extent, usage);
-  prev_depth_ = device.CreateImage2D(Format::kR32Float, extent, usage);
-  prev_normal_ = device.CreateImage2D(Format::kRGBA16Float, extent, usage);
+  const gpu::TextureUsageFlags usage = gpu::kTextureUsageStorage | gpu::kTextureUsageSampled;
+  reservoir_[0] = device.CreateImage2D(gpu::Format::kRGBA32Float, extent, usage);
+  reservoir_[1] = device.CreateImage2D(gpu::Format::kRGBA32Float, extent, usage);
+  prev_depth_ = device.CreateImage2D(gpu::Format::kR32Float, extent, usage);
+  prev_normal_ = device.CreateImage2D(gpu::Format::kRGBA16Float, extent, usage);
   if (!reservoir_[0] || !reservoir_[1] || !prev_depth_ || !prev_normal_) {
-    for (GpuImage& image : reservoir_) device.DestroyImage(image);
+    for (gpu::GpuImage& image : reservoir_) device.DestroyImage(image);
     device.DestroyImage(prev_depth_);
     device.DestroyImage(prev_normal_);
     RX_WARN("restir di history allocation failed");
     return false;
   }
-  device.ImmediateSubmit([this](CommandList& cmd) {
-    TextureBarrier to_general[4] = {
-        Transition(reservoir_[0], ResourceState::kUndefined, ResourceState::kGeneral),
-        Transition(reservoir_[1], ResourceState::kUndefined, ResourceState::kGeneral),
-        Transition(prev_depth_, ResourceState::kUndefined, ResourceState::kGeneral),
-        Transition(prev_normal_, ResourceState::kUndefined, ResourceState::kGeneral)};
+  device.ImmediateSubmit([this](gpu::CommandList& cmd) {
+    gpu::TextureBarrier to_general[4] = {
+        gpu::Transition(reservoir_[0], gpu::ResourceState::kUndefined, gpu::ResourceState::kGeneral),
+        gpu::Transition(reservoir_[1], gpu::ResourceState::kUndefined, gpu::ResourceState::kGeneral),
+        gpu::Transition(prev_depth_, gpu::ResourceState::kUndefined, gpu::ResourceState::kGeneral),
+        gpu::Transition(prev_normal_, gpu::ResourceState::kUndefined, gpu::ResourceState::kGeneral)};
     cmd.TextureBarriers(to_general);
   });
   reset_ = true;
@@ -124,17 +124,17 @@ bool RestirDi::Resize(Device& device, Extent2D extent) {
 
 RestirDi::Outputs RestirDi::AddToGraph(RenderGraph& graph, ResourceHandle depth_export,
                                        ResourceHandle normals, ResourceHandle motion,
-                                       RayTracingContext& raytracing, Extent2D extent,
+                                       RayTracingContext& raytracing, gpu::Extent2D extent,
                                        const Frame& frame) {
   Outputs out;
   if (!available() || !frame.lights || frame.light_count == 0) return out;
 
   out.diffuse = graph.CreateTexture({.name = "restir_di_diffuse",
-                                     .format = Format::kRGBA16Float,
+                                     .format = gpu::Format::kRGBA16Float,
                                      .width = extent.width,
                                      .height = extent.height});
   out.spec = graph.CreateTexture({.name = "restir_di_spec",
-                                  .format = Format::kRGBA16Float,
+                                  .format = gpu::Format::kRGBA16Float,
                                   .width = extent.width,
                                   .height = extent.height});
 
@@ -162,17 +162,17 @@ RestirDi::Outputs RestirDi::AddToGraph(RenderGraph& graph, ResourceHandle depth_
 
         ctx.cmd->BindPipeline(temporal_pipeline_);
         ctx.cmd->BindTransient(
-            0, {Bind::Storage(0, reservoir_[0]),
-                Bind::Sampled(1, ctx.graph->image(depth_export)),
-                Bind::Sampled(2, ctx.graph->image(normals)),
-                Bind::Sampled(3, ctx.graph->image(motion)),
-                InGeneral(Bind::Sampled(4, prev_depth_)),
-                InGeneral(Bind::Sampled(5, prev_normal_)),
-                InGeneral(Bind::Sampled(6, reservoir_[1])),
-                Bind::StorageBuffer(7, frame.lights, 0, frame.lights.size)});
+            0, {gpu::Bind::Storage(0, reservoir_[0]),
+                gpu::Bind::Sampled(1, ctx.graph->image(depth_export)),
+                gpu::Bind::Sampled(2, ctx.graph->image(normals)),
+                gpu::Bind::Sampled(3, ctx.graph->image(motion)),
+                gpu::InGeneral(gpu::Bind::Sampled(4, prev_depth_)),
+                gpu::InGeneral(gpu::Bind::Sampled(5, prev_normal_)),
+                gpu::InGeneral(gpu::Bind::Sampled(6, reservoir_[1])),
+                gpu::Bind::StorageBuffer(7, frame.lights, 0, frame.lights.size)});
         ctx.cmd->Push(push);
         ctx.cmd->Dispatch2D(extent);
-        ctx.cmd->MemoryBarrier(BarrierScope::kComputeWrite, BarrierScope::kComputeRead);
+        ctx.cmd->MemoryBarrier(gpu::BarrierScope::kComputeWrite, gpu::BarrierScope::kComputeRead);
       });
 
   graph.AddPass(
@@ -200,19 +200,19 @@ RestirDi::Outputs RestirDi::AddToGraph(RenderGraph& graph, ResourceHandle depth_
 
         ctx.cmd->BindPipeline(spatial_pipeline_);
         ctx.cmd->BindTransient(
-            0, {Bind::Storage(0, ctx.graph->image(out.diffuse)),
-                Bind::Storage(1, ctx.graph->image(out.spec)),
-                InGeneral(Bind::Sampled(2, reservoir_[0])),
-                Bind::Sampled(3, ctx.graph->image(depth_export)),
-                Bind::Sampled(4, ctx.graph->image(normals)),
-                Bind::StorageBuffer(5, frame.lights, 0, frame.lights.size),
-                Bind::Accel(6, raytracing.tlas(frame.tlas_slot)),
-                Bind::Storage(7, reservoir_[1]),
-                Bind::Storage(8, prev_depth_),
-                Bind::Storage(9, prev_normal_)});
+            0, {gpu::Bind::Storage(0, ctx.graph->image(out.diffuse)),
+                gpu::Bind::Storage(1, ctx.graph->image(out.spec)),
+                gpu::InGeneral(gpu::Bind::Sampled(2, reservoir_[0])),
+                gpu::Bind::Sampled(3, ctx.graph->image(depth_export)),
+                gpu::Bind::Sampled(4, ctx.graph->image(normals)),
+                gpu::Bind::StorageBuffer(5, frame.lights, 0, frame.lights.size),
+                gpu::Bind::Accel(6, raytracing.tlas(frame.tlas_slot)),
+                gpu::Bind::Storage(7, reservoir_[1]),
+                gpu::Bind::Storage(8, prev_depth_),
+                gpu::Bind::Storage(9, prev_normal_)});
         ctx.cmd->Push(push);
         ctx.cmd->Dispatch2D(extent);
-        ctx.cmd->MemoryBarrier(BarrierScope::kComputeWrite, BarrierScope::kComputeRead);
+        ctx.cmd->MemoryBarrier(gpu::BarrierScope::kComputeWrite, gpu::BarrierScope::kComputeRead);
       });
 
   return out;

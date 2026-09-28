@@ -7,15 +7,15 @@
 namespace rx::render {
 
 #if defined(RX_HAS_FSR3)
-base::UniquePointer<Upscaler> CreateFsr3Upscaler(const UpscalerDesc& desc, Device& device);
+base::UniquePointer<Upscaler> CreateFsr3Upscaler(const UpscalerDesc& desc, gpu::Device& device);
 #endif
 #if defined(RX_HAS_DLSS)
-base::UniquePointer<Upscaler> CreateDlssUpscaler(const UpscalerDesc& desc, Device& device);
+base::UniquePointer<Upscaler> CreateDlssUpscaler(const UpscalerDesc& desc, gpu::Device& device);
 #endif
 
 // SDK backed implementations (FSR3, DLSS, XeSS) plug in here behind build
 // options. Anything not compiled in falls back to TAA.
-base::UniquePointer<Upscaler> CreateUpscaler(const UpscalerDesc& desc, Device& device) {
+base::UniquePointer<Upscaler> CreateUpscaler(const UpscalerDesc& desc, gpu::Device& device) {
   switch (desc.kind) {
     case UpscalerKind::kFsr3:
 #if defined(RX_HAS_FSR3)

@@ -27,17 +27,17 @@ struct SurfacePush {
 
 }  // namespace
 
-bool SurfaceWeather::Initialize(Device& device) {
+bool SurfaceWeather::Initialize(gpu::Device& device) {
   pipeline_ = device.CreateComputePipeline({
       .shader = RX_SHADER(k_surface_weather_cs_hlsl),
-      .sets = {{.slots = {{0, BindingType::kStorageImage},
-                          {1, BindingType::kSampledImage},
-                          {2, BindingType::kSampledImage},
-                          {3, BindingType::kSampledImage},
-                          {4, BindingType::kCombinedTextureSampler},
-                          {5, BindingType::kCombinedTextureSampler},
-                          {6, BindingType::kUniformBuffer}}}},
-      .push_constant_size = PushSize<SurfacePush>(),
+      .sets = {{.slots = {{0, gpu::BindingType::kStorageImage},
+                          {1, gpu::BindingType::kSampledImage},
+                          {2, gpu::BindingType::kSampledImage},
+                          {3, gpu::BindingType::kSampledImage},
+                          {4, gpu::BindingType::kCombinedTextureSampler},
+                          {5, gpu::BindingType::kCombinedTextureSampler},
+                          {6, gpu::BindingType::kUniformBuffer}}}},
+      .push_constant_size = gpu::PushSize<SurfacePush>(),
       .debug_name = "surface_weather",
   });
   if (!pipeline_) {
@@ -46,17 +46,17 @@ bool SurfaceWeather::Initialize(Device& device) {
   }
   // One per in-flight frame: the pass rewrites it while the previous frame may
   // still be reading its own copy.
-  for (GpuBuffer& camera : camera_) {
-    camera = device.CreateBuffer(sizeof(SurfaceCamera), kBufferUsageUniform, true);
+  for (gpu::GpuBuffer& camera : camera_) {
+    camera = device.CreateBuffer(sizeof(SurfaceCamera), gpu::kBufferUsageUniform, true);
     if (!camera.mapped) return false;
   }
   return true;
 }
 
-void SurfaceWeather::Destroy(Device& device) {
+void SurfaceWeather::Destroy(gpu::Device& device) {
   device.DestroyPipeline(pipeline_);
   pipeline_ = {};
-  for (GpuBuffer& camera : camera_) {
+  for (gpu::GpuBuffer& camera : camera_) {
     if (camera) device.DestroyBuffer(camera);
     camera = {};
   }
@@ -64,10 +64,10 @@ void SurfaceWeather::Destroy(Device& device) {
 
 ResourceHandle SurfaceWeather::AddToGraph(RenderGraph& graph, ResourceHandle color,
                                           ResourceHandle normals, ResourceHandle depth,
-                                          TextureView sky_view, SamplerHandle sky_sampler,
-                                          Extent2D extent, const Frame& frame) {
+                                          gpu::TextureView sky_view, gpu::SamplerHandle sky_sampler,
+                                          gpu::Extent2D extent, const Frame& frame) {
   ResourceHandle out = graph.CreateTexture({.name = "surface_weather",
-                                            .format = Format::kRGBA16Float,
+                                            .format = gpu::Format::kRGBA16Float,
                                             .width = extent.width,
                                             .height = extent.height});
   uniform_slot_ ^= 1;
@@ -101,16 +101,16 @@ ResourceHandle SurfaceWeather::AddToGraph(RenderGraph& graph, ResourceHandle col
         // The occlusion slot must always be bound; without a live map the
         // shader is told to ignore it (occl2.x <= 0) but a valid 2D view is
         // still required, so the scene depth stands in.
-        BindingItem occl = frame.occlusion
-                               ? Bind::Combined(5, frame.occlusion, frame.occlusion_sampler)
-                               : Bind::Combined(5, ctx.graph->image(depth).view, sky_sampler);
+        gpu::BindingItem occl = frame.occlusion
+                               ? gpu::Bind::Combined(5, frame.occlusion, frame.occlusion_sampler)
+                               : gpu::Bind::Combined(5, ctx.graph->image(depth).view, sky_sampler);
         ctx.cmd->BindPipeline(pipeline_);
-        ctx.cmd->BindTransient(0, {Bind::Storage(0, ctx.graph->image(out)),
-                                   Bind::Sampled(1, ctx.graph->image(color)),
-                                   Bind::Sampled(2, ctx.graph->image(normals)),
-                                   Bind::Sampled(3, ctx.graph->image(depth)),
-                                   Bind::Combined(4, sky_view, sky_sampler), occl,
-                                   Bind::Uniform(6, camera_[slot], 0, sizeof(SurfaceCamera))});
+        ctx.cmd->BindTransient(0, {gpu::Bind::Storage(0, ctx.graph->image(out)),
+                                   gpu::Bind::Sampled(1, ctx.graph->image(color)),
+                                   gpu::Bind::Sampled(2, ctx.graph->image(normals)),
+                                   gpu::Bind::Sampled(3, ctx.graph->image(depth)),
+                                   gpu::Bind::Combined(4, sky_view, sky_sampler), occl,
+                                   gpu::Bind::Uniform(6, camera_[slot], 0, sizeof(SurfaceCamera))});
         ctx.cmd->Push(push);
         ctx.cmd->Dispatch2D(extent);
       });

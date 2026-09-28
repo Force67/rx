@@ -19,6 +19,7 @@
 
 using namespace rx;
 using namespace rx::render;
+namespace gpu = rx::gpu;
 
 namespace {
 
@@ -27,11 +28,11 @@ int g_failures = 0;
   ::printf("FAIL %s:%d %s\n", __FILE__, __LINE__, #condition); ++g_failures; \
 } } while (0)
 
-class TestCommandList final : public CommandList {
+class TestCommandList final : public gpu::CommandList {
  public:
-  void BindPipeline(PipelineHandle) override {}
-  void BindSet(u32, BindingSetHandle) override {}
-  void BindTransient(u32, base::Span<const BindingItem>) override {}
+  void BindPipeline(gpu::PipelineHandle) override {}
+  void BindSet(u32, gpu::BindingSetHandle) override {}
+  void BindTransient(u32, base::Span<const gpu::BindingItem>) override {}
   base::String pass;
   bool expect_reset = false;
   u32 temporal_dispatches = 0;
@@ -44,46 +45,46 @@ class TestCommandList final : public CommandList {
     ++temporal_dispatches;
   }
   void Dispatch(u32, u32, u32) override {}
-  void BeginRendering(const RenderingInfo&) override {}
+  void BeginRendering(const gpu::RenderingInfo&) override {}
   void EndRendering() override {}
   void SetViewport(f32, f32, f32, f32) override {}
   void SetScissor(i32, i32, u32, u32) override {}
-  void BindVertexBuffer(u32, const GpuBuffer&, rx::u64) override {}
-  void BindIndexBuffer(const GpuBuffer&, rx::u64, IndexType) override {}
+  void BindVertexBuffer(u32, const gpu::GpuBuffer&, rx::u64) override {}
+  void BindIndexBuffer(const gpu::GpuBuffer&, rx::u64, gpu::IndexType) override {}
   void Draw(u32, u32, u32, u32) override {}
   void DrawIndexed(u32, u32, u32, i32, u32) override {}
-  void DrawIndexedIndirect(const GpuBuffer&, rx::u64, u32, u32) override {}
+  void DrawIndexedIndirect(const gpu::GpuBuffer&, rx::u64, u32, u32) override {}
   void DrawMeshTasks(u32, u32, u32) override {}
-  void TextureBarriers(base::Span<const TextureBarrier> barriers) override {
+  void TextureBarriers(base::Span<const gpu::TextureBarrier> barriers) override {
     for (const auto& b : barriers) CHECK(b.texture);
   }
-  void MemoryBarrier(BarrierScope, BarrierScope) override {}
-  void CopyBufferToTexture(const GpuBuffer&, const GpuImage&,
-                           base::Span<const BufferTextureCopy>) override {}
-  void CopyTextureToBuffer(const GpuImage&, const GpuBuffer&,
-                           const BufferTextureCopy&) override {}
-  void CopyBuffer(const GpuBuffer&, rx::u64, const GpuBuffer&, rx::u64, rx::u64) override {}
-  void BlitMip(const GpuImage&, u32, Extent2D, u32, Extent2D) override {}
-  void ResolveTexture(const GpuImage&, const GpuImage&) override {}
-  void ClearColor(const GpuImage&, const f32[4]) override {}
-  void ClearDepth(const GpuImage&, f32) override {}
-  void FillBuffer(const GpuBuffer&, rx::u64, rx::u64, u32) override {}
-  void BuildBlas(AccelStructHandle, const BlasBuildDesc&, const GpuBuffer&, rx::u64,
-                 AccelStructHandle) override {}
+  void MemoryBarrier(gpu::BarrierScope, gpu::BarrierScope) override {}
+  void CopyBufferToTexture(const gpu::GpuBuffer&, const gpu::GpuImage&,
+                           base::Span<const gpu::BufferTextureCopy>) override {}
+  void CopyTextureToBuffer(const gpu::GpuImage&, const gpu::GpuBuffer&,
+                           const gpu::BufferTextureCopy&) override {}
+  void CopyBuffer(const gpu::GpuBuffer&, rx::u64, const gpu::GpuBuffer&, rx::u64, rx::u64) override {}
+  void BlitMip(const gpu::GpuImage&, u32, gpu::Extent2D, u32, gpu::Extent2D) override {}
+  void ResolveTexture(const gpu::GpuImage&, const gpu::GpuImage&) override {}
+  void ClearColor(const gpu::GpuImage&, const f32[4]) override {}
+  void ClearDepth(const gpu::GpuImage&, f32) override {}
+  void FillBuffer(const gpu::GpuBuffer&, rx::u64, rx::u64, u32) override {}
+  void BuildBlas(gpu::AccelStructHandle, const gpu::BlasBuildDesc&, const gpu::GpuBuffer&, rx::u64,
+                 gpu::AccelStructHandle) override {}
   u32 instances = 0;
-  void BuildTlas(AccelStructHandle tlas, const GpuBuffer& input, u32 count,
-                  const GpuBuffer& scratch) override {
+  void BuildTlas(gpu::AccelStructHandle tlas, const gpu::GpuBuffer& input, u32 count,
+                  const gpu::GpuBuffer& scratch) override {
     CHECK(tlas && input && scratch);
     instances = count;
   }
-  void ResetTimestamps(TimestampPoolHandle, u32, u32) override {}
-  void WriteTimestamp(TimestampPoolHandle, u32, bool) override {}
+  void ResetTimestamps(gpu::TimestampPoolHandle, u32, u32) override {}
+  void WriteTimestamp(gpu::TimestampPoolHandle, u32, bool) override {}
   void BeginDebugLabel(const char*) override {}
   void EndDebugLabel() override {}
   void* native_handle() override { return nullptr; }
 };
 
-class TestDevice final : public Device {
+class TestDevice final : public gpu::Device {
  public:
   explicit TestDevice(bool async = false) {
     caps_.raytracing = true;
@@ -105,61 +106,61 @@ class TestDevice final : public Device {
   void WaitIdle() override {}
   bool RecreateSurface(Window&) override { return false; }
   void DestroySurface() override {}
-  base::UniquePointer<Swapchain> CreateSwapchain(u32, u32, bool, bool) override { return nullptr; }
+  base::UniquePointer<gpu::Swapchain> CreateSwapchain(u32, u32, bool, bool) override { return nullptr; }
   MemoryBudget memory_budget() const override { return {}; }
 
-  GpuBuffer CreateBuffer(rx::u64 size, BufferUsageFlags, bool host) override {
+  gpu::GpuBuffer CreateBuffer(rx::u64 size, gpu::BufferUsageFlags, bool host) override {
     const rx::u64 id = Allocate();
     if (!id) return {};
     return {.handle = {id}, .size = size, .mapped = host ? ::calloc(1, size) : nullptr,
             .address = id * 4096};
   }
-  GpuBuffer CreateBufferWithData(ByteSpan, BufferUsageFlags) override { return {}; }
-  void DestroyBuffer(GpuBuffer& buffer) override {
+  gpu::GpuBuffer CreateBufferWithData(ByteSpan, gpu::BufferUsageFlags) override { return {}; }
+  void DestroyBuffer(gpu::GpuBuffer& buffer) override {
     Free(buffer.handle.value);
     ::free(buffer.mapped);
     buffer = {};
   }
-  GpuImage CreateImage2D(Format format, Extent2D extent, TextureUsageFlags, u32, u32) override {
+  gpu::GpuImage CreateImage2D(gpu::Format format, gpu::Extent2D extent, gpu::TextureUsageFlags, u32, u32) override {
     CHECK(extent.width && extent.height);
     const rx::u64 id = Allocate();
     return {.handle = {id}, .view = {id}, .format = format, .extent = extent};
   }
-  GpuImage CreateImageCube(Format, u32, TextureUsageFlags, u32) override { return {}; }
-  void DestroyImage(GpuImage& image) override { Free(image.handle.value); image = {}; }
-  TextureView CreateMipView(const GpuImage&, u32) override { return {}; }
-  TextureView CreateArrayView(const GpuImage&) override { return {}; }
-  void DestroyView(TextureView) override {}
-  SamplerHandle GetSampler(const SamplerDesc&) override { return {}; }
+  gpu::GpuImage CreateImageCube(gpu::Format, u32, gpu::TextureUsageFlags, u32) override { return {}; }
+  void DestroyImage(gpu::GpuImage& image) override { Free(image.handle.value); image = {}; }
+  gpu::TextureView CreateMipView(const gpu::GpuImage&, u32) override { return {}; }
+  gpu::TextureView CreateArrayView(const gpu::GpuImage&) override { return {}; }
+  void DestroyView(gpu::TextureView) override {}
+  gpu::SamplerHandle GetSampler(const gpu::SamplerDesc&) override { return {}; }
 
-  PipelineHandle CreateComputePipeline(const ComputePipelineDesc&) override { return {Allocate()}; }
-  PipelineHandle CreateGraphicsPipeline(const GraphicsPipelineDesc&) override { return {}; }
-  void DestroyPipeline(PipelineHandle pipeline) override { Free(pipeline.value); }
-  BindingLayoutHandle CreateBindingLayout(const BindingLayoutDesc&) override { return {}; }
-  void DestroyBindingLayout(BindingLayoutHandle) override {}
-  BindingSetHandle CreateBindingSet(BindingLayoutHandle, u32) override { return {}; }
-  void DestroyBindingSet(BindingSetHandle) override {}
-  void UpdateBindingSet(BindingSetHandle, base::Span<const BindingItem>) override {}
+  gpu::PipelineHandle CreateComputePipeline(const gpu::ComputePipelineDesc&) override { return {Allocate()}; }
+  gpu::PipelineHandle CreateGraphicsPipeline(const gpu::GraphicsPipelineDesc&) override { return {}; }
+  void DestroyPipeline(gpu::PipelineHandle pipeline) override { Free(pipeline.value); }
+  gpu::BindingLayoutHandle CreateBindingLayout(const gpu::BindingLayoutDesc&) override { return {}; }
+  void DestroyBindingLayout(gpu::BindingLayoutHandle) override {}
+  gpu::BindingSetHandle CreateBindingSet(gpu::BindingLayoutHandle, u32) override { return {}; }
+  void DestroyBindingSet(gpu::BindingSetHandle) override {}
+  void UpdateBindingSet(gpu::BindingSetHandle, base::Span<const gpu::BindingItem>) override {}
 
-  AccelSizes GetBlasSizes(const BlasBuildDesc&) override { return {1024, 1024, 512}; }
-  AccelSizes GetTlasSizes(u32) override { return {1024, 1024}; }
-  AccelStructHandle CreateAccelStruct(AccelStructType, rx::u64) override { return {Allocate()}; }
-  void DestroyAccelStruct(AccelStructHandle accel) override { Free(accel.value); }
-  rx::u64 accel_address(AccelStructHandle accel) override { return accel.value * 4096; }
+  gpu::AccelSizes GetBlasSizes(const gpu::BlasBuildDesc&) override { return {1024, 1024, 512}; }
+  gpu::AccelSizes GetTlasSizes(u32) override { return {1024, 1024}; }
+  gpu::AccelStructHandle CreateAccelStruct(gpu::AccelStructType, rx::u64) override { return {Allocate()}; }
+  void DestroyAccelStruct(gpu::AccelStructHandle accel) override { Free(accel.value); }
+  rx::u64 accel_address(gpu::AccelStructHandle accel) override { return accel.value * 4096; }
 
-  TimestampPoolHandle CreateTimestampPool(u32) override { return {}; }
-  void DestroyTimestampPool(TimestampPoolHandle) override {}
-  bool GetTimestamps(TimestampPoolHandle, u32, u32, rx::u64*) override { return false; }
+  gpu::TimestampPoolHandle CreateTimestampPool(u32) override { return {}; }
+  void DestroyTimestampPool(gpu::TimestampPoolHandle) override {}
+  bool GetTimestamps(gpu::TimestampPoolHandle, u32, u32, rx::u64*) override { return false; }
 
-  void ImmediateSubmit(const base::Function<void(CommandList&)>& record) override {
+  void ImmediateSubmit(const base::Function<void(gpu::CommandList&)>& record) override {
     TestCommandList cmd;
     record(cmd);
   }
-  CommandList* BeginFrame(u32) override { return &cmd_; }
+  gpu::CommandList* BeginFrame(u32) override { return &cmd_; }
   u32 splits = 0;
-  CommandList* SplitFrame(CommandList* cmd, bool) override { ++splits; return cmd; }
-  PresentResult SubmitFrame(CommandList*, Swapchain&, u32) override {
-    return PresentResult::kFailed;
+  gpu::CommandList* SplitFrame(gpu::CommandList* cmd, bool) override { ++splits; return cmd; }
+  gpu::PresentResult SubmitFrame(gpu::CommandList*, gpu::Swapchain&, u32) override {
+    return gpu::PresentResult::kFailed;
   }
 
  private:
@@ -212,7 +213,7 @@ int main() {
     TestDevice device;
     device.fail_at = fail;
     ReconPathTracer tracer;
-    bool initialized = tracer.Initialize(device, BindingLayoutHandle{1});
+    bool initialized = tracer.Initialize(device, gpu::BindingLayoutHandle{1});
     if (!initialized) CHECK(device.live.empty());
     tracer.Resize(device, {17, 9});
     if (initialized && device.attempts >= fail) CHECK(!tracer.available());
@@ -233,7 +234,7 @@ int main() {
     TestDevice device;
     device.fail_at = fail;
     PathTracer tracer;
-    bool initialized = tracer.Initialize(device, BindingLayoutHandle{1});
+    bool initialized = tracer.Initialize(device, gpu::BindingLayoutHandle{1});
     if (!initialized) CHECK(device.live.empty());
     tracer.Resize(device, {17, 9});
     if (initialized && device.attempts >= fail) CHECK(!tracer.available());
@@ -268,7 +269,7 @@ int main() {
     TestDevice device;
     device.fail_at = fail;
     ReflectionTrace reflection;
-    CHECK(!reflection.Initialize(device, BindingLayoutHandle{1}));
+    CHECK(!reflection.Initialize(device, gpu::BindingLayoutHandle{1}));
     CHECK(!reflection.available());
     CHECK(device.live.empty());
     reflection.Destroy(device);
@@ -304,7 +305,7 @@ int main() {
     CHECK(rt->tlas(~0u));
     rt->BuildTlas(cmd, ~0u, 2, instances);
 
-    base::Vector<AccelTriangles> triangles;
+    base::Vector<gpu::AccelTriangles> triangles;
     triangles.push_back({.vertex_address = 4096, .vertex_stride = 12, .vertex_count = 3});
     CHECK(rt->ReserveSkinnedBlas(42, triangles));
     instances.push_back({.mesh_key = 42, .skinned = true, .transform = Mat4::Identity()});
@@ -337,7 +338,7 @@ int main() {
     TestDevice device;
     auto rt = RayTracingContext::Create(device);
     ReconPathTracer tracer;
-    CHECK(tracer.Initialize(device, BindingLayoutHandle{1}));
+    CHECK(tracer.Initialize(device, gpu::BindingLayoutHandle{1}));
     tracer.Resize(device, {17, 9});
     ReconPathTracer::Frame frame;
     frame.frame_index = 100;
@@ -346,10 +347,10 @@ int main() {
       TransientPool pool(device);
       TestCommandList cmd;
       cmd.expect_reset = reset;
-      graph.SetPassHooks([&](CommandList&, const char* name) { cmd.pass = name; }, {});
+      graph.SetPassHooks([&](gpu::CommandList&, const char* name) { cmd.pass = name; }, {});
       auto output = graph.CreateTexture({.name = "output", .width = 17, .height = 9});
       ReconPathTracer::ExternalInputs guides;
-      tracer.AddToGraph(graph, *rt, 0, BindingSetHandle{1}, TextureView{1}, SamplerHandle{1},
+      tracer.AddToGraph(graph, *rt, 0, gpu::BindingSetHandle{1}, gpu::TextureView{1}, gpu::SamplerHandle{1},
                         output, frame, external ? &guides : nullptr);
       CHECK(graph.Compile(device, pool));
       PassContext ctx{.cmd = &cmd, .device = &device, .graph = &graph};

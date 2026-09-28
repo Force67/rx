@@ -1,6 +1,6 @@
 #include "rxe/gpu/vulkan/vk_backend.h"
 
-namespace rx::render::vk {
+namespace rx::gpu::vk {
 namespace {
 
 // Indexed by Format; kept in declaration order and size-checked so adding a
@@ -261,4 +261,4 @@ ScopeInfo ScopeInfoOf(BarrierScope scope, bool as_source) {
           VK_ACCESS_2_MEMORY_READ_BIT | VK_ACCESS_2_MEMORY_WRITE_BIT};
 }
 
-}  // namespace rx::render::vk
+}  // namespace rx::gpu::vk

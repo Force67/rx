@@ -4,9 +4,12 @@
 #include "foundation/build_config/types.h"
 #include "rxe/render/core/render_graph.h"
 
+namespace rx::gpu {
+class Device;
+}  // namespace rx::gpu
+
 namespace rx::render {
 
-class Device;
 
 // Threshold-free physically based bloom: 13-tap Karis downsample chain into
 // tent upsamples (CoD: Advanced Warfare). The tonemap pass mixes the result
@@ -15,8 +18,8 @@ class BloomPass {
  public:
   static constexpr u32 kMips = 6;
 
-  bool Initialize(Device& device);
-  void Destroy(Device& device);
+  bool Initialize(gpu::Device& device);
+  void Destroy(gpu::Device& device);
 
   // Builds the chain off `input` (output resolution hdr) and returns the
   // full resolution bloom texture. If `flare_src` is non-null it receives a
@@ -28,9 +31,9 @@ class BloomPass {
                             ResourceHandle* flare_src = nullptr);
 
  private:
-  SamplerHandle sampler_;
-  PipelineHandle down_pipeline_;
-  PipelineHandle up_pipeline_;
+  gpu::SamplerHandle sampler_;
+  gpu::PipelineHandle down_pipeline_;
+  gpu::PipelineHandle up_pipeline_;
 };
 
 }  // namespace rx::render

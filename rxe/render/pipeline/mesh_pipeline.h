@@ -222,9 +222,9 @@ static_assert(offsetof(MeshShaderPush, draw_index) == offsetof(MeshPushConstants
               "mesh-shader and raster push blocks must agree on draw_index");
 static_assert(offsetof(MeshShaderPush, tint_packed) == offsetof(MeshPushConstants, tint_packed),
               "mesh-shader and raster push blocks must agree on tint_packed");
-static_assert(offsetof(MeshPushConstants, bone_address) == kPushBdaBoneOffset &&
-                  offsetof(MeshPushConstants, morph_delta_address) == kPushBdaMorphDeltaOffset &&
-                  offsetof(MeshPushConstants, morph_weight_address) == kPushBdaMorphWeightOffset,
+static_assert(offsetof(MeshPushConstants, bone_address) == gpu::kPushBdaBoneOffset &&
+                  offsetof(MeshPushConstants, morph_delta_address) == gpu::kPushBdaMorphDeltaOffset &&
+                  offsetof(MeshPushConstants, morph_weight_address) == gpu::kPushBdaMorphWeightOffset,
               "mesh push block must keep the RX_BDA addresses where d3d12 looks");
 // The shader block aligns detail_rect (a float4) to 16 bytes and this one packs
 // it, so the two agree only while its offset is already a multiple of 16. An
@@ -242,51 +242,51 @@ class MeshPipeline {
  public:
   // Third scene-pass attachment: diffuse-only lighting of skin materials plus
   // a mask, consumed by the screen-space subsurface scattering blur.
-  static constexpr Format kSkinDiffuseFormat = Format::kRGBA16Float;
+  static constexpr gpu::Format kSkinDiffuseFormat = gpu::Format::kRGBA16Float;
 
   // bindless_layout enables set 3 (the scene tables the rt variant reads for
   // reflection hit shading); pass a null handle when ray query is unavailable.
   // samples > 1 builds the opaque/prepass raster pipelines multisampled
   // (kMsaa mode). Blend pipelines stay single-sampled: the transparent pass
   // always runs after the resolve.
-  static base::UniquePointer<MeshPipeline> Create(Device& device, Format color_format,
-                                              Format motion_format, Format normal_format,
-                                              Format depth_format,
-                                              BindingLayoutHandle material_layout,
-                                              BindingLayoutHandle environment_layout,
-                                              BindingLayoutHandle bindless_layout,
+  static base::UniquePointer<MeshPipeline> Create(gpu::Device& device, gpu::Format color_format,
+                                              gpu::Format motion_format, gpu::Format normal_format,
+                                              gpu::Format depth_format,
+                                              gpu::BindingLayoutHandle material_layout,
+                                              gpu::BindingLayoutHandle environment_layout,
+                                              gpu::BindingLayoutHandle bindless_layout,
                                               u32 samples = 1);
   ~MeshPipeline();
 
   MeshPipeline(const MeshPipeline&) = delete;
   MeshPipeline& operator=(const MeshPipeline&) = delete;
 
-  BindingLayoutHandle set_layout() const { return set_layout_; }
+  gpu::BindingLayoutHandle set_layout() const { return set_layout_; }
   bool has_rt_variant() const { return static_cast<bool>(pipelines_[kRt]); }
 
   // use_rt selects the ray-query fragment variant (shadows and/or reflections);
   // bindless is bound as set 3 when the pipeline was built with it.
-  void Bind(CommandList& cmd, BindingSetHandle globals, BindingSetHandle environment,
-            BindingSetHandle bindless, bool use_rt, bool wireframe);
-  void BindPrepass(CommandList& cmd, BindingSetHandle globals, BindingSetHandle environment);
+  void Bind(gpu::CommandList& cmd, gpu::BindingSetHandle globals, gpu::BindingSetHandle environment,
+            gpu::BindingSetHandle bindless, bool use_rt, bool wireframe);
+  void BindPrepass(gpu::CommandList& cmd, gpu::BindingSetHandle globals, gpu::BindingSetHandle environment);
   // Transparent variant: alpha blend over the opaque result, depth tested
   // against the prepass without writing. Set state mirrors Bind.
-  void BindBlend(CommandList& cmd, BindingSetHandle globals, BindingSetHandle environment,
-                 BindingSetHandle bindless, bool use_rt);
+  void BindBlend(gpu::CommandList& cmd, gpu::BindingSetHandle globals, gpu::BindingSetHandle environment,
+                 gpu::BindingSetHandle bindless, bool use_rt);
   // Additive-blend transparent variant (one, one): HDR effect-shader fire and
   // glows. Same shaders as BindBlend; the unlit branch premultiplies coverage.
-  void BindBlendAdditive(CommandList& cmd, BindingSetHandle globals, BindingSetHandle environment,
-                         BindingSetHandle bindless, bool use_rt);
-  void BindMaterial(CommandList& cmd, BindingSetHandle material);
-  void Draw(CommandList& cmd, const GpuMesh& mesh, const MeshPushConstants& push);
-  void DrawSubmesh(CommandList& cmd, const GpuSubmesh& submesh);
+  void BindBlendAdditive(gpu::CommandList& cmd, gpu::BindingSetHandle globals, gpu::BindingSetHandle environment,
+                         gpu::BindingSetHandle bindless, bool use_rt);
+  void BindMaterial(gpu::CommandList& cmd, gpu::BindingSetHandle material);
+  void Draw(gpu::CommandList& cmd, const gpu::GpuMesh& mesh, const MeshPushConstants& push);
+  void DrawSubmesh(gpu::CommandList& cmd, const gpu::GpuSubmesh& submesh);
   // Static streamed props use persistent current/previous matrix streams. The
   // instance permutation keeps the same material/frame sets and shaders, but
   // one indexed draw covers every placement in the group.
-  void SetInstanced(CommandList& cmd, bool use_rt, bool wireframe);
-  void SetInstancedPrepass(CommandList& cmd, bool masked);
-  void DrawInstances(CommandList& cmd, const GpuMesh& mesh, const GpuBuffer& instances,
-                     const GpuBuffer& previous_instances, const MeshPushConstants& push);
+  void SetInstanced(gpu::CommandList& cmd, bool use_rt, bool wireframe);
+  void SetInstancedPrepass(gpu::CommandList& cmd, bool masked);
+  void DrawInstances(gpu::CommandList& cmd, const gpu::GpuMesh& mesh, const gpu::GpuBuffer& instances,
+                     const gpu::GpuBuffer& previous_instances, const MeshPushConstants& push);
 
   // Optional mesh-shader opaque path. Built only when the device supports it;
   // the scene/prepass variants reuse the same descriptor sets and fragment
@@ -295,46 +295,46 @@ class MeshPipeline {
   bool has_mesh_shader() const {
     return static_cast<bool>(ms_scene_[0]) && static_cast<bool>(ms_prepass_);
   }
-  void BindMeshScene(CommandList& cmd, BindingSetHandle globals, BindingSetHandle environment,
-                     BindingSetHandle bindless, bool use_rt);
-  void BindMeshPrepass(CommandList& cmd, BindingSetHandle globals);
-  void BindMeshMaterial(CommandList& cmd, BindingSetHandle material);
-  void DrawMeshlets(CommandList& cmd, const MeshShaderPush& push);
+  void BindMeshScene(gpu::CommandList& cmd, gpu::BindingSetHandle globals, gpu::BindingSetHandle environment,
+                     gpu::BindingSetHandle bindless, bool use_rt);
+  void BindMeshPrepass(gpu::CommandList& cmd, gpu::BindingSetHandle globals);
+  void BindMeshMaterial(gpu::CommandList& cmd, gpu::BindingSetHandle material);
+  void DrawMeshlets(gpu::CommandList& cmd, const MeshShaderPush& push);
 
   // Swap the bound pipeline between the static and GPU-skinned vertex paths
   // mid-pass without rebinding descriptor sets (the layout is shared). The draw
   // loop calls these when it crosses a skinned/non-skinned mesh boundary.
   bool has_skinning() const { return static_cast<bool>(skinned_pipelines_[0]); }
-  void SetSkinned(CommandList& cmd, bool skinned, bool use_rt, bool wireframe);
+  void SetSkinned(gpu::CommandList& cmd, bool skinned, bool use_rt, bool wireframe);
   // Binds the prepass pipeline for a submesh: skinned vs static vertex path,
   // masked (alpha-test discard) vs opaque fragment (keeps early-Z).
-  void SetPrepassVariant(CommandList& cmd, bool skinned, bool masked);
+  void SetPrepassVariant(gpu::CommandList& cmd, bool skinned, bool masked);
 
  private:
   // Variant index bits.
   static constexpr u32 kRt = 1;
   static constexpr u32 kWire = 2;
 
-  explicit MeshPipeline(Device& device) : device_(device) {}
+  explicit MeshPipeline(gpu::Device& device) : device_(device) {}
 
-  Device& device_;
-  BindingLayoutHandle set_layout_;
+  gpu::Device& device_;
+  gpu::BindingLayoutHandle set_layout_;
   bool has_bindless_ = false;  // set 3 present in the layout
-  PipelineHandle pipelines_[4] = {};  // [rt | wire]
-  PipelineHandle blend_pipelines_[2] = {};  // [rt]
-  PipelineHandle blend_additive_pipelines_[2] = {};  // [rt] additive effect vfx
-  PipelineHandle prepass_pipeline_;
-  PipelineHandle prepass_masked_pipeline_;  // alpha-test discard variant
+  gpu::PipelineHandle pipelines_[4] = {};  // [rt | wire]
+  gpu::PipelineHandle blend_pipelines_[2] = {};  // [rt]
+  gpu::PipelineHandle blend_additive_pipelines_[2] = {};  // [rt] additive effect vfx
+  gpu::PipelineHandle prepass_pipeline_;
+  gpu::PipelineHandle prepass_masked_pipeline_;  // alpha-test discard variant
   // Skinned vertex path: same fragment variants, extra vertex stream + VS.
-  PipelineHandle skinned_pipelines_[2] = {};  // [rt]
-  PipelineHandle skinned_prepass_pipeline_;
-  PipelineHandle skinned_prepass_masked_pipeline_;
-  PipelineHandle instanced_pipelines_[4] = {};  // [rt | wire]
-  PipelineHandle instanced_prepass_pipeline_;
-  PipelineHandle instanced_prepass_masked_pipeline_;
+  gpu::PipelineHandle skinned_pipelines_[2] = {};  // [rt]
+  gpu::PipelineHandle skinned_prepass_pipeline_;
+  gpu::PipelineHandle skinned_prepass_masked_pipeline_;
+  gpu::PipelineHandle instanced_pipelines_[4] = {};  // [rt | wire]
+  gpu::PipelineHandle instanced_prepass_pipeline_;
+  gpu::PipelineHandle instanced_prepass_masked_pipeline_;
   // Optional mesh-shader opaque variants (their own mesh-stage push block).
-  PipelineHandle ms_scene_[2] = {};  // [rt]
-  PipelineHandle ms_prepass_;
+  gpu::PipelineHandle ms_scene_[2] = {};  // [rt]
+  gpu::PipelineHandle ms_prepass_;
 };
 
 }  // namespace rx::render

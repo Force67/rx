@@ -29,14 +29,14 @@ struct ShadowTracePush {
 
 }  // namespace
 
-bool ShadowTracePass::Initialize(Device& device) {
+bool ShadowTracePass::Initialize(gpu::Device& device) {
   // 0: penumbra out, 1: depth, 2: tlas.
   pipeline_ = device.CreateComputePipeline({
       .shader = RX_SHADER(k_shadow_trace_cs_hlsl),
-      .sets = {{.slots = {{0, BindingType::kStorageImage},
-                          {1, BindingType::kSampledImage},
-                          {2, BindingType::kAccelStruct}}}},
-      .push_constant_size = PushSize<ShadowTracePush>(),
+      .sets = {{.slots = {{0, gpu::BindingType::kStorageImage},
+                          {1, gpu::BindingType::kSampledImage},
+                          {2, gpu::BindingType::kAccelStruct}}}},
+      .push_constant_size = gpu::PushSize<ShadowTracePush>(),
       .debug_name = "shadow_trace",
   });
   if (!pipeline_) {
@@ -46,7 +46,7 @@ bool ShadowTracePass::Initialize(Device& device) {
   return true;
 }
 
-void ShadowTracePass::Destroy(Device& device) {
+void ShadowTracePass::Destroy(gpu::Device& device) {
   device.DestroyPipeline(pipeline_);
   pipeline_ = {};
 }
@@ -83,9 +83,9 @@ ResourceHandle ShadowTracePass::AddToGraph(RenderGraph& graph, RayTracingContext
         push.jitter[1] = jitter_y;
 
         ctx.cmd->BindPipeline(pipeline_);
-        ctx.cmd->BindTransient(0, {Bind::Storage(0, ctx.graph->image(penumbra)),
-                                   Bind::Sampled(1, ctx.graph->image(depth)),
-                                   Bind::Accel(2, raytracing.tlas(tlas_slot))});
+        ctx.cmd->BindTransient(0, {gpu::Bind::Storage(0, ctx.graph->image(penumbra)),
+                                   gpu::Bind::Sampled(1, ctx.graph->image(depth)),
+                                   gpu::Bind::Accel(2, raytracing.tlas(tlas_slot))});
         ctx.cmd->Push(push);
         ctx.cmd->Dispatch2D(extent_);
       });

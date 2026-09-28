@@ -5,9 +5,12 @@
 #include "rxe/render/core/render_graph.h"
 #include "rxe/gpu/rhi/resources.h"
 
+namespace rx::gpu {
+class Device;
+}  // namespace rx::gpu
+
 namespace rx::render {
 
-class Device;
 
 // Screen-space reflections: a world-space ray march over the prepass depth and
 // the lit scene color, no ray tracing required. This is the reflection fallback
@@ -24,9 +27,9 @@ class SsrPass {
     u32 step_count = 32;        // march samples per pixel
   };
 
-  bool Initialize(Device& device);
-  void Resize(Device& device, Extent2D extent) { extent_ = extent; }
-  void Destroy(Device& device);
+  bool Initialize(gpu::Device& device);
+  void Resize(gpu::Device& device, gpu::Extent2D extent) { extent_ = extent; }
+  void Destroy(gpu::Device& device);
 
   void Configure(const Settings& settings) { settings_ = settings; }
 
@@ -38,9 +41,9 @@ class SsrPass {
 
  private:
   Settings settings_;
-  PipelineHandle pipeline_;
-  GpuBuffer camera_[2];  // march matrices, too big for the push block
-  Extent2D extent_{};
+  gpu::PipelineHandle pipeline_;
+  gpu::GpuBuffer camera_[2];  // march matrices, too big for the push block
+  gpu::Extent2D extent_{};
 };
 
 }  // namespace rx::render

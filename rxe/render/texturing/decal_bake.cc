@@ -73,7 +73,7 @@ DecalBaker::Desc DecalBaker::EnvDesc() {
   return desc;
 }
 
-bool DecalBaker::Initialize(Device& device, const Desc& desc) {
+bool DecalBaker::Initialize(gpu::Device& device, const Desc& desc) {
   desc_ = desc;
   if (desc_.tile_size == 0 || desc_.atlas_size < desc_.tile_size ||
       desc_.atlas_size % desc_.tile_size != 0) {
@@ -101,23 +101,23 @@ bool DecalBaker::Initialize(Device& device, const Desc& desc) {
   // uninitialized VRAM, and an arbitrary alpha defeats the coverage early-out.
   const f32 zero[4] = {0, 0, 0, 0};
   const f32 neutral[4] = {0.5f, 0.5f, 0.5f, 0};
-  device.ImmediateSubmit([&](CommandList& cmd) {
-    TextureBarrier to_clear[3] = {
-        Transition(albedo_, ResourceState::kUndefined, ResourceState::kCopyDst),
-        Transition(fx_, ResourceState::kUndefined, ResourceState::kCopyDst),
-        Transition(chart_, ResourceState::kUndefined, ResourceState::kCopyDst)};
+  device.ImmediateSubmit([&](gpu::CommandList& cmd) {
+    gpu::TextureBarrier to_clear[3] = {
+        gpu::Transition(albedo_, gpu::ResourceState::kUndefined, gpu::ResourceState::kCopyDst),
+        gpu::Transition(fx_, gpu::ResourceState::kUndefined, gpu::ResourceState::kCopyDst),
+        gpu::Transition(chart_, gpu::ResourceState::kUndefined, gpu::ResourceState::kCopyDst)};
     cmd.TextureBarriers(to_clear);
     cmd.ClearColor(albedo_, zero);
     cmd.ClearColor(fx_, neutral);
     cmd.ClearColor(chart_, zero);
-    TextureBarrier ready[3] = {
-        Transition(albedo_, ResourceState::kCopyDst, ResourceState::kShaderReadFragment),
-        Transition(fx_, ResourceState::kCopyDst, ResourceState::kShaderReadFragment),
-        Transition(chart_, ResourceState::kCopyDst, ResourceState::kShaderReadFragment)};
+    gpu::TextureBarrier ready[3] = {
+        gpu::Transition(albedo_, gpu::ResourceState::kCopyDst, gpu::ResourceState::kShaderReadFragment),
+        gpu::Transition(fx_, gpu::ResourceState::kCopyDst, gpu::ResourceState::kShaderReadFragment),
+        gpu::Transition(chart_, gpu::ResourceState::kCopyDst, gpu::ResourceState::kShaderReadFragment)};
     cmd.TextureBarriers(ready);
   });
-  atlas_state_ = ResourceState::kShaderReadFragment;
-  chart_state_ = ResourceState::kShaderReadFragment;
+  atlas_state_ = gpu::ResourceState::kShaderReadFragment;
+  chart_state_ = gpu::ResourceState::kShaderReadFragment;
 
   tile_owner_.resize(tile_count_);
   for (u32 i = 0; i < tile_count_; ++i) tile_owner_[i] = 0;
@@ -126,17 +126,17 @@ bool DecalBaker::Initialize(Device& device, const Desc& desc) {
   return true;
 }
 
-bool DecalBaker::CreateAtlases(Device& device) {
-  const Extent2D extent{desc_.atlas_size, desc_.atlas_size};
-  const TextureUsageFlags layer_usage = kTextureUsageSampled | kTextureUsageStorage |
-                                        kTextureUsageColorTarget | kTextureUsageTransferSrc |
-                                        kTextureUsageTransferDst;
-  albedo_ = device.CreateImage2D(Format::kRGBA8Unorm, extent, layer_usage, mip_count_);
-  fx_ = device.CreateImage2D(Format::kRGBA8Unorm, extent, layer_usage, mip_count_);
+bool DecalBaker::CreateAtlases(gpu::Device& device) {
+  const gpu::Extent2D extent{desc_.atlas_size, desc_.atlas_size};
+  const gpu::TextureUsageFlags layer_usage = gpu::kTextureUsageSampled | gpu::kTextureUsageStorage |
+                                        gpu::kTextureUsageColorTarget | gpu::kTextureUsageTransferSrc |
+                                        gpu::kTextureUsageTransferDst;
+  albedo_ = device.CreateImage2D(gpu::Format::kRGBA8Unorm, extent, layer_usage, mip_count_);
+  fx_ = device.CreateImage2D(gpu::Format::kRGBA8Unorm, extent, layer_usage, mip_count_);
   // The chart mask needs no mips: only the dilate reads it, always at mip 0.
-  chart_ = device.CreateImage2D(Format::kR8Unorm, extent,
-                                kTextureUsageSampled | kTextureUsageColorTarget |
-                                    kTextureUsageTransferDst,
+  chart_ = device.CreateImage2D(gpu::Format::kR8Unorm, extent,
+                                gpu::kTextureUsageSampled | gpu::kTextureUsageColorTarget |
+                                    gpu::kTextureUsageTransferDst,
                                 1);
   if (!albedo_ || !fx_ || !chart_) {
     RX_WARN("decal baker: atlas allocation failed; texture-space decals disabled");
@@ -156,7 +156,7 @@ bool DecalBaker::CreateAtlases(Device& device) {
   clear_albedo_offset_ = 0;
   clear_fx_offset_ = texels * 4;
   clear_chart_offset_ = clear_fx_offset_ + texels * 4;
-  clear_staging_ = device.CreateBuffer(clear_chart_offset_ + texels, kBufferUsageTransferSrc, true);
+  clear_staging_ = device.CreateBuffer(clear_chart_offset_ + texels, gpu::kBufferUsageTransferSrc, true);
   if (!clear_staging_.mapped) {
     RX_WARN("decal baker: clear staging allocation failed; texture-space decals disabled");
     return false;
@@ -174,9 +174,9 @@ bool DecalBaker::CreateAtlases(Device& device) {
 
   // Per-tile uv mapping, read by the forward pass to reproduce what the bake
   // did. Identity until a receiver claims the tile and says otherwise.
-  for (u32 f = 0; f < Device::kMaxFramesInFlight; ++f) {
+  for (u32 f = 0; f < gpu::Device::kMaxFramesInFlight; ++f) {
     tile_uv_xform_[f] =
-        device.CreateBuffer(kMaxTiles * 4 * sizeof(f32), kBufferUsageStorage, true);
+        device.CreateBuffer(kMaxTiles * 4 * sizeof(f32), gpu::kBufferUsageStorage, true);
     if (!tile_uv_xform_[f].mapped) {
       RX_WARN("decal baker: tile transform buffer mapping failed; texture-space decals disabled");
       return false;
@@ -190,31 +190,31 @@ bool DecalBaker::CreateAtlases(Device& device) {
     }
   }
 
-  white_ = device.CreateImage2D(Format::kRGBA8Unorm, {1, 1},
-                                kTextureUsageSampled | kTextureUsageTransferDst);
-  flat_normal_ = device.CreateImage2D(Format::kRGBA8Unorm, {1, 1},
-                                      kTextureUsageSampled | kTextureUsageTransferDst);
+  white_ = device.CreateImage2D(gpu::Format::kRGBA8Unorm, {1, 1},
+                                gpu::kTextureUsageSampled | gpu::kTextureUsageTransferDst);
+  flat_normal_ = device.CreateImage2D(gpu::Format::kRGBA8Unorm, {1, 1},
+                                      gpu::kTextureUsageSampled | gpu::kTextureUsageTransferDst);
   if (!white_ || !flat_normal_) {
     RX_WARN("decal baker: fallback page allocation failed; texture-space decals disabled");
     return false;
   }
   const f32 opaque_white[4] = {1, 1, 1, 1};
   const f32 flat[4] = {0.5f, 0.5f, 1.0f, 1.0f};
-  device.ImmediateSubmit([&](CommandList& cmd) {
-    TextureBarrier to_copy[2] = {
-        Transition(white_, ResourceState::kUndefined, ResourceState::kCopyDst),
-        Transition(flat_normal_, ResourceState::kUndefined, ResourceState::kCopyDst)};
+  device.ImmediateSubmit([&](gpu::CommandList& cmd) {
+    gpu::TextureBarrier to_copy[2] = {
+        gpu::Transition(white_, gpu::ResourceState::kUndefined, gpu::ResourceState::kCopyDst),
+        gpu::Transition(flat_normal_, gpu::ResourceState::kUndefined, gpu::ResourceState::kCopyDst)};
     cmd.TextureBarriers(to_copy);
     cmd.ClearColor(white_, opaque_white);
     cmd.ClearColor(flat_normal_, flat);
-    TextureBarrier to_read[2] = {
-        Transition(white_, ResourceState::kCopyDst, ResourceState::kShaderReadFragment),
-        Transition(flat_normal_, ResourceState::kCopyDst, ResourceState::kShaderReadFragment)};
+    gpu::TextureBarrier to_read[2] = {
+        gpu::Transition(white_, gpu::ResourceState::kCopyDst, gpu::ResourceState::kShaderReadFragment),
+        gpu::Transition(flat_normal_, gpu::ResourceState::kCopyDst, gpu::ResourceState::kShaderReadFragment)};
     cmd.TextureBarriers(to_read);
   });
 
-  for (u32 f = 0; f < Device::kMaxFramesInFlight; ++f) {
-    stamps_[f] = device.CreateBuffer(kMaxFrameStamps * sizeof(GpuStamp), kBufferUsageStorage, true);
+  for (u32 f = 0; f < gpu::Device::kMaxFramesInFlight; ++f) {
+    stamps_[f] = device.CreateBuffer(kMaxFrameStamps * sizeof(GpuStamp), gpu::kBufferUsageStorage, true);
     if (!stamps_[f].mapped) {
       RX_WARN("decal baker: stamp buffer mapping failed; texture-space decals disabled");
       return false;
@@ -223,41 +223,41 @@ bool DecalBaker::CreateAtlases(Device& device) {
   return true;
 }
 
-bool DecalBaker::CreatePipelines(Device& device) {
-  sampler_ = device.GetSampler({.min_filter = Filter::kLinear,
-                                .mag_filter = Filter::kLinear,
-                                .address_u = AddressMode::kClampToEdge,
-                                .address_v = AddressMode::kClampToEdge,
-                                .address_w = AddressMode::kClampToEdge});
+bool DecalBaker::CreatePipelines(gpu::Device& device) {
+  sampler_ = device.GetSampler({.min_filter = gpu::Filter::kLinear,
+                                .mag_filter = gpu::Filter::kLinear,
+                                .address_u = gpu::AddressMode::kClampToEdge,
+                                .address_v = gpu::AddressMode::kClampToEdge,
+                                .address_w = gpu::AddressMode::kClampToEdge});
 
-  VertexBufferLayout stream{
+  gpu::VertexBufferLayout stream{
       .stride = sizeof(asset::Vertex),
-      .attributes = {{0, Format::kRGB32Float, offsetof(asset::Vertex, position)},
-                     {1, Format::kRGB32Float, offsetof(asset::Vertex, normal)},
-                     {2, Format::kRGBA32Float, offsetof(asset::Vertex, tangent)},
-                     {3, Format::kRG32Float, offsetof(asset::Vertex, uv)}}};
-  VertexBufferLayout skin_stream{
+      .attributes = {{0, gpu::Format::kRGB32Float, offsetof(asset::Vertex, position)},
+                     {1, gpu::Format::kRGB32Float, offsetof(asset::Vertex, normal)},
+                     {2, gpu::Format::kRGBA32Float, offsetof(asset::Vertex, tangent)},
+                     {3, gpu::Format::kRG32Float, offsetof(asset::Vertex, uv)}}};
+  gpu::VertexBufferLayout skin_stream{
       .stride = sizeof(asset::SkinnedVertexExtra),
-      .attributes = {{5, Format::kRGBA8Uint, offsetof(asset::SkinnedVertexExtra, bone_indices)},
-                     {6, Format::kRGBA8Unorm, offsetof(asset::SkinnedVertexExtra, bone_weights)}}};
+      .attributes = {{5, gpu::Format::kRGBA8Uint, offsetof(asset::SkinnedVertexExtra, bone_indices)},
+                     {6, gpu::Format::kRGBA8Unorm, offsetof(asset::SkinnedVertexExtra, bone_weights)}}};
 
-  GraphicsPipelineDesc bake{};
+  gpu::GraphicsPipelineDesc bake{};
   bake.vertex = RX_SHADER(k_decal_bake_vs_hlsl);
   bake.fragment = RX_SHADER(k_decal_bake_ps_hlsl);
   bake.vertex_buffers = {stream};
   // UV-space rasterization has no meaningful winding, and mirrored charts flip
   // it anyway; both faces must land in the tile.
-  bake.raster = {.cull = CullMode::kNone};
-  bake.color_formats = {Format::kRGBA8Unorm, Format::kRGBA8Unorm, Format::kR8Unorm};
+  bake.raster = {.cull = gpu::CullMode::kNone};
+  bake.color_formats = {gpu::Format::kRGBA8Unorm, gpu::Format::kRGBA8Unorm, gpu::Format::kR8Unorm};
   // The shader emits ONE premultiplied composite of its whole stamp run, so the
   // fixed function only has to put that over what the tile already holds. The
   // chart mask is a plain write.
-  bake.blend = {BlendMode::kPremultiplied, BlendMode::kPremultiplied, BlendMode::kOpaque};
-  bake.sets = {{.slots = {{0, BindingType::kStorageBuffer},
-                          {1, BindingType::kStorageBuffer},
-                          {2, BindingType::kCombinedTextureSampler},
-                          {3, BindingType::kCombinedTextureSampler}}}};
-  bake.push_constant_size = PushSize<BakePush>();
+  bake.blend = {gpu::BlendMode::kPremultiplied, gpu::BlendMode::kPremultiplied, gpu::BlendMode::kOpaque};
+  bake.sets = {{.slots = {{0, gpu::BindingType::kStorageBuffer},
+                          {1, gpu::BindingType::kStorageBuffer},
+                          {2, gpu::BindingType::kCombinedTextureSampler},
+                          {3, gpu::BindingType::kCombinedTextureSampler}}}};
+  bake.push_constant_size = gpu::PushSize<BakePush>();
   bake.debug_name = "decal_bake";
   stamp_pipeline_ = device.CreateGraphicsPipeline(bake);
   if (!stamp_pipeline_) {
@@ -265,7 +265,7 @@ bool DecalBaker::CreatePipelines(Device& device) {
     return false;
   }
 
-  GraphicsPipelineDesc skinned = bake;
+  gpu::GraphicsPipelineDesc skinned = bake;
   skinned.vertex = RX_SHADER(k_decal_bake_skin_vs_hlsl);
   skinned.vertex_buffers = {stream, skin_stream};
   skinned.debug_name = "decal_bake_skinned";
@@ -278,10 +278,10 @@ bool DecalBaker::CreatePipelines(Device& device) {
 
   dilate_pipeline_ = device.CreateComputePipeline({
       .shader = RX_SHADER(k_decal_dilate_cs_hlsl),
-      .sets = {{.slots = {{0, BindingType::kStorageImage},
-                          {1, BindingType::kStorageImage},
-                          {2, BindingType::kCombinedTextureSampler}}}},
-      .push_constant_size = PushSize<DilatePush>(),
+      .sets = {{.slots = {{0, gpu::BindingType::kStorageImage},
+                          {1, gpu::BindingType::kStorageImage},
+                          {2, gpu::BindingType::kCombinedTextureSampler}}}},
+      .push_constant_size = gpu::PushSize<DilatePush>(),
       .debug_name = "decal_dilate",
   });
   if (!dilate_pipeline_) {
@@ -290,7 +290,7 @@ bool DecalBaker::CreatePipelines(Device& device) {
   return true;
 }
 
-void DecalBaker::Destroy(Device& device) {
+void DecalBaker::Destroy(gpu::Device& device) {
   if (stamp_pipeline_) device.DestroyPipeline(stamp_pipeline_);
   if (stamp_skin_pipeline_) device.DestroyPipeline(stamp_skin_pipeline_);
   if (dilate_pipeline_) device.DestroyPipeline(dilate_pipeline_);
@@ -307,17 +307,17 @@ void DecalBaker::Destroy(Device& device) {
   if (fx_) device.DestroyImage(fx_);
   if (chart_) device.DestroyImage(chart_);
   if (clear_staging_) device.DestroyBuffer(clear_staging_);
-  for (u32 f = 0; f < Device::kMaxFramesInFlight; ++f) {
+  for (u32 f = 0; f < gpu::Device::kMaxFramesInFlight; ++f) {
     if (tile_uv_xform_[f]) device.DestroyBuffer(tile_uv_xform_[f]);
   }
-  for (u32 f = 0; f < Device::kMaxFramesInFlight; ++f) {
+  for (u32 f = 0; f < gpu::Device::kMaxFramesInFlight; ++f) {
     if (stamps_[f]) device.DestroyBuffer(stamps_[f]);
   }
   receivers_.clear();
   free_receivers_.clear();
   tile_owner_.clear();
-  atlas_state_ = ResourceState::kUndefined;
-  chart_state_ = ResourceState::kUndefined;
+  atlas_state_ = gpu::ResourceState::kUndefined;
+  chart_state_ = gpu::ResourceState::kUndefined;
   stats_ = Stats{};
 }
 
@@ -448,7 +448,7 @@ u32 DecalBaker::AcquireTile(u32 receiver, u64 frame_index) {
 }
 
 void DecalBaker::AddToGraph(RenderGraph& graph, base::Span<const Target> targets, u32 frame_slot,
-                            u64 frame_index, TextureView source_albedo, TextureView source_normal) {
+                            u64 frame_index, gpu::TextureView source_albedo, gpu::TextureView source_normal) {
   stats_.bakes = 0;
   if (!available()) return;
 
@@ -460,8 +460,8 @@ void DecalBaker::AddToGraph(RenderGraph& graph, base::Span<const Target> targets
 
   struct BakeDraw {
     u32 tile = 0;
-    const GpuMesh* mesh = nullptr;
-    const GpuBuffer* bones = nullptr;
+    const gpu::GpuMesh* mesh = nullptr;
+    const gpu::GpuBuffer* bones = nullptr;
     Mat4 model = Mat4::Identity();
     u32 skin_offset = 0;
     u32 first_stamp = 0;
@@ -553,9 +553,9 @@ void DecalBaker::AddToGraph(RenderGraph& graph, base::Span<const Target> targets
       "decal_bake", [](RenderGraph::PassBuilder&) {},
       [this, draws = base::move(draws), frame_slot, source_albedo,
        source_normal](PassContext& ctx) {
-        CommandList& cmd = *ctx.cmd;
-        ResourceState atlas = atlas_state_;
-        ResourceState chart = chart_state_;
+        gpu::CommandList& cmd = *ctx.cmd;
+        gpu::ResourceState atlas = atlas_state_;
+        gpu::ResourceState chart = chart_state_;
 
         // Repainted tiles get their neutral content back before anything draws
         // over them: this is also what wipes the previous owner of a recycled
@@ -563,17 +563,17 @@ void DecalBaker::AddToGraph(RenderGraph& graph, base::Span<const Target> targets
         bool any_clear = false;
         for (const BakeDraw& draw : draws) any_clear |= draw.clear;
         if (any_clear) {
-          TextureBarrier to_copy[3] = {Transition(albedo_, atlas, ResourceState::kCopyDst),
-                                       Transition(fx_, atlas, ResourceState::kCopyDst),
-                                       Transition(chart_, chart, ResourceState::kCopyDst)};
+          gpu::TextureBarrier to_copy[3] = {gpu::Transition(albedo_, atlas, gpu::ResourceState::kCopyDst),
+                                       gpu::Transition(fx_, atlas, gpu::ResourceState::kCopyDst),
+                                       gpu::Transition(chart_, chart, gpu::ResourceState::kCopyDst)};
           cmd.TextureBarriers(to_copy);
-          atlas = ResourceState::kCopyDst;
-          chart = ResourceState::kCopyDst;
+          atlas = gpu::ResourceState::kCopyDst;
+          chart = gpu::ResourceState::kCopyDst;
           for (const BakeDraw& draw : draws) {
             if (!draw.clear) continue;
             const i32 x = static_cast<i32>((draw.tile % tiles_per_row_) * desc_.tile_size);
             const i32 y = static_cast<i32>((draw.tile / tiles_per_row_) * desc_.tile_size);
-            BufferTextureCopy region{.offset = {x, y}, .extent = {desc_.tile_size, desc_.tile_size}};
+            gpu::BufferTextureCopy region{.offset = {x, y}, .extent = {desc_.tile_size, desc_.tile_size}};
             region.buffer_offset = clear_albedo_offset_;
             cmd.CopyBufferToTexture(clear_staging_, albedo_, base::Span(&region, 1));
             region.buffer_offset = clear_fx_offset_;
@@ -583,22 +583,22 @@ void DecalBaker::AddToGraph(RenderGraph& graph, base::Span<const Target> targets
           }
         }
 
-        TextureBarrier to_target[3] = {
-            Transition(albedo_, atlas, ResourceState::kColorTarget),
-            Transition(fx_, atlas, ResourceState::kColorTarget),
-            Transition(chart_, chart, ResourceState::kColorTarget)};
+        gpu::TextureBarrier to_target[3] = {
+            gpu::Transition(albedo_, atlas, gpu::ResourceState::kColorTarget),
+            gpu::Transition(fx_, atlas, gpu::ResourceState::kColorTarget),
+            gpu::Transition(chart_, chart, gpu::ResourceState::kColorTarget)};
         cmd.TextureBarriers(to_target);
 
-        ColorAttachment colors[3];
-        colors[0] = {.view = albedo_mip0_, .load = LoadOp::kLoad};
-        colors[1] = {.view = fx_mip0_, .load = LoadOp::kLoad};
-        colors[2] = {.view = chart_.view, .load = LoadOp::kLoad};
+        gpu::ColorAttachment colors[3];
+        colors[0] = {.view = albedo_mip0_, .load = gpu::LoadOp::kLoad};
+        colors[1] = {.view = fx_mip0_, .load = gpu::LoadOp::kLoad};
+        colors[2] = {.view = chart_.view, .load = gpu::LoadOp::kLoad};
         cmd.BeginRendering({.extent = {desc_.atlas_size, desc_.atlas_size},
                             .colors = base::Span(colors, 3)});
-        PipelineHandle bound{};
+        gpu::PipelineHandle bound{};
         for (const BakeDraw& draw : draws) {
           if (draw.stamp_count == 0) continue;
-          const PipelineHandle wanted = draw.bones ? stamp_skin_pipeline_ : stamp_pipeline_;
+          const gpu::PipelineHandle wanted = draw.bones ? stamp_skin_pipeline_ : stamp_pipeline_;
           if (!(wanted == bound)) {
             cmd.BindPipeline(wanted);
             bound = wanted;
@@ -607,11 +607,11 @@ void DecalBaker::AddToGraph(RenderGraph& graph, base::Span<const Target> targets
           // receivers, and a static one binds the stamp buffer as a placeholder
           // for the slot its vertex shader never reads.
           cmd.BindTransient(
-              0, {Bind::StorageBuffer(0, stamps_[frame_slot], 0, stamps_[frame_slot].size),
-                  Bind::StorageBuffer(1, draw.bones ? *draw.bones : stamps_[frame_slot], 0,
+              0, {gpu::Bind::StorageBuffer(0, stamps_[frame_slot], 0, stamps_[frame_slot].size),
+                  gpu::Bind::StorageBuffer(1, draw.bones ? *draw.bones : stamps_[frame_slot], 0,
                                       draw.bones ? draw.bones->size : stamps_[frame_slot].size),
-                  Bind::Combined(2, source_albedo ? source_albedo : white_.view, sampler_),
-                  Bind::Combined(3, source_normal ? source_normal : flat_normal_.view,
+                  gpu::Bind::Combined(2, source_albedo ? source_albedo : white_.view, sampler_),
+                  gpu::Bind::Combined(3, source_normal ? source_normal : flat_normal_.view,
                                  sampler_)});
           const f32 x = static_cast<f32>((draw.tile % tiles_per_row_) * desc_.tile_size);
           const f32 y = static_cast<f32>((draw.tile / tiles_per_row_) * desc_.tile_size);
@@ -631,27 +631,27 @@ void DecalBaker::AddToGraph(RenderGraph& graph, base::Span<const Target> targets
           cmd.Push(push);
           cmd.BindVertexBuffer(0, draw.mesh->vertices);
           if (draw.bones) cmd.BindVertexBuffer(1, draw.mesh->skinning);
-          cmd.BindIndexBuffer(draw.mesh->indices, 0, IndexType::kUint32);
+          cmd.BindIndexBuffer(draw.mesh->indices, 0, gpu::IndexType::kUint32);
           cmd.DrawIndexed(draw.mesh->index_count);
         }
         cmd.EndRendering();
 
         // Gutter fill, then the mip chain the forward pass minifies through.
         if (dilate_pipeline_) {
-          TextureBarrier to_storage[3] = {
-              Transition(albedo_, ResourceState::kColorTarget, ResourceState::kGeneral),
-              Transition(fx_, ResourceState::kColorTarget, ResourceState::kGeneral),
-              Transition(chart_, ResourceState::kColorTarget,
-                         ResourceState::kShaderReadCompute)};
+          gpu::TextureBarrier to_storage[3] = {
+              gpu::Transition(albedo_, gpu::ResourceState::kColorTarget, gpu::ResourceState::kGeneral),
+              gpu::Transition(fx_, gpu::ResourceState::kColorTarget, gpu::ResourceState::kGeneral),
+              gpu::Transition(chart_, gpu::ResourceState::kColorTarget,
+                         gpu::ResourceState::kShaderReadCompute)};
           to_storage[0].mip_count = 1;
           to_storage[1].mip_count = 1;
           cmd.TextureBarriers(to_storage);
           cmd.BindPipeline(dilate_pipeline_);
           for (const BakeDraw& draw : draws) {
             if (draw.stamp_count == 0) continue;
-            cmd.BindTransient(0, {Bind::StorageView(0, albedo_mip0_),
-                                  Bind::StorageView(1, fx_mip0_),
-                                  Bind::Combined(2, chart_.view, sampler_)});
+            cmd.BindTransient(0, {gpu::Bind::StorageView(0, albedo_mip0_),
+                                  gpu::Bind::StorageView(1, fx_mip0_),
+                                  gpu::Bind::Combined(2, chart_.view, sampler_)});
             DilatePush push{{(draw.tile % tiles_per_row_) * desc_.tile_size,
                              (draw.tile / tiles_per_row_) * desc_.tile_size},
                             desc_.tile_size, 0};
@@ -664,14 +664,14 @@ void DecalBaker::AddToGraph(RenderGraph& graph, base::Span<const Target> targets
         // regions and costs a third of a mip-0 copy. A mip texel never spans
         // two tiles (the chain stops far short of a tile edge), so tiles cannot
         // bleed into each other.
-        const ResourceState after_dilate =
-            dilate_pipeline_ ? ResourceState::kGeneral : ResourceState::kColorTarget;
+        const gpu::ResourceState after_dilate =
+            dilate_pipeline_ ? gpu::ResourceState::kGeneral : gpu::ResourceState::kColorTarget;
         if (mip_count_ > 1) {
-          TextureBarrier chain[4] = {
-              Transition(albedo_, after_dilate, ResourceState::kCopySrc),
-              Transition(fx_, after_dilate, ResourceState::kCopySrc),
-              Transition(albedo_, ResourceState::kUndefined, ResourceState::kCopyDst),
-              Transition(fx_, ResourceState::kUndefined, ResourceState::kCopyDst)};
+          gpu::TextureBarrier chain[4] = {
+              gpu::Transition(albedo_, after_dilate, gpu::ResourceState::kCopySrc),
+              gpu::Transition(fx_, after_dilate, gpu::ResourceState::kCopySrc),
+              gpu::Transition(albedo_, gpu::ResourceState::kUndefined, gpu::ResourceState::kCopyDst),
+              gpu::Transition(fx_, gpu::ResourceState::kUndefined, gpu::ResourceState::kCopyDst)};
           chain[0].mip_count = 1;
           chain[1].mip_count = 1;
           chain[2].base_mip = 1;
@@ -679,15 +679,15 @@ void DecalBaker::AddToGraph(RenderGraph& graph, base::Span<const Target> targets
           cmd.TextureBarriers(chain);
           u32 size = desc_.atlas_size;
           for (u32 mip = 1; mip < mip_count_; ++mip) {
-            const Extent2D src{size, size};
-            const Extent2D dst{rx::Max(size >> 1, 1u), rx::Max(size >> 1, 1u)};
+            const gpu::Extent2D src{size, size};
+            const gpu::Extent2D dst{rx::Max(size >> 1, 1u), rx::Max(size >> 1, 1u)};
             cmd.BlitMip(albedo_, mip - 1, src, mip, dst);
             cmd.BlitMip(fx_, mip - 1, src, mip, dst);
             if (mip + 1 < mip_count_) {
-              TextureBarrier step[2] = {Transition(albedo_, ResourceState::kCopyDst,
-                                                   ResourceState::kCopySrc),
-                                        Transition(fx_, ResourceState::kCopyDst,
-                                                   ResourceState::kCopySrc)};
+              gpu::TextureBarrier step[2] = {gpu::Transition(albedo_, gpu::ResourceState::kCopyDst,
+                                                   gpu::ResourceState::kCopySrc),
+                                        gpu::Transition(fx_, gpu::ResourceState::kCopyDst,
+                                                   gpu::ResourceState::kCopySrc)};
               step[0].base_mip = mip;
               step[0].mip_count = 1;
               step[1].base_mip = mip;
@@ -696,25 +696,25 @@ void DecalBaker::AddToGraph(RenderGraph& graph, base::Span<const Target> targets
             }
             size = dst.width;
           }
-          TextureBarrier to_read[4] = {
-              Transition(albedo_, ResourceState::kCopySrc, ResourceState::kShaderReadFragment),
-              Transition(fx_, ResourceState::kCopySrc, ResourceState::kShaderReadFragment),
-              Transition(albedo_, ResourceState::kCopyDst, ResourceState::kShaderReadFragment),
-              Transition(fx_, ResourceState::kCopyDst, ResourceState::kShaderReadFragment)};
+          gpu::TextureBarrier to_read[4] = {
+              gpu::Transition(albedo_, gpu::ResourceState::kCopySrc, gpu::ResourceState::kShaderReadFragment),
+              gpu::Transition(fx_, gpu::ResourceState::kCopySrc, gpu::ResourceState::kShaderReadFragment),
+              gpu::Transition(albedo_, gpu::ResourceState::kCopyDst, gpu::ResourceState::kShaderReadFragment),
+              gpu::Transition(fx_, gpu::ResourceState::kCopyDst, gpu::ResourceState::kShaderReadFragment)};
           to_read[0].mip_count = mip_count_ - 1;
           to_read[1].mip_count = mip_count_ - 1;
           to_read[2].base_mip = mip_count_ - 1;
           to_read[3].base_mip = mip_count_ - 1;
           cmd.TextureBarriers(to_read);
         } else {
-          TextureBarrier to_read[2] = {
-              Transition(albedo_, after_dilate, ResourceState::kShaderReadFragment),
-              Transition(fx_, after_dilate, ResourceState::kShaderReadFragment)};
+          gpu::TextureBarrier to_read[2] = {
+              gpu::Transition(albedo_, after_dilate, gpu::ResourceState::kShaderReadFragment),
+              gpu::Transition(fx_, after_dilate, gpu::ResourceState::kShaderReadFragment)};
           cmd.TextureBarriers(to_read);
         }
-        atlas_state_ = ResourceState::kShaderReadFragment;
+        atlas_state_ = gpu::ResourceState::kShaderReadFragment;
         chart_state_ =
-            dilate_pipeline_ ? ResourceState::kShaderReadCompute : ResourceState::kColorTarget;
+            dilate_pipeline_ ? gpu::ResourceState::kShaderReadCompute : gpu::ResourceState::kColorTarget;
       });
 }
 

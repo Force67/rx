@@ -16,7 +16,7 @@
 namespace rx::render {
 namespace {
 
-constexpr Format kPrecipMotionFormat = Format::kRG16Float;  // == kMotionFormat
+constexpr gpu::Format kPrecipMotionFormat = gpu::Format::kRG16Float;  // == kMotionFormat
 
 // Mirrors PrecipCamera in precip_common.hlsli. The two matrices on their own
 // are the entire 128 bytes vulkan guarantees for a push block, so they ride in
@@ -41,27 +41,27 @@ static_assert(sizeof(PrecipPush) == 128);
 
 }  // namespace
 
-bool PrecipVolume::Initialize(Device& device, Format color_format, bool ray_query) {
+bool PrecipVolume::Initialize(gpu::Device& device, gpu::Format color_format, bool ray_query) {
   // Slot 0 is the sky-occlusion map (vertex stage), 1 the prepass depth and 2
   // the froxel volume (pixel stage), 4 the reprojection matrices (vertex
   // stage); the rt variant adds the TLAS at 3.
-  base::Vector<PipelineBindings> sets;
-  sets.push_back({.slots = {{0, BindingType::kCombinedTextureSampler},
-                            {1, BindingType::kSampledImage},
-                            {2, BindingType::kCombinedTextureSampler},
-                            {4, BindingType::kUniformBuffer}}});
+  base::Vector<gpu::PipelineBindings> sets;
+  sets.push_back({.slots = {{0, gpu::BindingType::kCombinedTextureSampler},
+                            {1, gpu::BindingType::kSampledImage},
+                            {2, gpu::BindingType::kCombinedTextureSampler},
+                            {4, gpu::BindingType::kUniformBuffer}}});
 
   // Attachment 0 = lit colour, 1 = motion, both alpha-weighted like the
   // billboard particles. Depth is read as a texture (soft fade), not attached.
-  GraphicsPipelineDesc desc{
+  gpu::GraphicsPipelineDesc desc{
       .vertex = RX_SHADER(k_precip_volume_vs_hlsl),
       .fragment = RX_SHADER(k_precip_volume_ps_hlsl),
-      .topology = PrimitiveTopology::kTriangleStrip,
-      .raster = {.cull = CullMode::kNone},
+      .topology = gpu::PrimitiveTopology::kTriangleStrip,
+      .raster = {.cull = gpu::CullMode::kNone},
       .color_formats = {color_format, kPrecipMotionFormat},
-      .blend = {BlendMode::kAlpha, BlendMode::kAlpha},
+      .blend = {gpu::BlendMode::kAlpha, gpu::BlendMode::kAlpha},
       .sets = sets,
-      .push_constant_size = PushSize<PrecipPush>(),
+      .push_constant_size = gpu::PushSize<PrecipPush>(),
       .debug_name = "precip_volume",
   };
   pipeline_ = device.CreateGraphicsPipeline(desc);
@@ -71,12 +71,12 @@ bool PrecipVolume::Initialize(Device& device, Format color_format, bool ray_quer
   }
 
   if (ray_query) {
-    base::Vector<PipelineBindings> rt_sets;
-    rt_sets.push_back({.slots = {{0, BindingType::kCombinedTextureSampler},
-                                 {1, BindingType::kSampledImage},
-                                 {2, BindingType::kCombinedTextureSampler},
-                                 {3, BindingType::kAccelStruct},
-                                 {4, BindingType::kUniformBuffer}}});
+    base::Vector<gpu::PipelineBindings> rt_sets;
+    rt_sets.push_back({.slots = {{0, gpu::BindingType::kCombinedTextureSampler},
+                                 {1, gpu::BindingType::kSampledImage},
+                                 {2, gpu::BindingType::kCombinedTextureSampler},
+                                 {3, gpu::BindingType::kAccelStruct},
+                                 {4, gpu::BindingType::kUniformBuffer}}});
     desc.vertex = RX_SHADER(k_precip_volume_rt_vs_hlsl);
     desc.sets = rt_sets;
     desc.debug_name = "precip_volume_rt";
@@ -100,8 +100,8 @@ bool PrecipVolume::Initialize(Device& device, Format color_format, bool ray_quer
   // slot 2 must always hold a valid Texture3D descriptor. A cleared 1x1x1
   // stand-in fills it then; the froxel flag in the push zeroes the term.
   froxel_dummy_ = device.CreateImage3D(
-      Format::kRGBA16Float, 1, 1, 1,
-      kTextureUsageStorage | kTextureUsageSampled | kTextureUsageTransferDst);
+      gpu::Format::kRGBA16Float, 1, 1, 1,
+      gpu::kTextureUsageStorage | gpu::kTextureUsageSampled | gpu::kTextureUsageTransferDst);
   if (!froxel_dummy_) {
     RX_ERROR("precip froxel stand-in creation failed");
     return false;
@@ -109,27 +109,27 @@ bool PrecipVolume::Initialize(Device& device, Format color_format, bool ray_quer
 
   // One per in-flight frame: the pass rewrites it while the previous frame may
   // still be reading its own copy.
-  for (GpuBuffer& camera : camera_) {
-    camera = device.CreateBuffer(sizeof(PrecipCamera), kBufferUsageUniform, true);
+  for (gpu::GpuBuffer& camera : camera_) {
+    camera = device.CreateBuffer(sizeof(PrecipCamera), gpu::kBufferUsageUniform, true);
     if (!camera.mapped) {
       RX_ERROR("precip camera uniform creation failed");
       return false;
     }
   }
-  device.ImmediateSubmit([this](CommandList& cmd) {
-    TextureBarrier to_clear[1] = {
-        Transition(froxel_dummy_, ResourceState::kUndefined, ResourceState::kCopyDst)};
+  device.ImmediateSubmit([this](gpu::CommandList& cmd) {
+    gpu::TextureBarrier to_clear[1] = {
+        gpu::Transition(froxel_dummy_, gpu::ResourceState::kUndefined, gpu::ResourceState::kCopyDst)};
     cmd.TextureBarriers(to_clear);
     const f32 zero[4] = {0, 0, 0, 0};
     cmd.ClearColor(froxel_dummy_, zero);
-    TextureBarrier to_general[1] = {
-        Transition(froxel_dummy_, ResourceState::kCopyDst, ResourceState::kGeneral)};
+    gpu::TextureBarrier to_general[1] = {
+        gpu::Transition(froxel_dummy_, gpu::ResourceState::kCopyDst, gpu::ResourceState::kGeneral)};
     cmd.TextureBarriers(to_general);
   });
   return true;
 }
 
-void PrecipVolume::Destroy(Device& device) {
+void PrecipVolume::Destroy(gpu::Device& device) {
   device.DestroyPipeline(pipeline_);
   pipeline_ = {};
   device.DestroyPipeline(pipeline_rt_);
@@ -138,7 +138,7 @@ void PrecipVolume::Destroy(Device& device) {
   splash_pipeline_ = {};
   device.DestroyImage(froxel_dummy_);
   froxel_dummy_ = {};
-  for (GpuBuffer& camera : camera_) {
+  for (gpu::GpuBuffer& camera : camera_) {
     if (camera) device.DestroyBuffer(camera);
     camera = {};
   }
@@ -204,27 +204,27 @@ void PrecipVolume::AddToGraph(RenderGraph& graph, ResourceHandle color, Resource
         push.dt = frame.dt;
         push.occl_range = frame.occl_range;
 
-        const GpuImage& target = ctx.graph->image(color);
-        ColorAttachment attachments[2];
-        attachments[0] = {.view = target.view, .load = LoadOp::kLoad};
-        attachments[1] = {.view = ctx.graph->image(motion).view, .load = LoadOp::kLoad};
+        const gpu::GpuImage& target = ctx.graph->image(color);
+        gpu::ColorAttachment attachments[2];
+        attachments[0] = {.view = target.view, .load = gpu::LoadOp::kLoad};
+        attachments[1] = {.view = ctx.graph->image(motion).view, .load = gpu::LoadOp::kLoad};
         ctx.cmd->BeginRendering({.extent = target.extent, .colors = attachments});
 
         // The occlusion map sits in kShaderReadAll; the froxel volume stays in
         // GENERAL like every other consumer of it. When froxel fog never
         // initialized its view is null - the stand-in keeps the descriptor
         // valid (the push flag already zeroes the term).
-        const TextureView froxel_view =
+        const gpu::TextureView froxel_view =
             frame.froxel_volume ? frame.froxel_volume : froxel_dummy_.view;
-        const SamplerHandle froxel_sampler =
+        const gpu::SamplerHandle froxel_sampler =
             frame.froxel_sampler ? frame.froxel_sampler : frame.occlusion_sampler;
         ctx.cmd->BindPipeline(rt ? pipeline_rt_ : pipeline_);
-        base::Vector<BindingItem> items;
-        items.push_back(Bind::Combined(0, frame.occlusion, frame.occlusion_sampler));
-        items.push_back(Bind::Sampled(1, ctx.graph->image(depth)));
-        items.push_back(InGeneral(Bind::Combined(2, froxel_view, froxel_sampler)));
-        if (rt) items.push_back(Bind::Accel(3, raytracing->tlas(tlas_slot)));
-        items.push_back(Bind::Uniform(4, camera_[slot], 0, sizeof(PrecipCamera)));
+        base::Vector<gpu::BindingItem> items;
+        items.push_back(gpu::Bind::Combined(0, frame.occlusion, frame.occlusion_sampler));
+        items.push_back(gpu::Bind::Sampled(1, ctx.graph->image(depth)));
+        items.push_back(gpu::InGeneral(gpu::Bind::Combined(2, froxel_view, froxel_sampler)));
+        if (rt) items.push_back(gpu::Bind::Accel(3, raytracing->tlas(tlas_slot)));
+        items.push_back(gpu::Bind::Uniform(4, camera_[slot], 0, sizeof(PrecipCamera)));
         ctx.cmd->BindTransient(0, base::Span(items.data(), items.size()));
         ctx.cmd->Push(push);
         ctx.cmd->Draw(4, drop_count, 0, 0);
@@ -232,10 +232,10 @@ void PrecipVolume::AddToGraph(RenderGraph& graph, ResourceHandle color, Resource
         if (splash_count > 0) {
           ctx.cmd->BindPipeline(splash_pipeline_);
           ctx.cmd->BindTransient(
-              0, {Bind::Combined(0, frame.occlusion, frame.occlusion_sampler),
-                  Bind::Sampled(1, ctx.graph->image(depth)),
-                  InGeneral(Bind::Combined(2, froxel_view, froxel_sampler)),
-                  Bind::Uniform(4, camera_[slot], 0, sizeof(PrecipCamera))});
+              0, {gpu::Bind::Combined(0, frame.occlusion, frame.occlusion_sampler),
+                  gpu::Bind::Sampled(1, ctx.graph->image(depth)),
+                  gpu::InGeneral(gpu::Bind::Combined(2, froxel_view, froxel_sampler)),
+                  gpu::Bind::Uniform(4, camera_[slot], 0, sizeof(PrecipCamera))});
           ctx.cmd->Push(push);
           ctx.cmd->Draw(4, splash_count, 0, 0);
         }

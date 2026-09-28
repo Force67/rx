@@ -34,11 +34,11 @@ class FluidSurfacePass {
   // render pass stays compatible. bindless_layout is accepted for call-site
   // parity with the other transparent passes but this pass needs no bindless
   // table (IBL comes through the environment set).
-  static base::UniquePointer<FluidSurfacePass> Create(Device& device, Format color_format,
-                                                  Format motion_format, Format depth_format,
-                                                  BindingLayoutHandle globals_layout,
-                                                  BindingLayoutHandle environment_layout,
-                                                  BindingLayoutHandle bindless_layout);
+  static base::UniquePointer<FluidSurfacePass> Create(gpu::Device& device, gpu::Format color_format,
+                                                  gpu::Format motion_format, gpu::Format depth_format,
+                                                  gpu::BindingLayoutHandle globals_layout,
+                                                  gpu::BindingLayoutHandle environment_layout,
+                                                  gpu::BindingLayoutHandle bindless_layout);
   ~FluidSurfacePass();
 
   FluidSurfacePass(const FluidSurfacePass&) = delete;
@@ -49,15 +49,15 @@ class FluidSurfacePass {
   // then issues the grid draw for the frame's domain. Caller guarantees the sim
   // is active and stepped this frame (its final barrier makes the state readable
   // in the graphics stages).
-  void Draw(PassContext& ctx, BindingSetHandle globals, BindingSetHandle environment,
+  void Draw(PassContext& ctx, gpu::BindingSetHandle globals, gpu::BindingSetHandle environment,
             const FluidSim& sim, u32 frame_slot, f32 time);
 
  private:
-  explicit FluidSurfacePass(Device& device) : device_(device) {}
+  explicit FluidSurfacePass(gpu::Device& device) : device_(device) {}
 
-  Device& device_;
-  SamplerHandle sampler_;
-  PipelineHandle pipeline_;
+  gpu::Device& device_;
+  gpu::SamplerHandle sampler_;
+  gpu::PipelineHandle pipeline_;
 };
 
 }  // namespace rx::render

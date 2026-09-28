@@ -18,33 +18,33 @@ static_assert(sizeof(ShorePush) == 64);
 
 }  // namespace
 
-bool ShoreWetting::Initialize(Device& device) {
+bool ShoreWetting::Initialize(gpu::Device& device) {
   pipeline_ = device.CreateComputePipeline({
       .shader = RX_SHADER(k_shore_wetting_cs_hlsl),
-      .sets = {{.slots = {{0, BindingType::kStorageImage},
-                          {1, BindingType::kCombinedTextureSampler},
-                          {2, BindingType::kCombinedTextureSampler}}}},
-      .push_constant_size = PushSize<ShorePush>(),
+      .sets = {{.slots = {{0, gpu::BindingType::kStorageImage},
+                          {1, gpu::BindingType::kCombinedTextureSampler},
+                          {2, gpu::BindingType::kCombinedTextureSampler}}}},
+      .push_constant_size = gpu::PushSize<ShorePush>(),
       .debug_name = "shore_wetting",
   });
   if (!pipeline_) return false;
 
-  linear_clamp_ = device.GetSampler({.min_filter = Filter::kLinear,
-                                     .mag_filter = Filter::kLinear,
-                                     .address_u = AddressMode::kClampToEdge,
-                                     .address_v = AddressMode::kClampToEdge});
-  linear_wrap_ = device.GetSampler({.min_filter = Filter::kLinear,
-                                    .mag_filter = Filter::kLinear,
-                                    .address_u = AddressMode::kRepeat,
-                                    .address_v = AddressMode::kRepeat});
+  linear_clamp_ = device.GetSampler({.min_filter = gpu::Filter::kLinear,
+                                     .mag_filter = gpu::Filter::kLinear,
+                                     .address_u = gpu::AddressMode::kClampToEdge,
+                                     .address_v = gpu::AddressMode::kClampToEdge});
+  linear_wrap_ = device.GetSampler({.min_filter = gpu::Filter::kLinear,
+                                    .mag_filter = gpu::Filter::kLinear,
+                                    .address_u = gpu::AddressMode::kRepeat,
+                                    .address_v = gpu::AddressMode::kRepeat});
 
-  const TextureUsageFlags usage =
-      kTextureUsageSampled | kTextureUsageStorage | kTextureUsageTransferDst;
-  for (GpuImage& field : fields_) {
-    field = device.CreateImage2D(Format::kR16Float, {kResolution, kResolution}, usage);
+  const gpu::TextureUsageFlags usage =
+      gpu::kTextureUsageSampled | gpu::kTextureUsageStorage | gpu::kTextureUsageTransferDst;
+  for (gpu::GpuImage& field : fields_) {
+    field = device.CreateImage2D(gpu::Format::kR16Float, {kResolution, kResolution}, usage);
   }
-  dummy_ocean_ = device.CreateImage2D(Format::kRGBA16Float, {1, 1},
-                                      kTextureUsageSampled | kTextureUsageTransferDst);
+  dummy_ocean_ = device.CreateImage2D(gpu::Format::kRGBA16Float, {1, 1},
+                                      gpu::kTextureUsageSampled | gpu::kTextureUsageTransferDst);
   if (!fields_[0] || !fields_[1] || !dummy_ocean_ || !linear_clamp_ || !linear_wrap_) {
     RX_WARN("shoreline wetting allocation failed; feature disabled");
     Destroy(device);
@@ -54,24 +54,24 @@ bool ShoreWetting::Initialize(Device& device) {
   // Clear the ping-pong fields to dry and park them in GENERAL (they stay
   // there, storage-written each frame and sampled by the scene pass). The dummy
   // ocean is left shader-readable for the Gerstner path.
-  device.ImmediateSubmit([&](CommandList& cmd) {
+  device.ImmediateSubmit([&](gpu::CommandList& cmd) {
     const f32 zero[4] = {0.0f, 0.0f, 0.0f, 0.0f};
-    for (GpuImage& field : fields_) {
-      cmd.Barrier(Transition(field, ResourceState::kUndefined, ResourceState::kCopyDst));
+    for (gpu::GpuImage& field : fields_) {
+      cmd.Barrier(gpu::Transition(field, gpu::ResourceState::kUndefined, gpu::ResourceState::kCopyDst));
       cmd.ClearColor(field, zero);
-      cmd.Barrier(Transition(field, ResourceState::kCopyDst, ResourceState::kGeneral));
+      cmd.Barrier(gpu::Transition(field, gpu::ResourceState::kCopyDst, gpu::ResourceState::kGeneral));
     }
-    cmd.Barrier(Transition(dummy_ocean_, ResourceState::kUndefined, ResourceState::kCopyDst));
+    cmd.Barrier(gpu::Transition(dummy_ocean_, gpu::ResourceState::kUndefined, gpu::ResourceState::kCopyDst));
     cmd.ClearColor(dummy_ocean_, zero);
-    cmd.Barrier(Transition(dummy_ocean_, ResourceState::kCopyDst, ResourceState::kShaderReadAll));
+    cmd.Barrier(gpu::Transition(dummy_ocean_, gpu::ResourceState::kCopyDst, gpu::ResourceState::kShaderReadAll));
   });
   return true;
 }
 
-void ShoreWetting::Destroy(Device& device) {
+void ShoreWetting::Destroy(gpu::Device& device) {
   if (pipeline_) device.DestroyPipeline(pipeline_);
   pipeline_ = {};
-  for (GpuImage& field : fields_) device.DestroyImage(field);
+  for (gpu::GpuImage& field : fields_) device.DestroyImage(field);
   device.DestroyImage(dummy_ocean_);
   have_prev_ = false;
 }
@@ -123,21 +123,21 @@ void ShoreWetting::AddToGraph(RenderGraph& graph, const Params& params) {
         // The ocean displacement is compute-written earlier this frame; make it
         // visible to this compute read before sampling it.
         if (params.fft_active && params.ocean_displacement) {
-          ctx.cmd->MemoryBarrier(BarrierScope::kComputeWrite, BarrierScope::kComputeRead);
+          ctx.cmd->MemoryBarrier(gpu::BarrierScope::kComputeWrite, gpu::BarrierScope::kComputeRead);
         }
 
-        BindingItem ocean =
+        gpu::BindingItem ocean =
             params.fft_active && params.ocean_displacement
-                ? InGeneral(Bind::Combined(2, params.ocean_displacement, linear_wrap_))
-                : Bind::Combined(2, dummy_ocean_.view, linear_wrap_);
+                ? gpu::InGeneral(gpu::Bind::Combined(2, params.ocean_displacement, linear_wrap_))
+                : gpu::Bind::Combined(2, dummy_ocean_.view, linear_wrap_);
         ctx.cmd->BindPipeline(pipeline_);
         ctx.cmd->BindTransient(
-            0, {Bind::Storage(0, fields_[write_index_]),
-                InGeneral(Bind::Combined(1, fields_[read_index_].view, linear_clamp_)), ocean});
+            0, {gpu::Bind::Storage(0, fields_[write_index_]),
+                gpu::InGeneral(gpu::Bind::Combined(1, fields_[read_index_].view, linear_clamp_)), ocean});
         ctx.cmd->Push(push);
         ctx.cmd->Dispatch(kResolution / 8, kResolution / 8, 1);
         // Sampled by the opaque scene pass (mesh.ps, env slot 30).
-        ctx.cmd->MemoryBarrier(BarrierScope::kComputeWrite, BarrierScope::kGraphicsRead);
+        ctx.cmd->MemoryBarrier(gpu::BarrierScope::kComputeWrite, gpu::BarrierScope::kGraphicsRead);
       });
 }
 

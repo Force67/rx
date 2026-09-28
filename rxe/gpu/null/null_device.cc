@@ -8,7 +8,7 @@
 #include "rxe/gpu/rhi/device.h"
 #include "rxe/gpu/rhi/swapchain.h"
 
-namespace rx::render::null {
+namespace rx::gpu::null {
 namespace {
 
 class NullCommandList final : public CommandList {
@@ -107,4 +107,4 @@ class NullDevice final : public Device {
 
 base::UniquePointer<Device> CreateNullDevice() { return base::MakeUnique<NullDevice>(); }
 
-}  // namespace rx::render::null
+}  // namespace rx::gpu::null

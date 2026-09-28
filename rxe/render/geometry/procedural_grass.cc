@@ -118,12 +118,12 @@ bool AllFinite(const f32* values, u32 count) {
 
 }  // namespace
 
-bool ProceduralGrass::Initialize(Device& device,
-                                 Format scene_color,
-                                 Format motion,
-                                 Format normal,
-                                 Format skin_diffuse,
-                                 Format depth) {
+bool ProceduralGrass::Initialize(gpu::Device& device,
+                                 gpu::Format scene_color,
+                                 gpu::Format motion,
+                                 gpu::Format normal,
+                                 gpu::Format skin_diffuse,
+                                 gpu::Format depth) {
   device_ = &device;
   scene_color_format_ = scene_color;
   motion_format_ = motion;
@@ -132,33 +132,33 @@ bool ProceduralGrass::Initialize(Device& device,
   depth_format_ = depth;
   bend_pipeline_ = device.CreateComputePipeline({
       .shader = RX_SHADER(k_procedural_grass_bend_cs_hlsl),
-      .sets = {{.slots = {{0, BindingType::kCombinedTextureSampler},
-                          {1, BindingType::kStorageImage},
-                          {2, BindingType::kByteBuffer},
-                          {3, BindingType::kCombinedTextureSampler},
-                          {4, BindingType::kStorageImage},
-                          {5, BindingType::kCombinedTextureSampler},
-                          {6, BindingType::kStorageImage}}}},
-      .push_constant_size = PushSize<BendPush>(),
+      .sets = {{.slots = {{0, gpu::BindingType::kCombinedTextureSampler},
+                          {1, gpu::BindingType::kStorageImage},
+                          {2, gpu::BindingType::kByteBuffer},
+                          {3, gpu::BindingType::kCombinedTextureSampler},
+                          {4, gpu::BindingType::kStorageImage},
+                          {5, gpu::BindingType::kCombinedTextureSampler},
+                          {6, gpu::BindingType::kStorageImage}}}},
+      .push_constant_size = gpu::PushSize<BendPush>(),
       .debug_name = "procedural_grass_bend",
   });
-  bend_sampler_ = device.GetSampler({.min_filter = Filter::kNearest,
-                                     .mag_filter = Filter::kNearest,
-                                     .address_u = AddressMode::kClampToEdge,
-                                     .address_v = AddressMode::kClampToEdge});
+  bend_sampler_ = device.GetSampler({.min_filter = gpu::Filter::kNearest,
+                                     .mag_filter = gpu::Filter::kNearest,
+                                     .address_u = gpu::AddressMode::kClampToEdge,
+                                     .address_v = gpu::AddressMode::kClampToEdge});
   generate_pipeline_ = device.CreateComputePipeline({
       .shader = RX_SHADER(k_procedural_grass_generate_cs_hlsl),
-      .sets = {{.slots = {{0, BindingType::kByteBuffer},
-                          {1, BindingType::kByteBuffer},
-                          {2, BindingType::kByteBuffer},
-                           {3, BindingType::kStorageBuffer},
-                           {4, BindingType::kStorageBuffer},
-                           {5, BindingType::kStorageBuffer},
-                           {6, BindingType::kCombinedTextureSampler},
-                           {7, BindingType::kCombinedTextureSampler},
-                           {8, BindingType::kCombinedTextureSampler},
-                           {9, BindingType::kUniformBuffer}}}},
-      .push_constant_size = PushSize<GenerationPush>(),
+      .sets = {{.slots = {{0, gpu::BindingType::kByteBuffer},
+                          {1, gpu::BindingType::kByteBuffer},
+                          {2, gpu::BindingType::kByteBuffer},
+                           {3, gpu::BindingType::kStorageBuffer},
+                           {4, gpu::BindingType::kStorageBuffer},
+                           {5, gpu::BindingType::kStorageBuffer},
+                           {6, gpu::BindingType::kCombinedTextureSampler},
+                           {7, gpu::BindingType::kCombinedTextureSampler},
+                           {8, gpu::BindingType::kCombinedTextureSampler},
+                           {9, gpu::BindingType::kUniformBuffer}}}},
+      .push_constant_size = gpu::PushSize<GenerationPush>(),
       .debug_name = "procedural_grass_generate",
   });
   if (!bend_pipeline_ || !bend_sampler_ || !generate_pipeline_) {
@@ -168,7 +168,7 @@ bool ProceduralGrass::Initialize(Device& device,
   return CreateDrawPipelines(device, 1);
 }
 
-bool ProceduralGrass::CreateDrawPipelines(Device& device, u32 samples) {
+bool ProceduralGrass::CreateDrawPipelines(gpu::Device& device, u32 samples) {
   const u32 index = PipelineIndex(samples);
   if (prepass_pipelines_[index] && scene_pipelines_[index])
     return true;
@@ -176,39 +176,39 @@ bool ProceduralGrass::CreateDrawPipelines(Device& device, u32 samples) {
     return false;
 
   samples = kSampleCounts[index];
-  const PipelineBindings draw_set{.slots = {{0, BindingType::kByteBuffer},
-                                             {1, BindingType::kUniformBuffer},
-                                             {2, BindingType::kByteBuffer}}};
+  const gpu::PipelineBindings draw_set{.slots = {{0, gpu::BindingType::kByteBuffer},
+                                             {1, gpu::BindingType::kUniformBuffer},
+                                             {2, gpu::BindingType::kByteBuffer}}};
 
-  PipelineHandle prepass = device.CreateGraphicsPipeline({
+  gpu::PipelineHandle prepass = device.CreateGraphicsPipeline({
       .vertex = RX_SHADER(k_procedural_grass_vs_hlsl),
       .fragment = RX_SHADER(k_procedural_grass_prepass_ps_hlsl),
-      .topology = PrimitiveTopology::kTriangleList,
-      .raster = {.cull = CullMode::kNone},
+      .topology = gpu::PrimitiveTopology::kTriangleList,
+      .raster = {.cull = gpu::CullMode::kNone},
       .depth = {.test = true,
                 .write = true,
-                .compare = CompareOp::kGreaterEqual,
+                .compare = gpu::CompareOp::kGreaterEqual,
                 .format = depth_format_},
-      .color_formats = {normal_format_, motion_format_, Format::kR32Float},
-      .blend = {BlendMode::kOpaque, BlendMode::kOpaque, BlendMode::kOpaque},
+      .color_formats = {normal_format_, motion_format_, gpu::Format::kR32Float},
+      .blend = {gpu::BlendMode::kOpaque, gpu::BlendMode::kOpaque, gpu::BlendMode::kOpaque},
       .sets = {draw_set},
-      .push_constant_size = PushSize<DrawPush>(),
+      .push_constant_size = gpu::PushSize<DrawPush>(),
       .samples = samples,
       .debug_name = "procedural_grass_prepass",
   });
-  PipelineHandle scene = device.CreateGraphicsPipeline({
+  gpu::PipelineHandle scene = device.CreateGraphicsPipeline({
       .vertex = RX_SHADER(k_procedural_grass_vs_hlsl),
       .fragment = RX_SHADER(k_procedural_grass_ps_hlsl),
-      .topology = PrimitiveTopology::kTriangleList,
-      .raster = {.cull = CullMode::kNone},
+      .topology = gpu::PrimitiveTopology::kTriangleList,
+      .raster = {.cull = gpu::CullMode::kNone},
       .depth = {.test = true,
                 .write = false,
-                .compare = CompareOp::kEqual,
+                .compare = gpu::CompareOp::kEqual,
                 .format = depth_format_},
       .color_formats = {scene_color_format_, motion_format_, skin_diffuse_format_},
-      .blend = {BlendMode::kOpaque, BlendMode::kOpaque, BlendMode::kOpaque},
+      .blend = {gpu::BlendMode::kOpaque, gpu::BlendMode::kOpaque, gpu::BlendMode::kOpaque},
       .sets = {draw_set},
-      .push_constant_size = PushSize<DrawPush>(),
+      .push_constant_size = gpu::PushSize<DrawPush>(),
       .samples = samples,
       .debug_name = "procedural_grass_scene",
   });
@@ -225,7 +225,7 @@ bool ProceduralGrass::CreateDrawPipelines(Device& device, u32 samples) {
   return true;
 }
 
-bool ProceduralGrass::EnsureSampleCount(Device& device, u32 samples) {
+bool ProceduralGrass::EnsureSampleCount(gpu::Device& device, u32 samples) {
   return available() && CreateDrawPipelines(device, samples);
 }
 
@@ -250,7 +250,7 @@ bool ProceduralGrass::EnsureBuffers() {
     }
     blade_indices_ = device_->CreateBufferWithData(
         ByteSpan{reinterpret_cast<const u8*>(indices), sizeof(indices)},
-        kBufferUsageIndex);
+        gpu::kBufferUsageIndex);
     if (!blade_indices_) {
       RX_ERROR("procedural grass index buffer allocation failed");
       allocation_failed_ = true;
@@ -267,18 +267,18 @@ bool ProceduralGrass::EnsureBuffers() {
   constexpr u64 kInstanceBytes =
       static_cast<u64>(kMaxBlades + kMaxUltraBlades) * kInstanceStride;
   for (Slot& slot : slots_) {
-    slot.field = device_->CreateBuffer(kFieldBytes, kBufferUsageStorage, true);
-    slot.types = device_->CreateBuffer(kTypeBytes, kBufferUsageStorage, true);
-    slot.surfaces = device_->CreateBuffer(kSurfaceBytes, kBufferUsageStorage, true);
+    slot.field = device_->CreateBuffer(kFieldBytes, gpu::kBufferUsageStorage, true);
+    slot.types = device_->CreateBuffer(kTypeBytes, gpu::kBufferUsageStorage, true);
+    slot.surfaces = device_->CreateBuffer(kSurfaceBytes, gpu::kBufferUsageStorage, true);
     slot.interactions =
-        device_->CreateBuffer(kInteractionBytes, kBufferUsageStorage, true);
-    slot.instances = device_->CreateBuffer(kInstanceBytes, kBufferUsageStorage);
-    slot.args = device_->CreateBuffer(64, kBufferUsageStorage | kBufferUsageIndirect);
-    slot.counters = device_->CreateBuffer(32, kBufferUsageStorage | kBufferUsageIndirect);
+        device_->CreateBuffer(kInteractionBytes, gpu::kBufferUsageStorage, true);
+    slot.instances = device_->CreateBuffer(kInstanceBytes, gpu::kBufferUsageStorage);
+    slot.args = device_->CreateBuffer(64, gpu::kBufferUsageStorage | gpu::kBufferUsageIndirect);
+    slot.counters = device_->CreateBuffer(32, gpu::kBufferUsageStorage | gpu::kBufferUsageIndirect);
     slot.generation_domain =
-        device_->CreateBuffer(sizeof(GenerationDomain), kBufferUsageUniform, true);
+        device_->CreateBuffer(sizeof(GenerationDomain), gpu::kBufferUsageUniform, true);
     slot.draw_camera =
-        device_->CreateBuffer(sizeof(DrawCamera), kBufferUsageUniform, true);
+        device_->CreateBuffer(sizeof(DrawCamera), gpu::kBufferUsageUniform, true);
     if (!slot.field.mapped || !slot.types.mapped || !slot.surfaces.mapped ||
         !slot.interactions.mapped || !slot.instances || !slot.args || !slot.counters ||
         !slot.generation_domain.mapped || !slot.draw_camera.mapped) {
@@ -299,27 +299,27 @@ bool ProceduralGrass::EnsureBuffers() {
       return false;
     }
   }
-  const TextureUsageFlags bend_usage =
-      kTextureUsageSampled | kTextureUsageStorage | kTextureUsageTransferDst;
+  const gpu::TextureUsageFlags bend_usage =
+      gpu::kTextureUsageSampled | gpu::kTextureUsageStorage | gpu::kTextureUsageTransferDst;
   for (u32 i = 0; i < 2; ++i) {
     bend_fields_[i] = device_->CreateImage2D(
-        Format::kRGBA16Float, {kBendResolution, kBendResolution}, bend_usage);
+        gpu::Format::kRGBA16Float, {kBendResolution, kBendResolution}, bend_usage);
     bend_metadata_[i] = device_->CreateImage2D(
-        Format::kRGBA16Float, {kBendResolution, kBendResolution}, bend_usage);
+        gpu::Format::kRGBA16Float, {kBendResolution, kBendResolution}, bend_usage);
     bend_confidence_[i] = device_->CreateImage2D(
-        Format::kRG16Float, {kBendResolution, kBendResolution}, bend_usage);
+        gpu::Format::kRG16Float, {kBendResolution, kBendResolution}, bend_usage);
     if (!bend_fields_[i] || !bend_metadata_[i] || !bend_confidence_[i]) {
       RX_ERROR("procedural grass bend field allocation failed");
       allocation_failed_ = true;
-      for (GpuImage& allocated : bend_fields_) {
+      for (gpu::GpuImage& allocated : bend_fields_) {
         device_->DestroyImage(allocated);
         allocated = {};
       }
-      for (GpuImage& allocated : bend_metadata_) {
+      for (gpu::GpuImage& allocated : bend_metadata_) {
         device_->DestroyImage(allocated);
         allocated = {};
       }
-      for (GpuImage& allocated : bend_confidence_) {
+      for (gpu::GpuImage& allocated : bend_confidence_) {
         device_->DestroyImage(allocated);
         allocated = {};
       }
@@ -338,23 +338,23 @@ bool ProceduralGrass::EnsureBuffers() {
       return false;
     }
   }
-  device_->ImmediateSubmit([this](CommandList& cmd) {
+  device_->ImmediateSubmit([this](gpu::CommandList& cmd) {
     const f32 zero[4] = {};
     for (u32 i = 0; i < 2; ++i) {
-      for (GpuImage* image : {&bend_fields_[i], &bend_metadata_[i],
+      for (gpu::GpuImage* image : {&bend_fields_[i], &bend_metadata_[i],
                               &bend_confidence_[i]}) {
-        cmd.Barrier(Transition(*image, ResourceState::kUndefined,
-                               ResourceState::kCopyDst));
+        cmd.Barrier(gpu::Transition(*image, gpu::ResourceState::kUndefined,
+                               gpu::ResourceState::kCopyDst));
         cmd.ClearColor(*image, zero);
-        cmd.Barrier(Transition(*image, ResourceState::kCopyDst,
-                               ResourceState::kShaderReadCompute));
+        cmd.Barrier(gpu::Transition(*image, gpu::ResourceState::kCopyDst,
+                               gpu::ResourceState::kShaderReadCompute));
       }
     }
   });
   return true;
 }
 
-void ProceduralGrass::Destroy(Device& device) {
+void ProceduralGrass::Destroy(gpu::Device& device) {
   if (bend_pipeline_)
     device.DestroyPipeline(bend_pipeline_);
   bend_pipeline_ = {};
@@ -381,15 +381,15 @@ void ProceduralGrass::Destroy(Device& device) {
     device.DestroyBuffer(slot.draw_camera);
     slot = {};
   }
-  for (GpuImage& field : bend_fields_) {
+  for (gpu::GpuImage& field : bend_fields_) {
     device.DestroyImage(field);
     field = {};
   }
-  for (GpuImage& field : bend_metadata_) {
+  for (gpu::GpuImage& field : bend_metadata_) {
     device.DestroyImage(field);
     field = {};
   }
-  for (GpuImage& field : bend_confidence_) {
+  for (gpu::GpuImage& field : bend_confidence_) {
     device.DestroyImage(field);
     field = {};
   }
@@ -411,11 +411,11 @@ void ProceduralGrass::Destroy(Device& device) {
   device_ = nullptr;
   allocation_failed_ = false;
   failed_sample_mask_ = 0;
-  scene_color_format_ = Format::kUnknown;
-  motion_format_ = Format::kUnknown;
-  normal_format_ = Format::kUnknown;
-  skin_diffuse_format_ = Format::kUnknown;
-  depth_format_ = Format::kUnknown;
+  scene_color_format_ = gpu::Format::kUnknown;
+  motion_format_ = gpu::Format::kUnknown;
+  normal_format_ = gpu::Format::kUnknown;
+  skin_diffuse_format_ = gpu::Format::kUnknown;
+  depth_format_ = gpu::Format::kUnknown;
 }
 
 bool ProceduralGrass::Prepare(const GrassDomain& domain,
@@ -879,55 +879,55 @@ void ProceduralGrass::AddGeneration(RenderGraph& graph, u32 frame_slot) {
        bend_sample_source, bend_surface_source, bend_update_time,
        bend_max_strength, phases, phase_count](PassContext& ctx) {
         Slot& current = slots_[frame_slot];
-        const GpuImage& bend_current = bend_fields_[bend_write_index];
-        const GpuImage& bend_previous = bend_fields_[bend_write_index ^ 1u];
-        const GpuImage& metadata_current = bend_metadata_[bend_write_index];
-        const GpuImage& metadata_previous = bend_metadata_[bend_write_index ^ 1u];
-        const GpuImage& confidence_current = bend_confidence_[bend_write_index];
-        const GpuImage& confidence_previous = bend_confidence_[bend_write_index ^ 1u];
+        const gpu::GpuImage& bend_current = bend_fields_[bend_write_index];
+        const gpu::GpuImage& bend_previous = bend_fields_[bend_write_index ^ 1u];
+        const gpu::GpuImage& metadata_current = bend_metadata_[bend_write_index];
+        const gpu::GpuImage& metadata_previous = bend_metadata_[bend_write_index ^ 1u];
+        const gpu::GpuImage& confidence_current = bend_confidence_[bend_write_index];
+        const gpu::GpuImage& confidence_previous = bend_confidence_[bend_write_index ^ 1u];
         if (bend_active) {
-          const TextureBarrier barriers[] = {
-              Transition(bend_current, ResourceState::kShaderReadCompute,
-                         ResourceState::kGeneral),
-              Transition(metadata_current, ResourceState::kShaderReadCompute,
-                         ResourceState::kGeneral),
-              Transition(confidence_current, ResourceState::kShaderReadCompute,
-                         ResourceState::kGeneral),
+          const gpu::TextureBarrier barriers[] = {
+              gpu::Transition(bend_current, gpu::ResourceState::kShaderReadCompute,
+                         gpu::ResourceState::kGeneral),
+              gpu::Transition(metadata_current, gpu::ResourceState::kShaderReadCompute,
+                         gpu::ResourceState::kGeneral),
+              gpu::Transition(confidence_current, gpu::ResourceState::kShaderReadCompute,
+                         gpu::ResourceState::kGeneral),
           };
           ctx.cmd->TextureBarriers(barriers);
           ctx.cmd->BindPipeline(bend_pipeline_);
           ctx.cmd->BindTransient(
-              0, {Bind::Combined(0, bend_previous.view, bend_sampler_),
-                  Bind::StorageView(1, bend_current.view),
-                  Bind::ByteBuffer(2, current.interactions),
-                  Bind::Combined(3, metadata_previous.view, bend_sampler_),
-                  Bind::StorageView(4, metadata_current.view),
-                  Bind::Combined(5, confidence_previous.view, bend_sampler_),
-                  Bind::StorageView(6, confidence_current.view)});
+              0, {gpu::Bind::Combined(0, bend_previous.view, bend_sampler_),
+                  gpu::Bind::StorageView(1, bend_current.view),
+                  gpu::Bind::ByteBuffer(2, current.interactions),
+                  gpu::Bind::Combined(3, metadata_previous.view, bend_sampler_),
+                  gpu::Bind::StorageView(4, metadata_current.view),
+                  gpu::Bind::Combined(5, confidence_previous.view, bend_sampler_),
+                  gpu::Bind::StorageView(6, confidence_current.view)});
           ctx.cmd->Push(bend);
           ctx.cmd->Dispatch(kBendResolution / 8u, kBendResolution / 8u, 1);
-          const TextureBarrier readable[] = {
-              Transition(bend_current, ResourceState::kGeneral,
-                         ResourceState::kShaderReadCompute),
-              Transition(metadata_current, ResourceState::kGeneral,
-                         ResourceState::kShaderReadCompute),
-              Transition(confidence_current, ResourceState::kGeneral,
-                         ResourceState::kShaderReadCompute),
+          const gpu::TextureBarrier readable[] = {
+              gpu::Transition(bend_current, gpu::ResourceState::kGeneral,
+                         gpu::ResourceState::kShaderReadCompute),
+              gpu::Transition(metadata_current, gpu::ResourceState::kGeneral,
+                         gpu::ResourceState::kShaderReadCompute),
+              gpu::Transition(confidence_current, gpu::ResourceState::kGeneral,
+                         gpu::ResourceState::kShaderReadCompute),
           };
           ctx.cmd->TextureBarriers(readable);
         }
 
         ctx.cmd->BindPipeline(generate_pipeline_);
         ctx.cmd->BindTransient(
-            0, {Bind::ByteBuffer(0, current.field), Bind::ByteBuffer(1, current.types),
-                Bind::ByteBuffer(2, current.surfaces),
-                 Bind::StorageBuffer(3, current.instances),
-                 Bind::StorageBuffer(4, current.args),
-                 Bind::StorageBuffer(5, current.counters),
-                 Bind::Combined(6, bend_current.view, bend_sampler_),
-                 Bind::Combined(7, metadata_current.view, bend_sampler_),
-                 Bind::Combined(8, confidence_current.view, bend_sampler_),
-                 Bind::Uniform(9, current.generation_domain, 0,
+            0, {gpu::Bind::ByteBuffer(0, current.field), gpu::Bind::ByteBuffer(1, current.types),
+                gpu::Bind::ByteBuffer(2, current.surfaces),
+                 gpu::Bind::StorageBuffer(3, current.instances),
+                 gpu::Bind::StorageBuffer(4, current.args),
+                 gpu::Bind::StorageBuffer(5, current.counters),
+                 gpu::Bind::Combined(6, bend_current.view, bend_sampler_),
+                 gpu::Bind::Combined(7, metadata_current.view, bend_sampler_),
+                 gpu::Bind::Combined(8, confidence_current.view, bend_sampler_),
+                 gpu::Bind::Uniform(9, current.generation_domain, 0,
                                sizeof(GenerationDomain))});
 
         for (u32 i = 0; i < phase_count; ++i) {
@@ -936,12 +936,12 @@ void ProceduralGrass::AddGeneration(RenderGraph& graph, u32 frame_slot) {
           const bool generate = phase.control[0] == 1u || phase.control[0] == 2u;
           ctx.cmd->Dispatch(generate ? (phase.counts[0] + 63u) / 64u : 1u, 1, 1);
           if (i + 1u < phase_count) {
-            ctx.cmd->MemoryBarrier(BarrierScope::kComputeWrite,
-                                   BarrierScope::kComputeReadWrite);
+            ctx.cmd->MemoryBarrier(gpu::BarrierScope::kComputeWrite,
+                                   gpu::BarrierScope::kComputeReadWrite);
           }
         }
-        ctx.cmd->MemoryBarrier(BarrierScope::kComputeWrite, BarrierScope::kGraphicsRead);
-        ctx.cmd->MemoryBarrier(BarrierScope::kComputeWrite, BarrierScope::kIndirectArgs);
+        ctx.cmd->MemoryBarrier(gpu::BarrierScope::kComputeWrite, gpu::BarrierScope::kGraphicsRead);
+        ctx.cmd->MemoryBarrier(gpu::BarrierScope::kComputeWrite, gpu::BarrierScope::kIndirectArgs);
         bend_write_index_ = bend_write_index;
         bend_origin_[0] = bend.field[0];
         bend_origin_[1] = bend.field[1];
@@ -967,18 +967,18 @@ u32 ProceduralGrass::PipelineIndex(u32 samples) {
   return 0;
 }
 
-void ProceduralGrass::Draw(CommandList& cmd,
+void ProceduralGrass::Draw(gpu::CommandList& cmd,
                            u32 frame_slot,
-                           PipelineHandle pipeline) const {
+                           gpu::PipelineHandle pipeline) const {
   if (frame_slot >= kFramesInFlight || !slots_[frame_slot].active || !pipeline)
     return;
   const Slot& slot = slots_[frame_slot];
   cmd.BindPipeline(pipeline);
-  cmd.BindIndexBuffer(blade_indices_, 0, IndexType::kUint16);
+  cmd.BindIndexBuffer(blade_indices_, 0, gpu::IndexType::kUint16);
   cmd.BindTransient(
-      0, {Bind::ByteBuffer(0, slot.instances),
-          Bind::Uniform(1, slot.draw_camera, 0, sizeof(DrawCamera)),
-          Bind::ByteBuffer(2, slot.types)});
+      0, {gpu::Bind::ByteBuffer(0, slot.instances),
+          gpu::Bind::Uniform(1, slot.draw_camera, 0, sizeof(DrawCamera)),
+          gpu::Bind::ByteBuffer(2, slot.types)});
   // Near grows up from arena slot 0, far down from the arena top, and the
   // distant ultra tier up from its own region past kMaxBlades; the base rides
   // in control[3] so the vertex shader resolves all three with one expression.
@@ -997,11 +997,11 @@ void ProceduralGrass::Draw(CommandList& cmd,
   cmd.DrawIndexedIndirectCount(slot.args, 40, slot.counters, 24, 1, 20);
 }
 
-void ProceduralGrass::DrawPrepass(CommandList& cmd, u32 frame_slot, u32 samples) const {
+void ProceduralGrass::DrawPrepass(gpu::CommandList& cmd, u32 frame_slot, u32 samples) const {
   Draw(cmd, frame_slot, prepass_pipelines_[PipelineIndex(samples)]);
 }
 
-void ProceduralGrass::DrawScene(CommandList& cmd, u32 frame_slot, u32 samples) const {
+void ProceduralGrass::DrawScene(gpu::CommandList& cmd, u32 frame_slot, u32 samples) const {
   Draw(cmd, frame_slot, scene_pipelines_[PipelineIndex(samples)]);
 }
 

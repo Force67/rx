@@ -9,32 +9,32 @@
 
 namespace rx::render {
 
-base::UniquePointer<BindlessRegistry> BindlessRegistry::Create(Device& device) {
+base::UniquePointer<BindlessRegistry> BindlessRegistry::Create(gpu::Device& device) {
   auto registry = base::UniquePointer<BindlessRegistry>(new BindlessRegistry(device));
   if (!registry->Initialize()) return nullptr;
   return registry;
 }
 
 bool BindlessRegistry::Initialize() {
-  mesh_table_ = device_.CreateBuffer(sizeof(MeshRecord) * kMaxMeshes, kBufferUsageStorage, true);
+  mesh_table_ = device_.CreateBuffer(sizeof(MeshRecord) * kMaxMeshes, gpu::kBufferUsageStorage, true);
   geometry_table_ =
-      device_.CreateBuffer(sizeof(GeometryRecord) * kMaxGeometries, kBufferUsageStorage, true);
+      device_.CreateBuffer(sizeof(GeometryRecord) * kMaxGeometries, gpu::kBufferUsageStorage, true);
   material_table_ =
-      device_.CreateBuffer(sizeof(MaterialRecord) * kMaxMaterials, kBufferUsageStorage, true);
+      device_.CreateBuffer(sizeof(MaterialRecord) * kMaxMaterials, gpu::kBufferUsageStorage, true);
   if (!mesh_table_.mapped || !geometry_table_.mapped || !material_table_.mapped) return false;
 
   // Hit shading runs from ddgi compute and the water fragment shader.
   set_layout_ = device_.CreateBindingLayout({
-      .stages = kShaderStageCompute | kShaderStageFragment,
-      .slots = {{0, BindingType::kStorageBuffer},
-                {1, BindingType::kStorageBuffer},
-                {2, BindingType::kStorageBuffer},
-                {3, BindingType::kSampledImage, kMaxTextures, /*variable_count=*/true},
-                {4, BindingType::kSampler},
+      .stages = gpu::kShaderStageCompute | gpu::kShaderStageFragment,
+      .slots = {{0, gpu::BindingType::kStorageBuffer},
+                {1, gpu::BindingType::kStorageBuffer},
+                {2, gpu::BindingType::kStorageBuffer},
+                {3, gpu::BindingType::kSampledImage, kMaxTextures, /*variable_count=*/true},
+                {4, gpu::BindingType::kSampler},
                 // Per-mesh vertex/index buffers for the DXIL geometry readers
                 // (the SPIR-V path reads the same buffers through BDA and
                 // never declares this binding).
-                {kGeometryBufferBinding, BindingType::kByteBuffer, kMaxGeometryBuffers,
+                {kGeometryBufferBinding, gpu::BindingType::kByteBuffer, kMaxGeometryBuffers,
                  /*variable_count=*/true}},
       .update_after_bind = true,
   });
@@ -43,15 +43,15 @@ bool BindlessRegistry::Initialize() {
   set_ = device_.CreateBindingSet(set_layout_, kMaxTextures);
   if (!set_) return false;
 
-  SamplerHandle sampler = device_.GetSampler({});  // trilinear repeat
-  device_.UpdateBindingSet(set_, {Bind::StorageBuffer(0, mesh_table_),
-                                  Bind::StorageBuffer(1, geometry_table_),
-                                  Bind::StorageBuffer(2, material_table_),
-                                  Bind::Sampler(4, sampler)});
+  gpu::SamplerHandle sampler = device_.GetSampler({});  // trilinear repeat
+  device_.UpdateBindingSet(set_, {gpu::Bind::StorageBuffer(0, mesh_table_),
+                                  gpu::Bind::StorageBuffer(1, geometry_table_),
+                                  gpu::Bind::StorageBuffer(2, material_table_),
+                                  gpu::Bind::Sampler(4, sampler)});
   return true;
 }
 
-u32 BindlessRegistry::RegisterTexture(TextureView view) {
+u32 BindlessRegistry::RegisterTexture(gpu::TextureView view) {
   u32 index;
   if (!free_textures_.empty()) {
     index = free_textures_.back();
@@ -62,7 +62,7 @@ u32 BindlessRegistry::RegisterTexture(TextureView view) {
     RX_WARN("bindless texture table full");
     return kInvalidIndex;
   }
-  BindingItem item = Bind::SampledView(3, view);
+  gpu::BindingItem item = gpu::Bind::SampledView(3, view);
   item.array_index = index;
   device_.UpdateBindingSet(set_, {item});
   return index;
@@ -113,7 +113,7 @@ u32 BindlessRegistry::RegisterMaterial(const MaterialRecord& record) {
   return index;
 }
 
-u32 BindlessRegistry::RegisterMesh(const GpuBuffer& vertices, const GpuBuffer& indices,
+u32 BindlessRegistry::RegisterMesh(const gpu::GpuBuffer& vertices, const gpu::GpuBuffer& indices,
                                    const GeometryRecord* geometries, u32 geometry_count) {
   if ((free_meshes_.empty() && mesh_count_ >= kMaxMeshes) ||
       geometry_count > kMaxGeometries) {
@@ -158,9 +158,9 @@ u32 BindlessRegistry::RegisterMesh(const GpuBuffer& vertices, const GpuBuffer& i
   // Mirror the buffers into the geometry buffer array for the DXIL readers.
   record.vertex_srv = 2 * index;
   record.index_srv = 2 * index + 1;
-  BindingItem vertex_srv = Bind::ByteBuffer(kGeometryBufferBinding, vertices);
+  gpu::BindingItem vertex_srv = gpu::Bind::ByteBuffer(kGeometryBufferBinding, vertices);
   vertex_srv.array_index = record.vertex_srv;
-  BindingItem index_srv = Bind::ByteBuffer(kGeometryBufferBinding, indices);
+  gpu::BindingItem index_srv = gpu::Bind::ByteBuffer(kGeometryBufferBinding, indices);
   index_srv.array_index = record.index_srv;
   device_.UpdateBindingSet(set_, {vertex_srv, index_srv});
   if (geometry_count != 0) {

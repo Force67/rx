@@ -34,12 +34,12 @@ class WaterCaustics {
     f32 rest_height = 0.0f;      // water rest plane y (m)
     f32 receiver_depth = 4.0f;   // reference caustic receiver depth below rest (m)
     bool fft_active = false;     // sample the ocean maps vs the Gerstner field
-    TextureView ocean_displacement;  // valid when fft_active
-    TextureView ocean_normal;        // valid when fft_active
+    gpu::TextureView ocean_displacement;  // valid when fft_active
+    gpu::TextureView ocean_normal;        // valid when fft_active
   };
 
-  bool Initialize(Device& device);
-  void Destroy(Device& device);
+  bool Initialize(gpu::Device& device);
+  void Destroy(gpu::Device& device);
   bool available() const { return static_cast<bool>(pipeline_) && static_cast<bool>(caustic_); }
 
   // Records the clear + scatter + resolve dispatches for this frame.
@@ -47,14 +47,14 @@ class WaterCaustics {
 
   // The caustic map written this frame (RG16F, kept in GENERAL), sampled by the
   // opaque scene pass through env slot 34.
-  TextureView current_view() const { return caustic_.view; }
+  gpu::TextureView current_view() const { return caustic_.view; }
 
  private:
-  PipelineHandle pipeline_;
-  GpuImage caustic_;       // RG16F, kept in GENERAL
-  GpuBuffer accum_;        // kSize*kSize uint fixed-point energy accumulation
-  GpuImage dummy_ocean_;   // 1x1 stand-in bound when the FFT ocean is off
-  SamplerHandle linear_wrap_;
+  gpu::PipelineHandle pipeline_;
+  gpu::GpuImage caustic_;       // RG16F, kept in GENERAL
+  gpu::GpuBuffer accum_;        // kSize*kSize uint fixed-point energy accumulation
+  gpu::GpuImage dummy_ocean_;   // 1x1 stand-in bound when the FFT ocean is off
+  gpu::SamplerHandle linear_wrap_;
 };
 
 }  // namespace rx::render

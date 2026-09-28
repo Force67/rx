@@ -25,7 +25,7 @@
 #include "shaders/blit_ps_slang.h"
 #include "shaders/fullscreen_vs_slang.h"
 
-namespace rx::render::d3d12 {
+namespace rx::gpu::d3d12 {
 namespace {
 
 u64 HashBytes(const void* data, size_t size, u64 seed = 1469598103934665603ull) {
@@ -2025,4 +2025,4 @@ bool D3D12Device::ReadbackImage(const GpuImage& image, ResourceState current, vo
   return true;
 }
 
-}  // namespace rx::render::d3d12
+}  // namespace rx::gpu::d3d12

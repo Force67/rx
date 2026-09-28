@@ -9,28 +9,28 @@
 namespace rx::render {
 
 namespace {
-constexpr Format kFrostFormat = Format::kRGBA16Float;
+constexpr gpu::Format kFrostFormat = gpu::Format::kRGBA16Float;
 struct BlurPush {
   float dir[2];  // per-tap UV step along one axis
 };
 }  // namespace
 
-base::UniquePointer<UiBlurPass> UiBlurPass::Create(Device& device) {
+base::UniquePointer<UiBlurPass> UiBlurPass::Create(gpu::Device& device) {
   auto pass = base::UniquePointer<UiBlurPass>(new UiBlurPass(device));
 
-  pass->sampler_ = device.GetSampler({.address_u = AddressMode::kClampToEdge,
-                                      .address_v = AddressMode::kClampToEdge,
-                                      .address_w = AddressMode::kClampToEdge});
+  pass->sampler_ = device.GetSampler({.address_u = gpu::AddressMode::kClampToEdge,
+                                      .address_v = gpu::AddressMode::kClampToEdge,
+                                      .address_w = gpu::AddressMode::kClampToEdge});
 
   pass->pipeline_ = device.CreateGraphicsPipeline({
       .vertex = RX_SHADER(k_fullscreen_vs_slang),
       .fragment = RX_SHADER(k_ui_blur_ps_hlsl),
-      .raster = {.cull = CullMode::kNone},
+      .raster = {.cull = gpu::CullMode::kNone},
       .color_formats = {kFrostFormat},
-      .blend = {BlendMode::kOpaque},
-      .sets = {{.slots = {{0, BindingType::kCombinedTextureSampler}},
-                .stages = kShaderStageFragment}},
-      .push_constant_size = PushSize<BlurPush>(),
+      .blend = {gpu::BlendMode::kOpaque},
+      .sets = {{.slots = {{0, gpu::BindingType::kCombinedTextureSampler}},
+                .stages = gpu::kShaderStageFragment}},
+      .push_constant_size = gpu::PushSize<BlurPush>(),
       .debug_name = "ui_blur",
   });
   if (!pass->pipeline_) {
@@ -42,12 +42,12 @@ base::UniquePointer<UiBlurPass> UiBlurPass::Create(Device& device) {
 
 UiBlurPass::~UiBlurPass() { device_.DestroyPipeline(pipeline_); }
 
-void UiBlurPass::Record(PassContext& ctx, TextureView input, TextureView output, Extent2D extent,
+void UiBlurPass::Record(PassContext& ctx, gpu::TextureView input, gpu::TextureView output, gpu::Extent2D extent,
                         float dx, float dy) {
-  ColorAttachment color{.view = output, .load = LoadOp::kDontCare, .store = StoreOp::kStore};
+  gpu::ColorAttachment color{.view = output, .load = gpu::LoadOp::kDontCare, .store = gpu::StoreOp::kStore};
   ctx.cmd->BeginRendering({.extent = extent, .colors = base::Span(&color, 1)});
   ctx.cmd->BindPipeline(pipeline_);
-  ctx.cmd->BindTransient(0, {Bind::Combined(0, input, sampler_)});
+  ctx.cmd->BindTransient(0, {gpu::Bind::Combined(0, input, sampler_)});
   BlurPush push{{dx, dy}};
   ctx.cmd->Push(push);
   ctx.cmd->Draw(3);
@@ -65,7 +65,7 @@ ResourceHandle UiBlurPass::AddToGraph(RenderGraph& graph, ResourceHandle src, u3
 
   const float step_x = 1.0f / static_cast<float>(dw);
   const float step_y = 1.0f / static_cast<float>(dh);
-  const Extent2D extent{dw, dh};
+  const gpu::Extent2D extent{dw, dh};
 
   graph.AddPass(
       "ui_blur_h",

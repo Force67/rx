@@ -5,9 +5,12 @@
 #include "rxe/render/core/render_graph.h"
 #include "rxe/gpu/rhi/resources.h"
 
+namespace rx::gpu {
+class Device;
+}  // namespace rx::gpu
+
 namespace rx::render {
 
-class Device;
 
 // Screen-space ambient occlusion: a hemisphere-kernel pass over the prepass
 // depth + world normals, no ray tracing required. This is the fallback AO for
@@ -24,9 +27,9 @@ class SsaoPass {
     u32 sample_count = 16;   // hemisphere taps per pixel
   };
 
-  bool Initialize(Device& device);
-  void Resize(Device& device, Extent2D extent) { extent_ = extent; }
-  void Destroy(Device& device);
+  bool Initialize(gpu::Device& device);
+  void Resize(gpu::Device& device, gpu::Extent2D extent) { extent_ = extent; }
+  void Destroy(gpu::Device& device);
 
   void Configure(const Settings& settings) { settings_ = settings; }
 
@@ -35,12 +38,12 @@ class SsaoPass {
                             const Mat4& inv_view_proj, const f32 proj_scale[2], f32 near_plane,
                             u32 frame_index);
 
-  static constexpr Format kAoFormat = Format::kR8Unorm;
+  static constexpr gpu::Format kAoFormat = gpu::Format::kR8Unorm;
 
  private:
   Settings settings_;
-  PipelineHandle pipeline_;
-  Extent2D extent_{};
+  gpu::PipelineHandle pipeline_;
+  gpu::Extent2D extent_{};
 };
 
 }  // namespace rx::render

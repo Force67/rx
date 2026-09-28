@@ -15,7 +15,7 @@
 #include "base/memory/unique_pointer.h"
 #include "foundation/logging/log.h"
 
-namespace rx::render::d3d12 {
+namespace rx::gpu::d3d12 {
 
 base::UniquePointer<D3D12Swapchain> D3D12Swapchain::Create(D3D12Device& device, u32 width, u32 height,
                                                        bool vsync) {
@@ -145,4 +145,4 @@ PresentResult D3D12Swapchain::Present() { return PresentResult::kOk; }
 
 #endif
 
-}  // namespace rx::render::d3d12
+}  // namespace rx::gpu::d3d12

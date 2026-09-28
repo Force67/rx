@@ -40,7 +40,7 @@ struct PathPush {
   u32 pad;
 };
 
-constexpr Format kAccumFormat = Format::kRGBA32Float;
+constexpr gpu::Format kAccumFormat = gpu::Format::kRGBA32Float;
 
 #if defined(RX_HAS_NRD)
 // Matches PathGbufferPush in pathtrace_gbuffer.cs.hlsl.
@@ -61,18 +61,18 @@ struct CompositePush {
 
 }  // namespace
 
-bool PathTracer::Initialize(Device& device, BindingLayoutHandle bindless_layout) {
+bool PathTracer::Initialize(gpu::Device& device, gpu::BindingLayoutHandle bindless_layout) {
   if (!bindless_layout) return false;
 
   pipeline_ = device.CreateComputePipeline({
       .shader = RX_SHADER(k_pathtrace_cs_hlsl),
-      .sets = {{.slots = {{0, BindingType::kStorageImage},
-                          {1, BindingType::kStorageImage},
-                          {2, BindingType::kAccelStruct},
-                          {3, BindingType::kCombinedTextureSampler},
-                          {4, BindingType::kUniformBuffer}}},
+      .sets = {{.slots = {{0, gpu::BindingType::kStorageImage},
+                          {1, gpu::BindingType::kStorageImage},
+                          {2, gpu::BindingType::kAccelStruct},
+                          {3, gpu::BindingType::kCombinedTextureSampler},
+                          {4, gpu::BindingType::kUniformBuffer}}},
                {.shared = bindless_layout}},
-      .push_constant_size = PushSize<PathPush>(),
+      .push_constant_size = gpu::PushSize<PathPush>(),
       .debug_name = "pathtrace",
   });
   if (!pipeline_) {
@@ -82,8 +82,8 @@ bool PathTracer::Initialize(Device& device, BindingLayoutHandle bindless_layout)
 
   // One per in-flight frame: a pass rewrites it while the previous frame may
   // still be reading its own copy.
-  for (GpuBuffer& camera : camera_) {
-    camera = device.CreateBuffer(sizeof(PathCamera), kBufferUsageUniform, true);
+  for (gpu::GpuBuffer& camera : camera_) {
+    camera = device.CreateBuffer(sizeof(PathCamera), gpu::kBufferUsageUniform, true);
     if (!camera.mapped) {
       Destroy(device);
       return false;
@@ -95,18 +95,18 @@ bool PathTracer::Initialize(Device& device, BindingLayoutHandle bindless_layout)
   // camera matrices (8).
   gbuffer_pipeline_ = device.CreateComputePipeline({
       .shader = RX_SHADER(k_pathtrace_gbuffer_cs_hlsl),
-      .sets = {{.slots = {{0, BindingType::kStorageImage},
-                          {1, BindingType::kStorageImage},
-                          {2, BindingType::kStorageImage},
-                          {3, BindingType::kStorageImage},
-                          {4, BindingType::kStorageImage},
-                          {5, BindingType::kStorageImage},
-                          {6, BindingType::kAccelStruct},
-                          {7, BindingType::kCombinedTextureSampler},
-                          {8, BindingType::kUniformBuffer},
-                          {9, BindingType::kStorageBuffer}}},
+      .sets = {{.slots = {{0, gpu::BindingType::kStorageImage},
+                          {1, gpu::BindingType::kStorageImage},
+                          {2, gpu::BindingType::kStorageImage},
+                          {3, gpu::BindingType::kStorageImage},
+                          {4, gpu::BindingType::kStorageImage},
+                          {5, gpu::BindingType::kStorageImage},
+                          {6, gpu::BindingType::kAccelStruct},
+                          {7, gpu::BindingType::kCombinedTextureSampler},
+                          {8, gpu::BindingType::kUniformBuffer},
+                          {9, gpu::BindingType::kStorageBuffer}}},
                {.shared = bindless_layout}},
-      .push_constant_size = PushSize<PathGbufferPush>(),
+      .push_constant_size = gpu::PushSize<PathGbufferPush>(),
       .debug_name = "pathtrace_gbuffer",
   });
   if (!gbuffer_pipeline_) {
@@ -118,11 +118,11 @@ bool PathTracer::Initialize(Device& device, BindingLayoutHandle bindless_layout)
   // Composite: output storage (0) + denoised/albedo/background sampled (1..3).
   composite_pipeline_ = device.CreateComputePipeline({
       .shader = RX_SHADER(k_pathtrace_composite_cs_hlsl),
-      .sets = {{.slots = {{0, BindingType::kStorageImage},
-                          {1, BindingType::kSampledImage},
-                          {2, BindingType::kSampledImage},
-                          {3, BindingType::kSampledImage}}}},
-      .push_constant_size = PushSize<CompositePush>(),
+      .sets = {{.slots = {{0, gpu::BindingType::kStorageImage},
+                          {1, gpu::BindingType::kSampledImage},
+                          {2, gpu::BindingType::kSampledImage},
+                          {3, gpu::BindingType::kSampledImage}}}},
+      .push_constant_size = gpu::PushSize<CompositePush>(),
       .debug_name = "pathtrace_composite",
   });
   if (!composite_pipeline_) {
@@ -134,7 +134,7 @@ bool PathTracer::Initialize(Device& device, BindingLayoutHandle bindless_layout)
   return true;
 }
 
-void PathTracer::Resize(Device& device, Extent2D extent) {
+void PathTracer::Resize(gpu::Device& device, gpu::Extent2D extent) {
   if (!pipeline_) return;
   if (extent.width == extent_.width && extent.height == extent_.height && accum_) return;
   if (accum_) {
@@ -143,33 +143,33 @@ void PathTracer::Resize(Device& device, Extent2D extent) {
   }
   extent_ = extent;
   if (extent.width == 0 || extent.height == 0) return;
-  accum_ = device.CreateImage2D(kAccumFormat, extent, kTextureUsageStorage);
-  accum_state_ = ResourceState::kUndefined;
+  accum_ = device.CreateImage2D(kAccumFormat, extent, gpu::kTextureUsageStorage);
+  accum_state_ = gpu::ResourceState::kUndefined;
   accumulated_samples_ = 0;
   if (!accum_) return;
 
   // The graph imports the buffer in GENERAL; transition it once up front.
-  device.ImmediateSubmit([this](CommandList& cmd) {
-    cmd.Barrier(Transition(accum_, ResourceState::kUndefined, ResourceState::kGeneral));
+  device.ImmediateSubmit([this](gpu::CommandList& cmd) {
+    cmd.Barrier(gpu::Transition(accum_, gpu::ResourceState::kUndefined, gpu::ResourceState::kGeneral));
   });
-  accum_state_ = ResourceState::kGeneral;
+  accum_state_ = gpu::ResourceState::kGeneral;
 }
 
-void PathTracer::Destroy(Device& device) {
+void PathTracer::Destroy(gpu::Device& device) {
   if (accum_) device.DestroyImage(accum_);
-  for (GpuBuffer& camera : camera_) {
+  for (gpu::GpuBuffer& camera : camera_) {
     if (camera) device.DestroyBuffer(camera);
     camera = {};
   }
-  for (PipelineHandle* p : {&pipeline_, &gbuffer_pipeline_, &composite_pipeline_}) {
+  for (gpu::PipelineHandle* p : {&pipeline_, &gbuffer_pipeline_, &composite_pipeline_}) {
     device.DestroyPipeline(*p);
     *p = {};
   }
 }
 
 void PathTracer::AddToGraph(RenderGraph& graph, RayTracingContext& raytracing, u32 tlas_slot,
-                            BindingSetHandle bindless_set, TextureView sky_view,
-                            SamplerHandle sky_sampler, ResourceHandle output, const Frame& frame) {
+                            gpu::BindingSetHandle bindless_set, gpu::TextureView sky_view,
+                            gpu::SamplerHandle sky_sampler, ResourceHandle output, const Frame& frame) {
   if (!available()) return;
   if (frame.reset || accumulated_samples_ > base::MinMax<u32>::max() - spp_)
     accumulated_samples_ = 0;
@@ -211,11 +211,11 @@ void PathTracer::AddToGraph(RenderGraph& graph, RayTracingContext& raytracing, u
         push.reset = sample_base == 0 ? 1u : 0u;
 
         ctx.cmd->BindPipeline(pipeline_);
-        ctx.cmd->BindTransient(0, {Bind::Storage(0, ctx.graph->image(output)),
-                                   Bind::Storage(1, ctx.graph->image(accum)),
-                                   Bind::Accel(2, raytracing.tlas(tlas_slot)),
-                                   Bind::Combined(3, sky_view, sky_sampler),
-                                   Bind::Uniform(4, camera_[slot], 0, sizeof(PathCamera))});
+        ctx.cmd->BindTransient(0, {gpu::Bind::Storage(0, ctx.graph->image(output)),
+                                   gpu::Bind::Storage(1, ctx.graph->image(accum)),
+                                   gpu::Bind::Accel(2, raytracing.tlas(tlas_slot)),
+                                   gpu::Bind::Combined(3, sky_view, sky_sampler),
+                                   gpu::Bind::Uniform(4, camera_[slot], 0, sizeof(PathCamera))});
         ctx.cmd->BindSet(1, bindless_set);
         ctx.cmd->Push(push);
         ctx.cmd->Dispatch2D(extent_);
@@ -224,8 +224,8 @@ void PathTracer::AddToGraph(RenderGraph& graph, RayTracingContext& raytracing, u
 
 #if defined(RX_HAS_NRD)
 void PathTracer::AddGbufferPass(RenderGraph& graph, RayTracingContext& raytracing, u32 tlas_slot,
-                                BindingSetHandle bindless_set, TextureView sky_view,
-                                SamplerHandle sky_sampler, const GbufferTargets& t,
+                                gpu::BindingSetHandle bindless_set, gpu::TextureView sky_view,
+                                gpu::SamplerHandle sky_sampler, const GbufferTargets& t,
                                 const Frame& frame) {
   graph.AddPass(
       "pathtrace_gbuffer",
@@ -241,16 +241,16 @@ void PathTracer::AddGbufferPass(RenderGraph& graph, RayTracingContext& raytracin
        frame](PassContext& ctx) {
         ResourceHandle handles[6] = {t.radiance_hitdist, t.normal_roughness, t.viewz,
                                      t.motion, t.albedo, t.background};
-        base::Vector<BindingItem> items;
-        for (u32 i = 0; i < 6; ++i) items.push_back(Bind::Storage(i, ctx.graph->image(handles[i])));
-        items.push_back(Bind::Accel(6, raytracing.tlas(tlas_slot)));
-        items.push_back(Bind::Combined(7, sky_view, sky_sampler));
+        base::Vector<gpu::BindingItem> items;
+        for (u32 i = 0; i < 6; ++i) items.push_back(gpu::Bind::Storage(i, ctx.graph->image(handles[i])));
+        items.push_back(gpu::Bind::Accel(6, raytracing.tlas(tlas_slot)));
+        items.push_back(gpu::Bind::Combined(7, sky_view, sky_sampler));
 
         const u32 slot = frame.frame_index % 2;
         const PathCamera camera{frame.inv_view_proj, frame.view_proj, frame.prev_view_proj};
         base::MemCopy(camera_[slot].mapped, &camera, sizeof(camera));
-        items.push_back(Bind::Uniform(8, camera_[slot], 0, sizeof(PathCamera)));
-        items.push_back(Bind::StorageBuffer(9, raytracing.motion_buffer(tlas_slot)));
+        items.push_back(gpu::Bind::Uniform(8, camera_[slot], 0, sizeof(PathCamera)));
+        items.push_back(gpu::Bind::StorageBuffer(9, raytracing.motion_buffer(tlas_slot)));
 
         PathGbufferPush push{};
         push.camera_pos[0] = frame.camera_pos.x;
@@ -291,10 +291,10 @@ void PathTracer::AddCompositePass(RenderGraph& graph, ResourceHandle denoised, R
       [this, denoised, albedo, background, output](PassContext& ctx) {
         CompositePush push{{extent_.width, extent_.height}};
         ctx.cmd->BindPipeline(composite_pipeline_);
-        ctx.cmd->BindTransient(0, {Bind::Storage(0, ctx.graph->image(output)),
-                                   Bind::Sampled(1, ctx.graph->image(denoised)),
-                                   Bind::Sampled(2, ctx.graph->image(albedo)),
-                                   Bind::Sampled(3, ctx.graph->image(background))});
+        ctx.cmd->BindTransient(0, {gpu::Bind::Storage(0, ctx.graph->image(output)),
+                                   gpu::Bind::Sampled(1, ctx.graph->image(denoised)),
+                                   gpu::Bind::Sampled(2, ctx.graph->image(albedo)),
+                                   gpu::Bind::Sampled(3, ctx.graph->image(background))});
         ctx.cmd->Push(push);
         ctx.cmd->Dispatch2D(extent_);
       });

@@ -2,7 +2,7 @@
 
 #include "rxe/gpu/vulkan/vk_backend.h"
 
-namespace rx::render {
+namespace rx::gpu {
 namespace {
 
 VulkanEntryPoints& EntryPoints() {
@@ -71,4 +71,4 @@ VkAccelerationStructureKHR GetVkAccelStruct(AccelStructHandle accel) {
 
 VkFormat GetVkFormat(Format format) { return vk::ToVkFormat(format); }
 
-}  // namespace rx::render
+}  // namespace rx::gpu

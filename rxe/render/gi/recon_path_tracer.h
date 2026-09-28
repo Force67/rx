@@ -5,9 +5,12 @@
 #include "rxe/render/core/render_graph.h"
 #include "rxe/gpu/rhi/resources.h"
 
+namespace rx::gpu {
+class Device;
+}  // namespace rx::gpu
+
 namespace rx::render {
 
-class Device;
 class RayTracingContext;
 
 // SVGF-style reconstruction path tracer (the "gameplay" mode), separate from the
@@ -46,7 +49,7 @@ class ReconPathTracer {
     // inline path never sampled). One alpha-tested shadow ray per pixel.
     bool restir_di = true;
     bool reset_reservoirs = false;
-    GpuBuffer lights;     // host-visible PointLight[], the renderer's frame buffer
+    gpu::GpuBuffer lights;     // host-visible PointLight[], the renderer's frame buffer
     u32 light_count = 0;
     // Volumetric fog (single-scattering height fog with shadowed sun shafts,
     // same model as the raster pass); parameters mirror RenderSettings.
@@ -70,9 +73,9 @@ class ReconPathTracer {
     ResourceHandle specular_hit_distance = kInvalidResource;
   };
 
-  bool Initialize(Device& device, BindingLayoutHandle bindless_layout);
-  void Resize(Device& device, Extent2D extent);
-  void Destroy(Device& device);
+  bool Initialize(gpu::Device& device, gpu::BindingLayoutHandle bindless_layout);
+  void Resize(gpu::Device& device, gpu::Extent2D extent);
+  void Destroy(gpu::Device& device);
   bool available() const { return gbuffer_pipeline_ && buffers_ready_; }
 
   // Reconstructs the path-traced image into output (scene_color, an hdr storage
@@ -81,18 +84,18 @@ class ReconPathTracer {
   // after the gbuffer/restir stages, composes the noisy radiance and fills
   // `external` for the caller's denoiser; output is untouched.
   void AddToGraph(RenderGraph& graph, RayTracingContext& raytracing, u32 tlas_slot,
-                  BindingSetHandle bindless_set, TextureView sky_view, SamplerHandle sky_sampler,
+                  gpu::BindingSetHandle bindless_set, gpu::TextureView sky_view, gpu::SamplerHandle sky_sampler,
                   ResourceHandle output, const Frame& frame, ExternalInputs* external = nullptr);
 
  private:
   struct PingPong {
-    GpuImage image[2];
-    ResourceState state[2] = {ResourceState::kUndefined, ResourceState::kUndefined};
+    gpu::GpuImage image[2];
+    gpu::ResourceState state[2] = {gpu::ResourceState::kUndefined, gpu::ResourceState::kUndefined};
   };
 
-  bool CreatePipelines(Device& device, BindingLayoutHandle bindless_layout);
-  bool CreateBuffers(Device& device, Extent2D extent);
-  void DestroyBuffers(Device& device);
+  bool CreatePipelines(gpu::Device& device, gpu::BindingLayoutHandle bindless_layout);
+  bool CreateBuffers(gpu::Device& device, gpu::Extent2D extent);
+  void DestroyBuffers(gpu::Device& device);
 
   // Reusable per-signal reconstruction (diffuse irradiance and specular both run
   // through these; they share the gbuffer history nr/viewz/matid + motion).
@@ -105,8 +108,8 @@ class ReconPathTracer {
                            ResourceHandle pong, ResourceHandle nr_c, ResourceHandle vz_c,
                            ResourceHandle mo_c, u32 passes, bool spec);
 
-  Device* device_ = nullptr;
-  Extent2D extent_{};
+  gpu::Device* device_ = nullptr;
+  gpu::Extent2D extent_{};
   u32 spp_ = 1;
   u32 bounces_ = 2;
   // Set when (re)creating the history images: their contents are undefined, so
@@ -120,16 +123,16 @@ class ReconPathTracer {
   f32 previous_jitter_[2] = {};
 
   // gbuffer (set 0: 7 storage + tlas + sky + restir samples; set 1: bindless)
-  PipelineHandle gbuffer_pipeline_;
-  PipelineHandle temporal_pipeline_;
-  PipelineHandle atrous_pipeline_;
-  PipelineHandle composite_pipeline_;
-  PipelineHandle restir_temporal_pipeline_;
-  PipelineHandle restir_spatial_pipeline_;
-  PipelineHandle restir_di_temporal_pipeline_;
-  PipelineHandle restir_di_spatial_pipeline_;
-  PipelineHandle sky_cdf_pipeline_;
-  PipelineHandle fog_pipeline_;
+  gpu::PipelineHandle gbuffer_pipeline_;
+  gpu::PipelineHandle temporal_pipeline_;
+  gpu::PipelineHandle atrous_pipeline_;
+  gpu::PipelineHandle composite_pipeline_;
+  gpu::PipelineHandle restir_temporal_pipeline_;
+  gpu::PipelineHandle restir_spatial_pipeline_;
+  gpu::PipelineHandle restir_di_temporal_pipeline_;
+  gpu::PipelineHandle restir_di_spatial_pipeline_;
+  gpu::PipelineHandle sky_cdf_pipeline_;
+  gpu::PipelineHandle fog_pipeline_;
 
   // Cross-frame ping-pong buffers (indexed by frame_index & 1).
   PingPong accum_;        // rgba16f accumulated diffuse irradiance + variance
@@ -153,11 +156,11 @@ class ReconPathTracer {
   PingPong restir_di_r3_;  // rgba32f
   // Sky importance-sampling tables (equirect luminance CDFs), rebuilt in
   // frame by the sky_cdf pass; layout documented in recon_sky_cdf.cs.hlsl.
-  GpuBuffer sky_cdf_;
+  gpu::GpuBuffer sky_cdf_;
   PingPong fog_;  // rgba16f inscatter + transmittance, EMA history
   // Camera matrices shared by the gbuffer and fog passes; three Mat4 are twice
   // the push budget on their own. Ping-pongs with the frame parity.
-  GpuBuffer camera_[2];
+  gpu::GpuBuffer camera_[2];
 
 };
 

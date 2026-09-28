@@ -19,7 +19,7 @@
 #include "rxe/gpu/rhi/command_list.h"
 #include "rxe/gpu/rhi/device.h"
 
-using namespace rx::render;
+namespace gpu = rx::gpu;
 
 namespace {
 
@@ -33,17 +33,17 @@ u64 AlignUp(u64 v, u64 a) { return (v + a - 1) & ~(a - 1); }
 }  // namespace
 
 int main() {
-  DeviceDesc desc;
+  gpu::DeviceDesc desc;
   const char* rhi = ::getenv("RX_RHI");
-  desc.backend = (rhi && ::strcmp(rhi, "d3d12") == 0) ? Backend::kD3D12 : Backend::kVulkan;
+  desc.backend = (rhi && ::strcmp(rhi, "d3d12") == 0) ? gpu::Backend::kD3D12 : gpu::Backend::kVulkan;
   desc.request_raytracing = true;
   desc.enable_validation = ::getenv("RX_VALIDATION") != nullptr;
-  base::UniquePointer<Device> device = Device::CreateOffscreen(desc);
+  base::UniquePointer<gpu::Device> device = gpu::Device::CreateOffscreen(desc);
   if (!device) return Fail("CreateOffscreen returned null");
 
   if (device->is_stub()) {
     ::printf("compaction_test: no %s driver, skipping (null backend)\n",
-                BackendName(desc.backend));
+                gpu::BackendName(desc.backend));
     return 0;
   }
   if (!device->caps().raytracing) {
@@ -55,39 +55,39 @@ int main() {
 
   // a single opaque triangle in a host-visible, AS-build-input buffer
   const f32 verts[9] = {-0.5f, -0.5f, 0.0f, 0.5f, -0.5f, 0.0f, 0.0f, 0.5f, 0.0f};
-  GpuBuffer vbo = device->CreateBuffer(sizeof(verts),
-                                       kBufferUsageAccelBuildInput | kBufferUsageDeviceAddress,
+  gpu::GpuBuffer vbo = device->CreateBuffer(sizeof(verts),
+                                       gpu::kBufferUsageAccelBuildInput | gpu::kBufferUsageDeviceAddress,
                                        /*host_visible=*/true);
   if (!vbo || !vbo.mapped || vbo.address == 0) return Fail("vertex buffer creation failed");
   base::MemCopy(vbo.mapped, verts, sizeof(verts));
 
-  AccelTriangles tri{.vertex_address = vbo.address,
+  gpu::AccelTriangles tri{.vertex_address = vbo.address,
                      .vertex_stride = 3 * sizeof(f32),
                      .vertex_count = 3,
-                     .vertex_format = Format::kRGB32Float,
+                     .vertex_format = gpu::Format::kRGB32Float,
                      .index_count = 0,  // non-indexed soup
                      .opaque = true};
-  BlasBuildDesc build_desc{.geometries = base::Span(&tri, 1), .fast_trace = true, .allow_compaction = true};
+  gpu::BlasBuildDesc build_desc{.geometries = base::Span(&tri, 1), .fast_trace = true, .allow_compaction = true};
 
-  AccelSizes sizes = device->GetBlasSizes(build_desc);
+  gpu::AccelSizes sizes = device->GetBlasSizes(build_desc);
   if (sizes.accel_bytes == 0) return Fail("GetBlasSizes returned 0");
   ::printf("compaction_test: original blas = %llu bytes, scratch = %llu bytes\n",
               (unsigned long long)sizes.accel_bytes, (unsigned long long)sizes.scratch_bytes);
 
-  AccelStructHandle fat = device->CreateAccelStruct(AccelStructType::kBlas, sizes.accel_bytes);
+  gpu::AccelStructHandle fat = device->CreateAccelStruct(gpu::AccelStructType::kBlas, sizes.accel_bytes);
   if (!fat) return Fail("CreateAccelStruct (fat) failed");
 
   const u32 align = device->caps().accel_scratch_alignment;
-  GpuBuffer scratch = device->CreateBuffer(sizes.scratch_bytes + align, kBufferUsageAccelScratch);
+  gpu::GpuBuffer scratch = device->CreateBuffer(sizes.scratch_bytes + align, gpu::kBufferUsageAccelScratch);
   if (!scratch) return Fail("scratch buffer creation failed");
   const u64 scratch_offset = AlignUp(scratch.address, align) - scratch.address;
 
-  AccelCompactionQueryHandle query = device->CreateCompactionQuery(1);
+  gpu::AccelCompactionQueryHandle query = device->CreateCompactionQuery(1);
   if (!query) return Fail("CreateCompactionQuery returned null (backend without compaction)");
 
   // Build the BLAS and record the compacted-size query on the same frame list,
   // then submit. Results are not valid until the frame's fence signals.
-  CommandList* cmd = device->BeginFrame(0);
+  gpu::CommandList* cmd = device->BeginFrame(0);
   if (!cmd) return Fail("BeginFrame returned null");
   cmd->BuildBlas(fat, build_desc, scratch, scratch_offset);
   cmd->QueryCompactedSizes(query, &fat, 1);
@@ -108,9 +108,9 @@ int main() {
   if (compacted > sizes.accel_bytes) return Fail("compacted size exceeds original");
 
   // Tight destination + compacting copy.
-  AccelStructHandle lean = device->CreateAccelStruct(AccelStructType::kBlas, compacted);
+  gpu::AccelStructHandle lean = device->CreateAccelStruct(gpu::AccelStructType::kBlas, compacted);
   if (!lean) return Fail("CreateAccelStruct (lean) failed");
-  device->ImmediateSubmit([&](CommandList& c) { c.CopyAccelStruct(lean, fat, /*compact=*/true); });
+  device->ImmediateSubmit([&](gpu::CommandList& c) { c.CopyAccelStruct(lean, fat, /*compact=*/true); });
 
   // Prove the compacted BLAS is a valid, addressable structure: build a TLAS
   // over one instance referencing it. (No trace shader here; a successful,
@@ -119,23 +119,23 @@ int main() {
   if (lean_address == 0) return Fail("compacted blas has no device address");
 
   if (device->caps().ray_query) {
-    TlasInstance inst{};
+    gpu::TlasInstance inst{};
     inst.transform[0][0] = inst.transform[1][1] = inst.transform[2][2] = 1.0f;
     inst.mask = 0xFF;
     inst.blas_address = lean_address;
-    GpuBuffer instances = device->CreateBuffer(
-        sizeof(TlasInstance), kBufferUsageAccelBuildInput | kBufferUsageDeviceAddress, true);
+    gpu::GpuBuffer instances = device->CreateBuffer(
+        sizeof(gpu::TlasInstance), gpu::kBufferUsageAccelBuildInput | gpu::kBufferUsageDeviceAddress, true);
     if (!instances || !instances.mapped) return Fail("instance buffer creation failed");
     base::MemCopy(instances.mapped, &inst, sizeof(inst));
 
-    AccelSizes tlas_sizes = device->GetTlasSizes(1);
-    AccelStructHandle tlas = device->CreateAccelStruct(AccelStructType::kTlas, tlas_sizes.accel_bytes);
-    GpuBuffer tlas_scratch =
-        device->CreateBuffer(tlas_sizes.scratch_bytes + align, kBufferUsageAccelScratch);
+    gpu::AccelSizes tlas_sizes = device->GetTlasSizes(1);
+    gpu::AccelStructHandle tlas = device->CreateAccelStruct(gpu::AccelStructType::kTlas, tlas_sizes.accel_bytes);
+    gpu::GpuBuffer tlas_scratch =
+        device->CreateBuffer(tlas_sizes.scratch_bytes + align, gpu::kBufferUsageAccelScratch);
     if (!tlas || !tlas_scratch) return Fail("tlas resources creation failed");
 
     device->ImmediateSubmit(
-        [&](CommandList& c) { c.BuildTlas(tlas, instances, 1, tlas_scratch); });
+        [&](gpu::CommandList& c) { c.BuildTlas(tlas, instances, 1, tlas_scratch); });
     device->WaitIdle();
     ::printf("compaction_test: built tlas over the compacted blas (ray_query)\n");
 

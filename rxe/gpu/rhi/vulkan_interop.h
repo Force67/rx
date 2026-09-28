@@ -16,7 +16,7 @@
 #include "rxe/gpu/rhi/command_list.h"
 #include "rxe/gpu/rhi/device.h"
 
-namespace rx::render {
+namespace rx::gpu {
 
 struct VulkanHandles {
   VkInstance instance = VK_NULL_HANDLE;
@@ -65,6 +65,6 @@ RX_GPU_EXPORT VkBuffer GetVkBuffer(const GpuBuffer& buffer);
 RX_GPU_EXPORT VkAccelerationStructureKHR GetVkAccelStruct(AccelStructHandle accel);
 RX_GPU_EXPORT VkFormat GetVkFormat(Format format);
 
-}  // namespace rx::render
+}  // namespace rx::gpu
 
 #endif  // RX_RENDER_RHI_VULKAN_INTEROP_H_

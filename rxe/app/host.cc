@@ -198,9 +198,9 @@ bool Host::WantsSplash() const {
 }
 
 void Host::ApplyRenderPreset() {
-  render::Device* device = renderer_.device();
+  gpu::Device* device = renderer_.device();
   if (!device || device->is_stub()) return;  // no gpu, nothing to tune
-  const render::DeviceCaps& caps = device->caps();
+  const gpu::DeviceCaps& caps = device->caps();
   render::QualityPreset resolved = render::ResolvePreset(config_.preset, caps);
   // The whole platform config for the tier: engine then game, default.ini then
   // <tier>.ini. Options and the memory plan apply again, now with the tier's.

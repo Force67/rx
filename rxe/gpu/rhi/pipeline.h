@@ -7,7 +7,7 @@
 #include "rxe/gpu/rhi/bindings.h"
 #include "rxe/gpu/rhi/types.h"
 
-namespace rx::render {
+namespace rx::gpu {
 
 // The portability floor for the Vulkan 1.0-1.3 devices rx targets, Android
 // included: maxPushConstantsSize is guaranteed to be *at least* this and
@@ -111,6 +111,6 @@ struct GraphicsPipelineDesc {
   const char* debug_name = nullptr;
 };
 
-}  // namespace rx::render
+}  // namespace rx::gpu
 
 #endif  // RX_RENDER_RHI_PIPELINE_H_

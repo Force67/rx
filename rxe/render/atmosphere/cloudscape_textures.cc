@@ -38,31 +38,31 @@ f32 QuantizeBlend(f32 blend) {
 
 }  // namespace
 
-bool CloudscapeTextures::Initialize(Device& device) {
+bool CloudscapeTextures::Initialize(gpu::Device& device) {
   // Every bake writes exactly one storage image at slot 0; the three static
   // volumes take no inputs, the weather map rides its push constants.
   base_noise_pipeline_ = device.CreateComputePipeline({
       .shader = RX_SHADER(k_cloudscape_base_noise_cs_hlsl),
-      .sets = {{.slots = {{0, BindingType::kStorageImage}}}},
+      .sets = {{.slots = {{0, gpu::BindingType::kStorageImage}}}},
       .push_constant_size = 0,
       .debug_name = "cloudscape_base_noise",
   });
   detail_noise_pipeline_ = device.CreateComputePipeline({
       .shader = RX_SHADER(k_cloudscape_detail_noise_cs_hlsl),
-      .sets = {{.slots = {{0, BindingType::kStorageImage}}}},
+      .sets = {{.slots = {{0, gpu::BindingType::kStorageImage}}}},
       .push_constant_size = 0,
       .debug_name = "cloudscape_detail_noise",
   });
   curl_pipeline_ = device.CreateComputePipeline({
       .shader = RX_SHADER(k_cloudscape_curl_cs_hlsl),
-      .sets = {{.slots = {{0, BindingType::kStorageImage}}}},
+      .sets = {{.slots = {{0, gpu::BindingType::kStorageImage}}}},
       .push_constant_size = 0,
       .debug_name = "cloudscape_curl",
   });
   weather_pipeline_ = device.CreateComputePipeline({
       .shader = RX_SHADER(k_cloudscape_weather_map_cs_hlsl),
-      .sets = {{.slots = {{0, BindingType::kStorageImage}}}},
-      .push_constant_size = PushSize<WeatherPush>(),
+      .sets = {{.slots = {{0, gpu::BindingType::kStorageImage}}}},
+      .push_constant_size = gpu::PushSize<WeatherPush>(),
       .debug_name = "cloudscape_weather_map",
   });
   if (!base_noise_pipeline_ || !detail_noise_pipeline_ || !curl_pipeline_ || !weather_pipeline_) {
@@ -72,14 +72,14 @@ bool CloudscapeTextures::Initialize(Device& device) {
   }
 
   // Storage + sampled: the bakes write them, the raymarcher samples them.
-  const TextureUsageFlags usage = kTextureUsageStorage | kTextureUsageSampled;
+  const gpu::TextureUsageFlags usage = gpu::kTextureUsageStorage | gpu::kTextureUsageSampled;
   base_noise_ =
-      device.CreateImage3D(Format::kRGBA8Unorm, kBaseNoiseSize, kBaseNoiseSize, kBaseNoiseSize,
+      device.CreateImage3D(gpu::Format::kRGBA8Unorm, kBaseNoiseSize, kBaseNoiseSize, kBaseNoiseSize,
                            usage);
-  detail_noise_ = device.CreateImage3D(Format::kRGBA8Unorm, kDetailNoiseSize, kDetailNoiseSize,
+  detail_noise_ = device.CreateImage3D(gpu::Format::kRGBA8Unorm, kDetailNoiseSize, kDetailNoiseSize,
                                        kDetailNoiseSize, usage);
-  curl_ = device.CreateImage2D(Format::kRG16Float, {kCurlSize, kCurlSize}, usage);
-  weather_map_ = device.CreateImage2D(Format::kRGBA8Unorm, {kWeatherSize, kWeatherSize}, usage);
+  curl_ = device.CreateImage2D(gpu::Format::kRG16Float, {kCurlSize, kCurlSize}, usage);
+  weather_map_ = device.CreateImage2D(gpu::Format::kRGBA8Unorm, {kWeatherSize, kWeatherSize}, usage);
   if (!base_noise_ || !detail_noise_ || !curl_ || !weather_map_) {
     RX_WARN("cloudscape textures unavailable (no 3d image support)");
     Destroy(device);
@@ -88,12 +88,12 @@ bool CloudscapeTextures::Initialize(Device& device) {
 
   // Trilinear, wrap on all axes: the volumes and the weather map tile, so every
   // sample must repeat seamlessly across the wrap.
-  sampler_ = device.GetSampler({.min_filter = Filter::kLinear,
-                                .mag_filter = Filter::kLinear,
-                                .mip_filter = Filter::kLinear,
-                                .address_u = AddressMode::kRepeat,
-                                .address_v = AddressMode::kRepeat,
-                                .address_w = AddressMode::kRepeat});
+  sampler_ = device.GetSampler({.min_filter = gpu::Filter::kLinear,
+                                .mag_filter = gpu::Filter::kLinear,
+                                .mip_filter = gpu::Filter::kLinear,
+                                .address_u = gpu::AddressMode::kRepeat,
+                                .address_v = gpu::AddressMode::kRepeat,
+                                .address_w = gpu::AddressMode::kRepeat});
   if (!sampler_) {
     RX_ERROR("cloudscape texture sampler creation failed");
     Destroy(device);
@@ -103,24 +103,24 @@ bool CloudscapeTextures::Initialize(Device& device) {
   // Images rest in sampled-compute state. Bake passes transition to UAV and
   // back explicitly, which is required on D3D12 (an SRV cannot be read while
   // the resource remains in D3D12_RESOURCE_STATE_UNORDERED_ACCESS).
-  device.ImmediateSubmit([this](CommandList& cmd) {
-    TextureBarrier to_sampled[4] = {
-        Transition(base_noise_, ResourceState::kUndefined, ResourceState::kShaderReadCompute),
-        Transition(detail_noise_, ResourceState::kUndefined, ResourceState::kShaderReadCompute),
-        Transition(curl_, ResourceState::kUndefined, ResourceState::kShaderReadCompute),
-        Transition(weather_map_, ResourceState::kUndefined, ResourceState::kShaderReadCompute)};
+  device.ImmediateSubmit([this](gpu::CommandList& cmd) {
+    gpu::TextureBarrier to_sampled[4] = {
+        gpu::Transition(base_noise_, gpu::ResourceState::kUndefined, gpu::ResourceState::kShaderReadCompute),
+        gpu::Transition(detail_noise_, gpu::ResourceState::kUndefined, gpu::ResourceState::kShaderReadCompute),
+        gpu::Transition(curl_, gpu::ResourceState::kUndefined, gpu::ResourceState::kShaderReadCompute),
+        gpu::Transition(weather_map_, gpu::ResourceState::kUndefined, gpu::ResourceState::kShaderReadCompute)};
     cmd.TextureBarriers(to_sampled);
   });
   return true;
 }
 
-void CloudscapeTextures::Destroy(Device& device) {
-  for (PipelineHandle* p : {&base_noise_pipeline_, &detail_noise_pipeline_, &curl_pipeline_,
+void CloudscapeTextures::Destroy(gpu::Device& device) {
+  for (gpu::PipelineHandle* p : {&base_noise_pipeline_, &detail_noise_pipeline_, &curl_pipeline_,
                             &weather_pipeline_}) {
     if (*p) device.DestroyPipeline(*p);
     *p = {};
   }
-  for (GpuImage* img : {&base_noise_, &detail_noise_, &curl_, &weather_map_}) {
+  for (gpu::GpuImage* img : {&base_noise_, &detail_noise_, &curl_, &weather_map_}) {
     if (*img) device.DestroyImage(*img);
     *img = {};
   }
@@ -149,35 +149,35 @@ void CloudscapeTextures::AddToGraph(RenderGraph& graph, const CloudscapeControls
     graph.AddPass(
         "cloudscape_base_noise", [](RenderGraph::PassBuilder&) {},
         [this](PassContext& ctx) {
-          ctx.cmd->Barrier(Transition(base_noise_, ResourceState::kShaderReadCompute,
-                                      ResourceState::kGeneral));
+          ctx.cmd->Barrier(gpu::Transition(base_noise_, gpu::ResourceState::kShaderReadCompute,
+                                      gpu::ResourceState::kGeneral));
           ctx.cmd->BindPipeline(base_noise_pipeline_);
-          ctx.cmd->BindTransient(0, {Bind::Storage(0, base_noise_)});
+          ctx.cmd->BindTransient(0, {gpu::Bind::Storage(0, base_noise_)});
           ctx.cmd->Dispatch(kBaseNoiseSize / 4, kBaseNoiseSize / 4, kBaseNoiseSize / 4);
-          ctx.cmd->Barrier(Transition(base_noise_, ResourceState::kGeneral,
-                                      ResourceState::kShaderReadCompute));
+          ctx.cmd->Barrier(gpu::Transition(base_noise_, gpu::ResourceState::kGeneral,
+                                      gpu::ResourceState::kShaderReadCompute));
         });
     graph.AddPass(
         "cloudscape_detail_noise", [](RenderGraph::PassBuilder&) {},
         [this](PassContext& ctx) {
-          ctx.cmd->Barrier(Transition(detail_noise_, ResourceState::kShaderReadCompute,
-                                      ResourceState::kGeneral));
+          ctx.cmd->Barrier(gpu::Transition(detail_noise_, gpu::ResourceState::kShaderReadCompute,
+                                      gpu::ResourceState::kGeneral));
           ctx.cmd->BindPipeline(detail_noise_pipeline_);
-          ctx.cmd->BindTransient(0, {Bind::Storage(0, detail_noise_)});
+          ctx.cmd->BindTransient(0, {gpu::Bind::Storage(0, detail_noise_)});
           ctx.cmd->Dispatch(kDetailNoiseSize / 4, kDetailNoiseSize / 4, kDetailNoiseSize / 4);
-          ctx.cmd->Barrier(Transition(detail_noise_, ResourceState::kGeneral,
-                                      ResourceState::kShaderReadCompute));
+          ctx.cmd->Barrier(gpu::Transition(detail_noise_, gpu::ResourceState::kGeneral,
+                                      gpu::ResourceState::kShaderReadCompute));
         });
     graph.AddPass(
         "cloudscape_curl", [](RenderGraph::PassBuilder&) {},
         [this](PassContext& ctx) {
-          ctx.cmd->Barrier(Transition(curl_, ResourceState::kShaderReadCompute,
-                                      ResourceState::kGeneral));
+          ctx.cmd->Barrier(gpu::Transition(curl_, gpu::ResourceState::kShaderReadCompute,
+                                      gpu::ResourceState::kGeneral));
           ctx.cmd->BindPipeline(curl_pipeline_);
-          ctx.cmd->BindTransient(0, {Bind::Storage(0, curl_)});
+          ctx.cmd->BindTransient(0, {gpu::Bind::Storage(0, curl_)});
           ctx.cmd->Dispatch2D({kCurlSize, kCurlSize});
-          ctx.cmd->Barrier(Transition(curl_, ResourceState::kGeneral,
-                                      ResourceState::kShaderReadCompute));
+          ctx.cmd->Barrier(gpu::Transition(curl_, gpu::ResourceState::kGeneral,
+                                      gpu::ResourceState::kShaderReadCompute));
         });
     noise_baked_ = true;
   }
@@ -198,14 +198,14 @@ void CloudscapeTextures::AddToGraph(RenderGraph& graph, const CloudscapeControls
     graph.AddPass(
         "cloudscape_weather_map", [](RenderGraph::PassBuilder&) {},
         [this, push](PassContext& ctx) {
-          ctx.cmd->Barrier(Transition(weather_map_, ResourceState::kShaderReadCompute,
-                                      ResourceState::kGeneral));
+          ctx.cmd->Barrier(gpu::Transition(weather_map_, gpu::ResourceState::kShaderReadCompute,
+                                      gpu::ResourceState::kGeneral));
           ctx.cmd->BindPipeline(weather_pipeline_);
-          ctx.cmd->BindTransient(0, {Bind::Storage(0, weather_map_)});
+          ctx.cmd->BindTransient(0, {gpu::Bind::Storage(0, weather_map_)});
           ctx.cmd->Push(push);
           ctx.cmd->Dispatch2D({kWeatherSize, kWeatherSize});
-          ctx.cmd->Barrier(Transition(weather_map_, ResourceState::kGeneral,
-                                      ResourceState::kShaderReadCompute));
+          ctx.cmd->Barrier(gpu::Transition(weather_map_, gpu::ResourceState::kGeneral,
+                                      gpu::ResourceState::kShaderReadCompute));
         });
     last_map_a_ = controls.map_a;
     last_map_b_ = controls.map_b;

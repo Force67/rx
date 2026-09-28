@@ -33,13 +33,13 @@ enum class QualityPreset : u8 {
 // lines of the platform config files, see app/platform_config.h), then every
 // ray-traced feature clamped off when the device cannot do it, so the result is
 // always runnable. The clamps are the only policy here; the tiers are files.
-RX_RENDER_EXPORT RenderSettings PresetSettings(base::StringRef tier_ini, const DeviceCaps& caps);
+RX_RENDER_EXPORT RenderSettings PresetSettings(base::StringRef tier_ini, const gpu::DeviceCaps& caps);
 
 // Picks a concrete tier from the gpu class, vram and ray tracing support.
-RX_RENDER_EXPORT QualityPreset DetectPreset(const DeviceCaps& caps);
+RX_RENDER_EXPORT QualityPreset DetectPreset(const gpu::DeviceCaps& caps);
 
 // Resolves kAuto, leaves a concrete tier untouched.
-inline QualityPreset ResolvePreset(QualityPreset preset, const DeviceCaps& caps) {
+inline QualityPreset ResolvePreset(QualityPreset preset, const gpu::DeviceCaps& caps) {
   return preset == QualityPreset::kAuto ? DetectPreset(caps) : preset;
 }
 

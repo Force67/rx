@@ -21,7 +21,7 @@
 #include "rxe/gpu/rhi/device.h"
 #include "rxe/gpu/rhi/swapchain.h"
 
-namespace rx::render::d3d12 {
+namespace rx::gpu::d3d12 {
 
 class D3D12Device;
 
@@ -579,6 +579,6 @@ class D3D12Device final : public Device {
   friend class D3D12Swapchain;
 };
 
-}  // namespace rx::render::d3d12
+}  // namespace rx::gpu::d3d12
 
 #endif  // RX_RENDER_D3D12_D3D12_BACKEND_H_

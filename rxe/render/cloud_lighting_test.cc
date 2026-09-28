@@ -10,6 +10,7 @@
 
 using namespace rx;
 using namespace rx::render;
+namespace gpu = rx::gpu;
 
 namespace {
 f32 Half(u16 bits) {
@@ -21,12 +22,12 @@ f32 Half(u16 bits) {
 }  // namespace
 
 int main() {
-  DeviceDesc desc;
+  gpu::DeviceDesc desc;
   const char* backend = ::getenv("RX_RHI");
-  desc.backend = backend && ::strcmp(backend, "d3d12") == 0 ? Backend::kD3D12 : Backend::kVulkan;
+  desc.backend = backend && ::strcmp(backend, "d3d12") == 0 ? gpu::Backend::kD3D12 : gpu::Backend::kVulkan;
   desc.request_raytracing = false;
   desc.enable_validation = true;
-  auto device = Device::CreateOffscreen(desc);
+  auto device = gpu::Device::CreateOffscreen(desc);
   if (!device || device->is_stub()) {
     ::printf("cloud_lighting_test: SKIP, GPU unavailable\n");
     return 77;
@@ -39,29 +40,29 @@ int main() {
     ::printf("%s: %s, error=%g\n", name, ok ? "PASS" : "FAIL", error);
     if (!ok) ++failures;
   };
-  for (Extent2D extent : {Extent2D{32, 16}, Extent2D{37, 23}}) {
-    base::Vector<GpuImage> owned;
+  for (gpu::Extent2D extent : {gpu::Extent2D{32, 16}, gpu::Extent2D{37, 23}}) {
+    base::Vector<gpu::GpuImage> owned;
     const u32 count = extent.width * extent.height;
-    auto input = [&](Format format, const base::Vector<f32>& data) {
-      GpuImage image = device->CreateImage2D(format, extent,
-          kTextureUsageSampled | kTextureUsageTransferDst);
-      GpuBuffer staging = device->CreateBufferWithData(
-          ByteSpan(reinterpret_cast<const u8*>(data.data()), data.size() * sizeof(f32)), kBufferUsageTransferSrc);
+    auto input = [&](gpu::Format format, const base::Vector<f32>& data) {
+      gpu::GpuImage image = device->CreateImage2D(format, extent,
+          gpu::kTextureUsageSampled | gpu::kTextureUsageTransferDst);
+      gpu::GpuBuffer staging = device->CreateBufferWithData(
+          ByteSpan(reinterpret_cast<const u8*>(data.data()), data.size() * sizeof(f32)), gpu::kBufferUsageTransferSrc);
       if (!image || !staging) ::exit(1);
-      device->ImmediateSubmit([&](CommandList& cmd) {
-        cmd.Barrier(Transition(image, ResourceState::kUndefined, ResourceState::kCopyDst));
-        BufferTextureCopy copy{.extent = extent};
+      device->ImmediateSubmit([&](gpu::CommandList& cmd) {
+        cmd.Barrier(gpu::Transition(image, gpu::ResourceState::kUndefined, gpu::ResourceState::kCopyDst));
+        gpu::BufferTextureCopy copy{.extent = extent};
         cmd.CopyBufferToTexture(staging, image, base::Span(&copy, 1));
-        cmd.Barrier(Transition(image, ResourceState::kCopyDst, ResourceState::kShaderReadCompute));
+        cmd.Barrier(gpu::Transition(image, gpu::ResourceState::kCopyDst, gpu::ResourceState::kShaderReadCompute));
       });
       device->DestroyBuffer(staging);
       owned.push_back(image);
       return image;
     };
-    const GpuImage black = input(Format::kRGBA32Float, base::Vector<f32>(count * 4, 0));
-    const GpuImage white = input(Format::kRGBA32Float, base::Vector<f32>(count * 4, 1));
-    const GpuImage depth = input(Format::kR32Float, base::Vector<f32>(count, 1.f / 5000));
-    const GpuImage foreground = input(Format::kR32Float, base::Vector<f32>(count, 1));
+    const gpu::GpuImage black = input(gpu::Format::kRGBA32Float, base::Vector<f32>(count * 4, 0));
+    const gpu::GpuImage white = input(gpu::Format::kRGBA32Float, base::Vector<f32>(count * 4, 1));
+    const gpu::GpuImage depth = input(gpu::Format::kR32Float, base::Vector<f32>(count, 1.f / 5000));
+    const gpu::GpuImage foreground = input(gpu::Format::kR32Float, base::Vector<f32>(count, 1));
     Clouds::Frame frame;
     // Parallel upward rays: world y = 1/depth. The surface at 5000 m clips
     // cirrus, leaving only the cumulus layer and its known input background.
@@ -74,10 +75,10 @@ int main() {
     frame.coverage = 1;
     frame.steps = 1;
     frame.light_steps = 0;
-    auto render = [&](GpuImage color, GpuImage guide) {
+    auto render = [&](gpu::GpuImage color, gpu::GpuImage guide) {
       pool.BeginFrame();
       RenderGraph graph;
-      ResourceState cs = ResourceState::kShaderReadCompute, ds = cs;
+      gpu::ResourceState cs = gpu::ResourceState::kShaderReadCompute, ds = cs;
       auto c = graph.ImportImage("color", color, &cs);
       auto d = graph.ImportImage("depth", guide, &ds);
       auto out = clouds.AddToGraph(graph, c, d, extent, frame);
@@ -85,12 +86,12 @@ int main() {
         b.Read(out, ResourceUsage::kResolveSrc);
       }, [](PassContext&) {});
       if (!graph.Compile(*device, pool)) ::exit(1);
-      device->ImmediateSubmit([&](CommandList& cmd) {
+      device->ImmediateSubmit([&](gpu::CommandList& cmd) {
         PassContext ctx{.cmd = &cmd, .device = device.Get_UseOnlyIfYouKnowWhatYouareDoing(), .graph = &graph};
         graph.Execute(ctx);
       });
       base::Vector<u16> bits(count * 4);
-      if (!device->ReadbackImage(graph.image(out), ResourceState::kResolveSrc,
+      if (!device->ReadbackImage(graph.image(out), gpu::ResourceState::kResolveSrc,
                                  bits.data(), bits.size() * sizeof(u16))) ::exit(1);
       base::Vector<f32> pixels(bits.size());
       for (u32 i = 0; i < bits.size(); ++i) pixels[i] = Half(bits[i]);

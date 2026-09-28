@@ -21,14 +21,14 @@
 namespace rx::render {
 namespace {
 
-constexpr Format kIrradiance = Format::kRGBA16Float;
-constexpr Format kNormalRough = Format::kRGBA16Float;
+constexpr gpu::Format kIrradiance = gpu::Format::kRGBA16Float;
+constexpr gpu::Format kNormalRough = gpu::Format::kRGBA16Float;
 // Squared HDR luminance exceeds half precision even when radiance fits.
-constexpr Format kMoments = Format::kRGBA32Float;
-constexpr Format kViewZ = Format::kR32Float;
-constexpr Format kMotion = Format::kRG16Float;
-constexpr Format kMatId = Format::kR32Uint;
-constexpr Format kWorldPos = Format::kRGBA32Float;  // restir positions need fp32
+constexpr gpu::Format kMoments = gpu::Format::kRGBA32Float;
+constexpr gpu::Format kViewZ = gpu::Format::kR32Float;
+constexpr gpu::Format kMotion = gpu::Format::kRG16Float;
+constexpr gpu::Format kMatId = gpu::Format::kR32Uint;
+constexpr gpu::Format kWorldPos = gpu::Format::kRGBA32Float;  // restir positions need fp32
 
 // ReSTIR GI tuning (Ouyang et al. 2021 defaults, scaled for 1 initial spp).
 constexpr f32 kRestirMMax = 30.0f;         // temporal reservoir age cap
@@ -157,13 +157,13 @@ struct RestirDiSpatialPush {
 
 }  // namespace
 
-bool ReconPathTracer::Initialize(Device& device, BindingLayoutHandle bindless_layout) {
+bool ReconPathTracer::Initialize(gpu::Device& device, gpu::BindingLayoutHandle bindless_layout) {
   if (!bindless_layout) return false;
   device_ = &device;
   // One per in-flight frame: the pass rewrites it while the previous frame may
   // still be reading its own copy.
-  for (GpuBuffer& camera : camera_) {
-    camera = device.CreateBuffer(sizeof(ReconCamera), kBufferUsageUniform, true);
+  for (gpu::GpuBuffer& camera : camera_) {
+    camera = device.CreateBuffer(sizeof(ReconCamera), gpu::kBufferUsageUniform, true);
     if (!camera.mapped) {
       Destroy(device);
       return false;
@@ -176,191 +176,191 @@ bool ReconPathTracer::Initialize(Device& device, BindingLayoutHandle bindless_la
   return true;
 }
 
-bool ReconPathTracer::CreatePipelines(Device& device, BindingLayoutHandle bindless_layout) {
+bool ReconPathTracer::CreatePipelines(gpu::Device& device, gpu::BindingLayoutHandle bindless_layout) {
   // gbuffer: 7 storage outputs, tlas (7), sky (8), noisy specular out (9),
   // restir initial sample + primary position (10..13), camera matrices (17);
   // set 1 bindless.
   gbuffer_pipeline_ = device.CreateComputePipeline({
       .shader = RX_SHADER(k_recon_gbuffer_cs_hlsl),
-      .sets = {{.slots = {{0, BindingType::kStorageImage},
-                          {1, BindingType::kStorageImage},
-                          {2, BindingType::kStorageImage},
-                          {3, BindingType::kStorageImage},
-                          {4, BindingType::kStorageImage},
-                          {5, BindingType::kStorageImage},
-                          {6, BindingType::kStorageImage},
-                          {7, BindingType::kAccelStruct},
-                          {8, BindingType::kCombinedTextureSampler},
-                          {9, BindingType::kStorageImage},
-                          {10, BindingType::kStorageImage},
-                          {11, BindingType::kStorageImage},
-                          {12, BindingType::kStorageImage},
-                          {13, BindingType::kStorageImage},
-                          {14, BindingType::kStorageImage},
-                          {15, BindingType::kStorageImage},
-                          {16, BindingType::kStorageImage},
-                          {17, BindingType::kUniformBuffer},
-                          {18, BindingType::kStorageBuffer},
-                          {19, BindingType::kStorageImage}}},
+      .sets = {{.slots = {{0, gpu::BindingType::kStorageImage},
+                          {1, gpu::BindingType::kStorageImage},
+                          {2, gpu::BindingType::kStorageImage},
+                          {3, gpu::BindingType::kStorageImage},
+                          {4, gpu::BindingType::kStorageImage},
+                          {5, gpu::BindingType::kStorageImage},
+                          {6, gpu::BindingType::kStorageImage},
+                          {7, gpu::BindingType::kAccelStruct},
+                          {8, gpu::BindingType::kCombinedTextureSampler},
+                          {9, gpu::BindingType::kStorageImage},
+                          {10, gpu::BindingType::kStorageImage},
+                          {11, gpu::BindingType::kStorageImage},
+                          {12, gpu::BindingType::kStorageImage},
+                          {13, gpu::BindingType::kStorageImage},
+                          {14, gpu::BindingType::kStorageImage},
+                          {15, gpu::BindingType::kStorageImage},
+                          {16, gpu::BindingType::kStorageImage},
+                          {17, gpu::BindingType::kUniformBuffer},
+                          {18, gpu::BindingType::kStorageBuffer},
+                          {19, gpu::BindingType::kStorageImage}}},
                {.shared = bindless_layout}},
-      .push_constant_size = PushSize<GbufferPush>(),
+      .push_constant_size = gpu::PushSize<GbufferPush>(),
       .debug_name = "recon_gbuffer",
   });
 
   restir_temporal_pipeline_ = device.CreateComputePipeline({
       .shader = RX_SHADER(k_recon_restir_temporal_cs_hlsl),
-      .sets = {{.slots = {{0, BindingType::kStorageImage},
-                          {1, BindingType::kStorageImage},
-                          {2, BindingType::kStorageImage},
-                          {3, BindingType::kSampledImage},
-                          {4, BindingType::kSampledImage},
-                          {5, BindingType::kSampledImage},
-                          {6, BindingType::kSampledImage},
-                          {7, BindingType::kSampledImage},
-                          {8, BindingType::kSampledImage},
-                          {9, BindingType::kSampledImage},
-                          {10, BindingType::kSampledImage},
-                          {11, BindingType::kSampledImage},
-                          {12, BindingType::kSampledImage},
-                          {13, BindingType::kSampledImage},
-                          {14, BindingType::kSampledImage},
-                          {15, BindingType::kSampledImage},
-                          {16, BindingType::kSampledImage},
-                          {17, BindingType::kSampledImage}}}},
-      .push_constant_size = PushSize<RestirTemporalPush>(),
+      .sets = {{.slots = {{0, gpu::BindingType::kStorageImage},
+                          {1, gpu::BindingType::kStorageImage},
+                          {2, gpu::BindingType::kStorageImage},
+                          {3, gpu::BindingType::kSampledImage},
+                          {4, gpu::BindingType::kSampledImage},
+                          {5, gpu::BindingType::kSampledImage},
+                          {6, gpu::BindingType::kSampledImage},
+                          {7, gpu::BindingType::kSampledImage},
+                          {8, gpu::BindingType::kSampledImage},
+                          {9, gpu::BindingType::kSampledImage},
+                          {10, gpu::BindingType::kSampledImage},
+                          {11, gpu::BindingType::kSampledImage},
+                          {12, gpu::BindingType::kSampledImage},
+                          {13, gpu::BindingType::kSampledImage},
+                          {14, gpu::BindingType::kSampledImage},
+                          {15, gpu::BindingType::kSampledImage},
+                          {16, gpu::BindingType::kSampledImage},
+                          {17, gpu::BindingType::kSampledImage}}}},
+      .push_constant_size = gpu::PushSize<RestirTemporalPush>(),
       .debug_name = "recon_restir_temporal",
   });
 
   restir_spatial_pipeline_ = device.CreateComputePipeline({
       .shader = RX_SHADER(k_recon_restir_spatial_cs_hlsl),
-      .sets = {{.slots = {{0, BindingType::kStorageImage},
-                          {1, BindingType::kSampledImage},
-                          {2, BindingType::kSampledImage},
-                          {3, BindingType::kSampledImage},
-                          {4, BindingType::kSampledImage},
-                          {5, BindingType::kSampledImage},
-                          {6, BindingType::kSampledImage},
-                          {7, BindingType::kSampledImage},
-                          {8, BindingType::kSampledImage},
-                          {9, BindingType::kAccelStruct},
-                          {10, BindingType::kStorageImage},
-                          {11, BindingType::kStorageImage},
-                          {12, BindingType::kStorageImage}}}},
-      .push_constant_size = PushSize<RestirSpatialPush>(),
+      .sets = {{.slots = {{0, gpu::BindingType::kStorageImage},
+                          {1, gpu::BindingType::kSampledImage},
+                          {2, gpu::BindingType::kSampledImage},
+                          {3, gpu::BindingType::kSampledImage},
+                          {4, gpu::BindingType::kSampledImage},
+                          {5, gpu::BindingType::kSampledImage},
+                          {6, gpu::BindingType::kSampledImage},
+                          {7, gpu::BindingType::kSampledImage},
+                          {8, gpu::BindingType::kSampledImage},
+                          {9, gpu::BindingType::kAccelStruct},
+                          {10, gpu::BindingType::kStorageImage},
+                          {11, gpu::BindingType::kStorageImage},
+                          {12, gpu::BindingType::kStorageImage}}}},
+      .push_constant_size = gpu::PushSize<RestirSpatialPush>(),
       .debug_name = "recon_restir_spatial",
   });
 
   restir_di_temporal_pipeline_ = device.CreateComputePipeline({
       .shader = RX_SHADER(k_recon_restir_di_temporal_cs_hlsl),
-      .sets = {{.slots = {{0, BindingType::kStorageImage},
-                          {1, BindingType::kStorageImage},
-                          {2, BindingType::kSampledImage},
-                          {3, BindingType::kSampledImage},
-                          {4, BindingType::kSampledImage},
-                          {5, BindingType::kSampledImage},
-                          {6, BindingType::kSampledImage},
-                          {7, BindingType::kSampledImage},
-                          {8, BindingType::kSampledImage},
-                          {9, BindingType::kSampledImage},
-                          {10, BindingType::kSampledImage},
-                          {11, BindingType::kSampledImage},
-                          {12, BindingType::kStorageBuffer},
-                          {13, BindingType::kCombinedTextureSampler},
-                          {14, BindingType::kStorageBuffer},
-                          {15, BindingType::kStorageImage},
-                          {16, BindingType::kStorageImage},
-                          {17, BindingType::kSampledImage},
-                          {18, BindingType::kSampledImage}}}},
-      .push_constant_size = PushSize<RestirDiTemporalPush>(),
+      .sets = {{.slots = {{0, gpu::BindingType::kStorageImage},
+                          {1, gpu::BindingType::kStorageImage},
+                          {2, gpu::BindingType::kSampledImage},
+                          {3, gpu::BindingType::kSampledImage},
+                          {4, gpu::BindingType::kSampledImage},
+                          {5, gpu::BindingType::kSampledImage},
+                          {6, gpu::BindingType::kSampledImage},
+                          {7, gpu::BindingType::kSampledImage},
+                          {8, gpu::BindingType::kSampledImage},
+                          {9, gpu::BindingType::kSampledImage},
+                          {10, gpu::BindingType::kSampledImage},
+                          {11, gpu::BindingType::kSampledImage},
+                          {12, gpu::BindingType::kStorageBuffer},
+                          {13, gpu::BindingType::kCombinedTextureSampler},
+                          {14, gpu::BindingType::kStorageBuffer},
+                          {15, gpu::BindingType::kStorageImage},
+                          {16, gpu::BindingType::kStorageImage},
+                          {17, gpu::BindingType::kSampledImage},
+                          {18, gpu::BindingType::kSampledImage}}}},
+      .push_constant_size = gpu::PushSize<RestirDiTemporalPush>(),
       .debug_name = "recon_restir_di_temporal",
   });
 
   sky_cdf_pipeline_ = device.CreateComputePipeline({
       .shader = RX_SHADER(k_recon_sky_cdf_cs_hlsl),
-      .sets = {{.slots = {{0, BindingType::kCombinedTextureSampler},
-                          {1, BindingType::kStorageBuffer}}}},
-      .push_constant_size = PushSize<SkyCdfPush>(),
+      .sets = {{.slots = {{0, gpu::BindingType::kCombinedTextureSampler},
+                          {1, gpu::BindingType::kStorageBuffer}}}},
+      .push_constant_size = gpu::PushSize<SkyCdfPush>(),
       .debug_name = "recon_sky_cdf",
   });
 
   restir_di_spatial_pipeline_ = device.CreateComputePipeline({
       .shader = RX_SHADER(k_recon_restir_di_spatial_cs_hlsl),
-      .sets = {{.slots = {{0, BindingType::kStorageImage},
-                          {1, BindingType::kSampledImage},
-                          {2, BindingType::kSampledImage},
-                          {3, BindingType::kSampledImage},
-                          {4, BindingType::kSampledImage},
-                          {5, BindingType::kSampledImage},
-                          {6, BindingType::kSampledImage},
-                          {7, BindingType::kStorageBuffer},
-                          {8, BindingType::kAccelStruct},
-                          {9, BindingType::kStorageImage},
-                          {10, BindingType::kStorageImage},
-                          {11, BindingType::kCombinedTextureSampler},
-                          {12, BindingType::kStorageBuffer},
-                          {13, BindingType::kSampledImage},
-                          {14, BindingType::kSampledImage},
-                          {15, BindingType::kStorageImage},
-                          {16, BindingType::kStorageImage}}},
+      .sets = {{.slots = {{0, gpu::BindingType::kStorageImage},
+                          {1, gpu::BindingType::kSampledImage},
+                          {2, gpu::BindingType::kSampledImage},
+                          {3, gpu::BindingType::kSampledImage},
+                          {4, gpu::BindingType::kSampledImage},
+                          {5, gpu::BindingType::kSampledImage},
+                          {6, gpu::BindingType::kSampledImage},
+                          {7, gpu::BindingType::kStorageBuffer},
+                          {8, gpu::BindingType::kAccelStruct},
+                          {9, gpu::BindingType::kStorageImage},
+                          {10, gpu::BindingType::kStorageImage},
+                          {11, gpu::BindingType::kCombinedTextureSampler},
+                          {12, gpu::BindingType::kStorageBuffer},
+                          {13, gpu::BindingType::kSampledImage},
+                          {14, gpu::BindingType::kSampledImage},
+                          {15, gpu::BindingType::kStorageImage},
+                          {16, gpu::BindingType::kStorageImage}}},
                {.shared = bindless_layout}},
-      .push_constant_size = PushSize<RestirDiSpatialPush>(),
+      .push_constant_size = gpu::PushSize<RestirDiSpatialPush>(),
       .debug_name = "recon_restir_di_spatial",
   });
 
   temporal_pipeline_ = device.CreateComputePipeline({
       .shader = RX_SHADER(k_recon_temporal_cs_hlsl),
-      .sets = {{.slots = {{0, BindingType::kStorageImage},
-                          {1, BindingType::kStorageImage},
-                          {2, BindingType::kSampledImage},
-                          {3, BindingType::kSampledImage},
-                          {4, BindingType::kSampledImage},
-                          {5, BindingType::kSampledImage},
-                          {6, BindingType::kSampledImage},
-                          {7, BindingType::kSampledImage},
-                          {8, BindingType::kSampledImage},
-                          {9, BindingType::kSampledImage},
-                          {10, BindingType::kSampledImage},
-                          {11, BindingType::kSampledImage},
-                          {12, BindingType::kSampledImage}}}},
-      .push_constant_size = PushSize<TemporalPush>(),
+      .sets = {{.slots = {{0, gpu::BindingType::kStorageImage},
+                          {1, gpu::BindingType::kStorageImage},
+                          {2, gpu::BindingType::kSampledImage},
+                          {3, gpu::BindingType::kSampledImage},
+                          {4, gpu::BindingType::kSampledImage},
+                          {5, gpu::BindingType::kSampledImage},
+                          {6, gpu::BindingType::kSampledImage},
+                          {7, gpu::BindingType::kSampledImage},
+                          {8, gpu::BindingType::kSampledImage},
+                          {9, gpu::BindingType::kSampledImage},
+                          {10, gpu::BindingType::kSampledImage},
+                          {11, gpu::BindingType::kSampledImage},
+                          {12, gpu::BindingType::kSampledImage}}}},
+      .push_constant_size = gpu::PushSize<TemporalPush>(),
       .debug_name = "recon_temporal",
   });
 
   atrous_pipeline_ = device.CreateComputePipeline({
       .shader = RX_SHADER(k_recon_atrous_cs_hlsl),
-      .sets = {{.slots = {{0, BindingType::kStorageImage},
-                          {1, BindingType::kSampledImage},
-                          {2, BindingType::kSampledImage},
-                          {3, BindingType::kSampledImage},
-                          {4, BindingType::kSampledImage}}}},
-      .push_constant_size = PushSize<AtrousPush>(),
+      .sets = {{.slots = {{0, gpu::BindingType::kStorageImage},
+                          {1, gpu::BindingType::kSampledImage},
+                          {2, gpu::BindingType::kSampledImage},
+                          {3, gpu::BindingType::kSampledImage},
+                          {4, gpu::BindingType::kSampledImage}}}},
+      .push_constant_size = gpu::PushSize<AtrousPush>(),
       .debug_name = "recon_atrous",
   });
 
   fog_pipeline_ = device.CreateComputePipeline({
       .shader = RX_SHADER(k_recon_fog_cs_hlsl),
-      .sets = {{.slots = {{0, BindingType::kStorageImage},
-                          {1, BindingType::kSampledImage},
-                          {2, BindingType::kSampledImage},
-                          {3, BindingType::kSampledImage},
-                          {4, BindingType::kAccelStruct},
-                          {5, BindingType::kUniformBuffer}}}},
-      .push_constant_size = PushSize<FogPush>(),
+      .sets = {{.slots = {{0, gpu::BindingType::kStorageImage},
+                          {1, gpu::BindingType::kSampledImage},
+                          {2, gpu::BindingType::kSampledImage},
+                          {3, gpu::BindingType::kSampledImage},
+                          {4, gpu::BindingType::kAccelStruct},
+                          {5, gpu::BindingType::kUniformBuffer}}}},
+      .push_constant_size = gpu::PushSize<FogPush>(),
       .debug_name = "recon_fog",
   });
 
   composite_pipeline_ = device.CreateComputePipeline({
       .shader = RX_SHADER(k_recon_composite_cs_hlsl),
-      .sets = {{.slots = {{0, BindingType::kStorageImage},
-                          {1, BindingType::kSampledImage},
-                          {2, BindingType::kSampledImage},
-                          {3, BindingType::kSampledImage},
-                          {4, BindingType::kSampledImage},
-                          {5, BindingType::kSampledImage},
-                          {6, BindingType::kSampledImage},
-                          {7, BindingType::kSampledImage},
-                          {8, BindingType::kCombinedTextureSampler}}}},
-      .push_constant_size = PushSize<CompositePush>(),
+      .sets = {{.slots = {{0, gpu::BindingType::kStorageImage},
+                          {1, gpu::BindingType::kSampledImage},
+                          {2, gpu::BindingType::kSampledImage},
+                          {3, gpu::BindingType::kSampledImage},
+                          {4, gpu::BindingType::kSampledImage},
+                          {5, gpu::BindingType::kSampledImage},
+                          {6, gpu::BindingType::kSampledImage},
+                          {7, gpu::BindingType::kSampledImage},
+                          {8, gpu::BindingType::kCombinedTextureSampler}}}},
+      .push_constant_size = gpu::PushSize<CompositePush>(),
       .debug_name = "recon_composite",
   });
 
@@ -374,13 +374,13 @@ bool ReconPathTracer::CreatePipelines(Device& device, BindingLayoutHandle bindle
   return true;
 }
 
-bool ReconPathTracer::CreateBuffers(Device& device, Extent2D extent) {
+bool ReconPathTracer::CreateBuffers(gpu::Device& device, gpu::Extent2D extent) {
   extent_ = extent;
-  auto make = [&](PingPong& pp, Format fmt) {
+  auto make = [&](PingPong& pp, gpu::Format fmt) {
     for (u32 i = 0; i < 2; ++i) {
       pp.image[i] =
-          device.CreateImage2D(fmt, extent, kTextureUsageSampled | kTextureUsageStorage);
-      pp.state[i] = ResourceState::kUndefined;
+          device.CreateImage2D(fmt, extent, gpu::kTextureUsageSampled | gpu::kTextureUsageStorage);
+      pp.state[i] = gpu::ResourceState::kUndefined;
     }
   };
   make(accum_, kIrradiance);
@@ -399,14 +399,14 @@ bool ReconPathTracer::CreateBuffers(Device& device, Extent2D extent) {
   make(restir_di_r2_, kWorldPos);
   make(restir_di_r3_, kWorldPos);
   // Fog history at half res (low-frequency signal, upsampled in composite).
-  Extent2D half{(extent.width + 1) / 2, (extent.height + 1) / 2};
+  gpu::Extent2D half{(extent.width + 1) / 2, (extent.height + 1) / 2};
   for (u32 i = 0; i < 2; ++i) {
     fog_.image[i] =
-        device.CreateImage2D(kIrradiance, half, kTextureUsageSampled | kTextureUsageStorage);
-    fog_.state[i] = ResourceState::kUndefined;
+        device.CreateImage2D(kIrradiance, half, gpu::kTextureUsageSampled | gpu::kTextureUsageStorage);
+    fog_.state[i] = gpu::ResourceState::kUndefined;
   }
   if (!sky_cdf_) {  // size is resolution-independent; survives Resize
-    sky_cdf_ = device.CreateBuffer(kSkyCdfFloats * sizeof(f32), kBufferUsageStorage);
+    sky_cdf_ = device.CreateBuffer(kSkyCdfFloats * sizeof(f32), gpu::kBufferUsageStorage);
   }
   history_invalid_ = true;
 
@@ -414,7 +414,7 @@ bool ReconPathTracer::CreateBuffers(Device& device, Extent2D extent) {
   for (PingPong* pp : {&accum_, &moments_, &spec_accum_, &spec_moments_, &normal_rough_,
                        &viewz_, &matid_, &primary_pos_, &restir_r0_, &restir_r1_, &restir_r2_,
                        &restir_di_r0_, &restir_di_r1_, &restir_di_r2_, &restir_di_r3_, &fog_})
-    for (const GpuImage& image : pp->image) complete &= static_cast<bool>(image);
+    for (const gpu::GpuImage& image : pp->image) complete &= static_cast<bool>(image);
   if (!complete) {
     DestroyBuffers(device);
     RX_ERROR("recon path tracer history allocation failed");
@@ -423,15 +423,15 @@ bool ReconPathTracer::CreateBuffers(Device& device, Extent2D extent) {
 
   // Prime every owned image to kGeneral so the first frame's barriers have a
   // defined source state (and reads of the not-yet-written prev slot are legal).
-  device.ImmediateSubmit([&](CommandList& cmd) {
-    base::Vector<TextureBarrier> barriers;
+  device.ImmediateSubmit([&](gpu::CommandList& cmd) {
+    base::Vector<gpu::TextureBarrier> barriers;
     for (PingPong* pp : {&accum_, &moments_, &spec_accum_, &spec_moments_, &normal_rough_,
                          &viewz_, &matid_, &primary_pos_, &restir_r0_, &restir_r1_, &restir_r2_,
                          &restir_di_r0_, &restir_di_r1_, &restir_di_r2_, &restir_di_r3_, &fog_})
       for (u32 i = 0; i < 2; ++i) {
-        barriers.push_back(Transition(pp->image[i], ResourceState::kUndefined,
-                                      ResourceState::kGeneral));
-        pp->state[i] = ResourceState::kGeneral;
+        barriers.push_back(gpu::Transition(pp->image[i], gpu::ResourceState::kUndefined,
+                                      gpu::ResourceState::kGeneral));
+        pp->state[i] = gpu::ResourceState::kGeneral;
       }
     cmd.TextureBarriers(base::Span(barriers.data(), barriers.size()));
   });
@@ -439,7 +439,7 @@ bool ReconPathTracer::CreateBuffers(Device& device, Extent2D extent) {
   return true;
 }
 
-void ReconPathTracer::DestroyBuffers(Device& device) {
+void ReconPathTracer::DestroyBuffers(gpu::Device& device) {
   buffers_ready_ = false;
   history_invalid_ = true;
   for (PingPong* pp : {&accum_, &moments_, &spec_accum_, &spec_moments_, &normal_rough_,
@@ -449,7 +449,7 @@ void ReconPathTracer::DestroyBuffers(Device& device) {
       if (pp->image[i]) device.DestroyImage(pp->image[i]);
 }
 
-void ReconPathTracer::Resize(Device& device, Extent2D extent) {
+void ReconPathTracer::Resize(gpu::Device& device, gpu::Extent2D extent) {
   if (!gbuffer_pipeline_) return;
   if (extent == extent_ && buffers_ready_) return;
   if (buffers_ready_) device.WaitIdle();
@@ -458,17 +458,17 @@ void ReconPathTracer::Resize(Device& device, Extent2D extent) {
   CreateBuffers(device, extent);
 }
 
-void ReconPathTracer::Destroy(Device& device) {
+void ReconPathTracer::Destroy(gpu::Device& device) {
   DestroyBuffers(device);
   if (sky_cdf_) {
     device.DestroyBuffer(sky_cdf_);
     sky_cdf_ = {};
   }
-  for (GpuBuffer& camera : camera_) {
+  for (gpu::GpuBuffer& camera : camera_) {
     if (camera) device.DestroyBuffer(camera);
     camera = {};
   }
-  for (PipelineHandle* p :
+  for (gpu::PipelineHandle* p :
        {&gbuffer_pipeline_, &temporal_pipeline_, &atrous_pipeline_, &composite_pipeline_,
         &restir_temporal_pipeline_, &restir_spatial_pipeline_,
         &restir_di_temporal_pipeline_, &restir_di_spatial_pipeline_, &sky_cdf_pipeline_,
@@ -497,11 +497,11 @@ void ReconPathTracer::RunTemporal(RenderGraph& graph, ResourceHandle noisy, Reso
        primary_pos, spec, frame](PassContext& ctx) {
         ResourceHandle reads[11] = {noisy, ac_p, nr_c,  nr_p, vz_c,       vz_p,
                                     motion, id_c, id_p, mo_p, primary_pos};
-        base::Vector<BindingItem> items;
-        items.push_back(Bind::Storage(0, ctx.graph->image(ac_c)));
-        items.push_back(Bind::Storage(1, ctx.graph->image(mo_c)));
+        base::Vector<gpu::BindingItem> items;
+        items.push_back(gpu::Bind::Storage(0, ctx.graph->image(ac_c)));
+        items.push_back(gpu::Bind::Storage(1, ctx.graph->image(mo_c)));
         for (u32 i = 0; i < 11; ++i) {
-          items.push_back(Bind::Sampled(i + 2, ctx.graph->image(reads[i])));
+          items.push_back(gpu::Bind::Sampled(i + 2, ctx.graph->image(reads[i])));
         }
 
         TemporalPush p{};
@@ -548,11 +548,11 @@ ResourceHandle ReconPathTracer::RunAtrous(RenderGraph& graph, ResourceHandle in,
           p.spec_mode = spec ? 1u : 0u;
           p.spec_radius = 8.0f;
           ctx.cmd->BindPipeline(atrous_pipeline_);
-          ctx.cmd->BindTransient(0, {Bind::Storage(0, ctx.graph->image(out)),
-                                     Bind::Sampled(1, ctx.graph->image(in)),
-                                     Bind::Sampled(2, ctx.graph->image(nr_c)),
-                                     Bind::Sampled(3, ctx.graph->image(vz_c)),
-                                     Bind::Sampled(4, ctx.graph->image(mo_c))});
+          ctx.cmd->BindTransient(0, {gpu::Bind::Storage(0, ctx.graph->image(out)),
+                                     gpu::Bind::Sampled(1, ctx.graph->image(in)),
+                                     gpu::Bind::Sampled(2, ctx.graph->image(nr_c)),
+                                     gpu::Bind::Sampled(3, ctx.graph->image(vz_c)),
+                                     gpu::Bind::Sampled(4, ctx.graph->image(mo_c))});
           ctx.cmd->Push(p);
           ctx.cmd->Dispatch2D(extent_);
         });
@@ -563,8 +563,8 @@ ResourceHandle ReconPathTracer::RunAtrous(RenderGraph& graph, ResourceHandle in,
 }
 
 void ReconPathTracer::AddToGraph(RenderGraph& graph, RayTracingContext& raytracing, u32 tlas_slot,
-                                 BindingSetHandle bindless_set, TextureView sky_view,
-                                 SamplerHandle sky_sampler, ResourceHandle output,
+                                 gpu::BindingSetHandle bindless_set, gpu::TextureView sky_view,
+                                 gpu::SamplerHandle sky_sampler, ResourceHandle output,
                                  const Frame& original_frame, ExternalInputs* external) {
   if (!available()) return;
   // Freshly (re)created history images hold undefined data; force one reset
@@ -610,7 +610,7 @@ void ReconPathTracer::AddToGraph(RenderGraph& graph, RayTracingContext& raytraci
   ResourceHandle smo_c = imp("recon_smo_c", spec_moments_, cur);
   ResourceHandle smo_p = imp("recon_smo_p", spec_moments_, prv);
 
-  auto tex = [&](const char* name, Format fmt) {
+  auto tex = [&](const char* name, gpu::Format fmt) {
     return graph.CreateTexture({.name = name, .format = fmt, .width = extent_.width,
                                 .height = extent_.height});
   };
@@ -658,21 +658,21 @@ void ReconPathTracer::AddToGraph(RenderGraph& graph, RayTracingContext& raytraci
        motion, id_c, albedo, emissive, spec_noisy, s_pos, s_nrm, s_rad, p_pos, spec_albedo,
        rr_normals, rr_depth, rr_hitdist, rr, di, cur, frame](PassContext& ctx) {
         ResourceHandle outs[7] = {gbuf_irr, nr_c, vz_c, motion, id_c, albedo, emissive};
-        base::Vector<BindingItem> items;
-        for (u32 i = 0; i < 7; ++i) items.push_back(Bind::Storage(i, ctx.graph->image(outs[i])));
-        items.push_back(Bind::Accel(7, raytracing.tlas(tlas_slot)));
-        items.push_back(Bind::Combined(8, sky_view, sky_sampler));
-        items.push_back(Bind::Storage(9, ctx.graph->image(spec_noisy)));
-        items.push_back(Bind::Storage(10, ctx.graph->image(s_pos)));
-        items.push_back(Bind::Storage(11, ctx.graph->image(s_nrm)));
-        items.push_back(Bind::Storage(12, ctx.graph->image(s_rad)));
-        items.push_back(Bind::Storage(13, ctx.graph->image(p_pos)));
-        items.push_back(Bind::Storage(14, ctx.graph->image(spec_albedo)));
-        items.push_back(Bind::Storage(15, ctx.graph->image(rr_normals)));
-        items.push_back(Bind::Storage(16, ctx.graph->image(rr_depth)));
-        items.push_back(Bind::Uniform(17, camera_[cur], 0, sizeof(ReconCamera)));
-        items.push_back(Bind::StorageBuffer(18, raytracing.motion_buffer(tlas_slot)));
-        items.push_back(Bind::Storage(19, ctx.graph->image(rr_hitdist)));
+        base::Vector<gpu::BindingItem> items;
+        for (u32 i = 0; i < 7; ++i) items.push_back(gpu::Bind::Storage(i, ctx.graph->image(outs[i])));
+        items.push_back(gpu::Bind::Accel(7, raytracing.tlas(tlas_slot)));
+        items.push_back(gpu::Bind::Combined(8, sky_view, sky_sampler));
+        items.push_back(gpu::Bind::Storage(9, ctx.graph->image(spec_noisy)));
+        items.push_back(gpu::Bind::Storage(10, ctx.graph->image(s_pos)));
+        items.push_back(gpu::Bind::Storage(11, ctx.graph->image(s_nrm)));
+        items.push_back(gpu::Bind::Storage(12, ctx.graph->image(s_rad)));
+        items.push_back(gpu::Bind::Storage(13, ctx.graph->image(p_pos)));
+        items.push_back(gpu::Bind::Storage(14, ctx.graph->image(spec_albedo)));
+        items.push_back(gpu::Bind::Storage(15, ctx.graph->image(rr_normals)));
+        items.push_back(gpu::Bind::Storage(16, ctx.graph->image(rr_depth)));
+        items.push_back(gpu::Bind::Uniform(17, camera_[cur], 0, sizeof(ReconCamera)));
+        items.push_back(gpu::Bind::StorageBuffer(18, raytracing.motion_buffer(tlas_slot)));
+        items.push_back(gpu::Bind::Storage(19, ctx.graph->image(rr_hitdist)));
 
         GbufferPush p{};
         p.camera_pos[0] = frame.camera_pos.x; p.camera_pos[1] = frame.camera_pos.y;
@@ -724,11 +724,11 @@ void ReconPathTracer::AddToGraph(RenderGraph& graph, RayTracingContext& raytraci
           p.grid[1] = kSkyCdfGridH;
           ctx.cmd->BindPipeline(sky_cdf_pipeline_);
           ctx.cmd->BindTransient(
-              0, {Bind::Combined(0, sky_view, sky_sampler),
-                  Bind::StorageBuffer(1, sky_cdf_, 0, sky_cdf_.size)});
+              0, {gpu::Bind::Combined(0, sky_view, sky_sampler),
+                  gpu::Bind::StorageBuffer(1, sky_cdf_, 0, sky_cdf_.size)});
           ctx.cmd->Push(p);
           ctx.cmd->Dispatch(1, 1, 1);
-          ctx.cmd->MemoryBarrier(BarrierScope::kComputeWrite, BarrierScope::kComputeRead);
+          ctx.cmd->MemoryBarrier(gpu::BarrierScope::kComputeWrite, gpu::BarrierScope::kComputeRead);
         });
     ResourceHandle d0_t = tex("recon_di_rsv0_t", kWorldPos);
     ResourceHandle d1_t = tex("recon_di_rsv1_t", kWorldPos);
@@ -756,18 +756,18 @@ void ReconPathTracer::AddToGraph(RenderGraph& graph, RayTracingContext& raytraci
          d1_p, d2_p, d3_p, sky_view, sky_sampler, jitter_delta, frame](PassContext& ctx) {
           ResourceHandle reads[10] = {p_pos, nr_c, nr_p, vz_c, vz_p,
                                       id_c,  id_p, motion, d0_p, d1_p};
-          base::Vector<BindingItem> items;
-          items.push_back(Bind::Storage(0, ctx.graph->image(d0_t)));
-          items.push_back(Bind::Storage(1, ctx.graph->image(d1_t)));
+          base::Vector<gpu::BindingItem> items;
+          items.push_back(gpu::Bind::Storage(0, ctx.graph->image(d0_t)));
+          items.push_back(gpu::Bind::Storage(1, ctx.graph->image(d1_t)));
           for (u32 i = 0; i < 10; ++i)
-            items.push_back(Bind::Sampled(i + 2, ctx.graph->image(reads[i])));
-          items.push_back(Bind::StorageBuffer(12, frame.lights));
-          items.push_back(Bind::Combined(13, sky_view, sky_sampler));
-          items.push_back(Bind::StorageBuffer(14, sky_cdf_, 0, sky_cdf_.size));
-          items.push_back(Bind::Storage(15, ctx.graph->image(d2_t)));
-          items.push_back(Bind::Storage(16, ctx.graph->image(d3_t)));
-          items.push_back(Bind::Sampled(17, ctx.graph->image(d2_p)));
-          items.push_back(Bind::Sampled(18, ctx.graph->image(d3_p)));
+            items.push_back(gpu::Bind::Sampled(i + 2, ctx.graph->image(reads[i])));
+          items.push_back(gpu::Bind::StorageBuffer(12, frame.lights));
+          items.push_back(gpu::Bind::Combined(13, sky_view, sky_sampler));
+          items.push_back(gpu::Bind::StorageBuffer(14, sky_cdf_, 0, sky_cdf_.size));
+          items.push_back(gpu::Bind::Storage(15, ctx.graph->image(d2_t)));
+          items.push_back(gpu::Bind::Storage(16, ctx.graph->image(d3_t)));
+          items.push_back(gpu::Bind::Sampled(17, ctx.graph->image(d2_p)));
+          items.push_back(gpu::Bind::Sampled(18, ctx.graph->image(d3_p)));
 
           RestirDiTemporalPush p{};
           Vec3 sun = Normalize(frame.sun_direction);
@@ -803,20 +803,20 @@ void ReconPathTracer::AddToGraph(RenderGraph& graph, RayTracingContext& raytraci
          d1_c, d2_c, d3_c, p_pos, nr_c, vz_c, id_c, sky_view, sky_sampler,
          frame](PassContext& ctx) {
           ResourceHandle reads[6] = {d0_t, d1_t, p_pos, nr_c, vz_c, id_c};
-          base::Vector<BindingItem> items;
-          items.push_back(Bind::Storage(0, ctx.graph->image(direct_irr)));
+          base::Vector<gpu::BindingItem> items;
+          items.push_back(gpu::Bind::Storage(0, ctx.graph->image(direct_irr)));
           for (u32 i = 0; i < 6; ++i)
-            items.push_back(Bind::Sampled(i + 1, ctx.graph->image(reads[i])));
-          items.push_back(Bind::StorageBuffer(7, frame.lights));
-          items.push_back(Bind::Accel(8, raytracing.tlas(tlas_slot)));
-          items.push_back(Bind::Storage(9, ctx.graph->image(d0_c)));
-          items.push_back(Bind::Storage(10, ctx.graph->image(d1_c)));
-          items.push_back(Bind::Combined(11, sky_view, sky_sampler));
-          items.push_back(Bind::StorageBuffer(12, sky_cdf_, 0, sky_cdf_.size));
-          items.push_back(Bind::Sampled(13, ctx.graph->image(d2_t)));
-          items.push_back(Bind::Sampled(14, ctx.graph->image(d3_t)));
-          items.push_back(Bind::Storage(15, ctx.graph->image(d2_c)));
-          items.push_back(Bind::Storage(16, ctx.graph->image(d3_c)));
+            items.push_back(gpu::Bind::Sampled(i + 1, ctx.graph->image(reads[i])));
+          items.push_back(gpu::Bind::StorageBuffer(7, frame.lights));
+          items.push_back(gpu::Bind::Accel(8, raytracing.tlas(tlas_slot)));
+          items.push_back(gpu::Bind::Storage(9, ctx.graph->image(d0_c)));
+          items.push_back(gpu::Bind::Storage(10, ctx.graph->image(d1_c)));
+          items.push_back(gpu::Bind::Combined(11, sky_view, sky_sampler));
+          items.push_back(gpu::Bind::StorageBuffer(12, sky_cdf_, 0, sky_cdf_.size));
+          items.push_back(gpu::Bind::Sampled(13, ctx.graph->image(d2_t)));
+          items.push_back(gpu::Bind::Sampled(14, ctx.graph->image(d3_t)));
+          items.push_back(gpu::Bind::Storage(15, ctx.graph->image(d2_c)));
+          items.push_back(gpu::Bind::Storage(16, ctx.graph->image(d3_c)));
 
           RestirDiSpatialPush p{};
           Vec3 sun = Normalize(frame.sun_direction);
@@ -864,14 +864,14 @@ void ReconPathTracer::AddToGraph(RenderGraph& graph, RayTracingContext& raytraci
          motion, r0_p, r1_p, r2_p, p_pos_prev, jitter_delta, frame](PassContext& ctx) {
           ResourceHandle reads[14] = {s_pos, s_nrm, s_rad, p_pos, nr_c, nr_p, vz_c,
                                       vz_p, id_c, id_p, motion, r0_p, r1_p, r2_p};
-          base::Vector<BindingItem> items;
-          items.push_back(Bind::Storage(0, ctx.graph->image(r0_t)));
-          items.push_back(Bind::Storage(1, ctx.graph->image(r1_t)));
-          items.push_back(Bind::Storage(2, ctx.graph->image(r2_t)));
+          base::Vector<gpu::BindingItem> items;
+          items.push_back(gpu::Bind::Storage(0, ctx.graph->image(r0_t)));
+          items.push_back(gpu::Bind::Storage(1, ctx.graph->image(r1_t)));
+          items.push_back(gpu::Bind::Storage(2, ctx.graph->image(r2_t)));
           for (u32 i = 0; i < 14; ++i)
-            items.push_back(Bind::Sampled(i + 3, ctx.graph->image(reads[i])));
+            items.push_back(gpu::Bind::Sampled(i + 3, ctx.graph->image(reads[i])));
 
-          items.push_back(Bind::Sampled(17, ctx.graph->image(p_pos_prev)));
+          items.push_back(gpu::Bind::Sampled(17, ctx.graph->image(p_pos_prev)));
           RestirTemporalPush p{};
           p.size[0] = extent_.width; p.size[1] = extent_.height;
           p.frame_index = frame.frame_index;
@@ -896,14 +896,14 @@ void ReconPathTracer::AddToGraph(RenderGraph& graph, RayTracingContext& raytraci
         [this, &raytracing, tlas_slot, noisy, r0_t, r1_t, r2_t, r0_c, r1_c, r2_c, p_pos, nr_c,
          vz_c, id_c, direct_irr, frame](PassContext& ctx) {
           ResourceHandle reads[8] = {r0_t, r1_t, r2_t, p_pos, nr_c, vz_c, id_c, direct_irr};
-          base::Vector<BindingItem> items;
-          items.push_back(Bind::Storage(0, ctx.graph->image(noisy)));
+          base::Vector<gpu::BindingItem> items;
+          items.push_back(gpu::Bind::Storage(0, ctx.graph->image(noisy)));
           for (u32 i = 0; i < 8; ++i)
-            items.push_back(Bind::Sampled(i + 1, ctx.graph->image(reads[i])));
-          items.push_back(Bind::Accel(9, raytracing.tlas(tlas_slot)));
-          items.push_back(Bind::Storage(10, ctx.graph->image(r0_c)));
-          items.push_back(Bind::Storage(11, ctx.graph->image(r1_c)));
-          items.push_back(Bind::Storage(12, ctx.graph->image(r2_c)));
+            items.push_back(gpu::Bind::Sampled(i + 1, ctx.graph->image(reads[i])));
+          items.push_back(gpu::Bind::Accel(9, raytracing.tlas(tlas_slot)));
+          items.push_back(gpu::Bind::Storage(10, ctx.graph->image(r0_c)));
+          items.push_back(gpu::Bind::Storage(11, ctx.graph->image(r1_c)));
+          items.push_back(gpu::Bind::Storage(12, ctx.graph->image(r2_c)));
 
           RestirSpatialPush p{};
           p.size[0] = extent_.width; p.size[1] = extent_.height;
@@ -936,13 +936,13 @@ void ReconPathTracer::AddToGraph(RenderGraph& graph, RayTracingContext& raytraci
             b.Read(h, ResourceUsage::kSampledCompute);
         },
         [this, &raytracing, tlas_slot, fog_c, fog_p, p_pos, motion, cur, frame](PassContext& ctx) {
-          base::Vector<BindingItem> items;
-          items.push_back(Bind::Storage(0, ctx.graph->image(fog_c)));
-          items.push_back(Bind::Sampled(1, ctx.graph->image(fog_p)));
-          items.push_back(Bind::Sampled(2, ctx.graph->image(p_pos)));
-          items.push_back(Bind::Sampled(3, ctx.graph->image(motion)));
-          items.push_back(Bind::Accel(4, raytracing.tlas(tlas_slot)));
-          items.push_back(Bind::Uniform(5, camera_[cur], 0, sizeof(ReconCamera)));
+          base::Vector<gpu::BindingItem> items;
+          items.push_back(gpu::Bind::Storage(0, ctx.graph->image(fog_c)));
+          items.push_back(gpu::Bind::Sampled(1, ctx.graph->image(fog_p)));
+          items.push_back(gpu::Bind::Sampled(2, ctx.graph->image(p_pos)));
+          items.push_back(gpu::Bind::Sampled(3, ctx.graph->image(motion)));
+          items.push_back(gpu::Bind::Accel(4, raytracing.tlas(tlas_slot)));
+          items.push_back(gpu::Bind::Uniform(5, camera_[cur], 0, sizeof(ReconCamera)));
 
           FogPush p{};
           p.camera_pos[0] = frame.camera_pos.x; p.camera_pos[1] = frame.camera_pos.y;
@@ -956,7 +956,7 @@ void ReconPathTracer::AddToGraph(RenderGraph& graph, RayTracingContext& raytraci
           p.params[1] = frame.fog_height_falloff;
           p.params[2] = frame.fog_base_height;
           p.params[3] = kFogMaxDistance;
-          Extent2D half{(extent_.width + 1) / 2, (extent_.height + 1) / 2};
+          gpu::Extent2D half{(extent_.width + 1) / 2, (extent_.height + 1) / 2};
           p.size[0] = half.width; p.size[1] = half.height;
           p.steps = kFogSteps;
           p.frame_index = frame.frame_index;
@@ -984,11 +984,11 @@ void ReconPathTracer::AddToGraph(RenderGraph& graph, RayTracingContext& raytraci
         [this, rr_color, albedo, noisy, emissive, mo_c, nr_c, motion, spec_noisy, fog_c, fog_on,
          sky_sampler](PassContext& ctx) {
           ResourceHandle reads[7] = {albedo, noisy, emissive, mo_c, nr_c, motion, spec_noisy};
-          base::Vector<BindingItem> items;
-          items.push_back(Bind::Storage(0, ctx.graph->image(rr_color)));
+          base::Vector<gpu::BindingItem> items;
+          items.push_back(gpu::Bind::Storage(0, ctx.graph->image(rr_color)));
           for (u32 i = 0; i < 7; ++i)
-            items.push_back(Bind::Sampled(i + 1, ctx.graph->image(reads[i])));
-          items.push_back(Bind::Combined(8, ctx.graph->image(fog_c).view, sky_sampler));
+            items.push_back(gpu::Bind::Sampled(i + 1, ctx.graph->image(reads[i])));
+          items.push_back(gpu::Bind::Combined(8, ctx.graph->image(fog_c).view, sky_sampler));
           CompositePush p{};
           p.size[0] = extent_.width; p.size[1] = extent_.height;
           p.debug_mode = 0;
@@ -1032,12 +1032,12 @@ void ReconPathTracer::AddToGraph(RenderGraph& graph, RayTracingContext& raytraci
       [this, output, albedo, denoised, emissive, mo_c, nr_c, motion, spec_denoised, fog_c, fog_on,
        sky_sampler, frame](PassContext& ctx) {
         ResourceHandle reads[7] = {albedo, denoised, emissive, mo_c, nr_c, motion, spec_denoised};
-        base::Vector<BindingItem> items;
-        items.push_back(Bind::Storage(0, ctx.graph->image(output)));
+        base::Vector<gpu::BindingItem> items;
+        items.push_back(gpu::Bind::Storage(0, ctx.graph->image(output)));
         for (u32 i = 0; i < 7; ++i) {
-          items.push_back(Bind::Sampled(i + 1, ctx.graph->image(reads[i])));
+          items.push_back(gpu::Bind::Sampled(i + 1, ctx.graph->image(reads[i])));
         }
-        items.push_back(Bind::Combined(8, ctx.graph->image(fog_c).view, sky_sampler));
+        items.push_back(gpu::Bind::Combined(8, ctx.graph->image(fog_c).view, sky_sampler));
 
         CompositePush p{};
         p.size[0] = extent_.width; p.size[1] = extent_.height;

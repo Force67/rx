@@ -37,17 +37,17 @@ constexpr u32 kMaxGridResolution = 512;
 }  // namespace
 
 base::UniquePointer<FluidSurfacePass> FluidSurfacePass::Create(
-    Device& device, Format color_format, Format motion_format, Format depth_format,
-    BindingLayoutHandle globals_layout, BindingLayoutHandle environment_layout,
-    BindingLayoutHandle bindless_layout) {
+    gpu::Device& device, gpu::Format color_format, gpu::Format motion_format, gpu::Format depth_format,
+    gpu::BindingLayoutHandle globals_layout, gpu::BindingLayoutHandle environment_layout,
+    gpu::BindingLayoutHandle bindless_layout) {
   (void)bindless_layout;  // IBL rides the environment set; no bindless table here.
   auto pass = base::UniquePointer<FluidSurfacePass>(new FluidSurfacePass(device));
 
   // Linear + clamp: the state/bed/velocity fields are sampled continuously
   // across the (coarser) render grid and must not wrap at the domain edge.
-  pass->sampler_ = device.GetSampler({.address_u = AddressMode::kClampToEdge,
-                                      .address_v = AddressMode::kClampToEdge,
-                                      .address_w = AddressMode::kClampToEdge});
+  pass->sampler_ = device.GetSampler({.address_u = gpu::AddressMode::kClampToEdge,
+                                      .address_v = gpu::AddressMode::kClampToEdge,
+                                      .address_w = gpu::AddressMode::kClampToEdge});
 
   // Mirrors the transparent pass attachments (scene color + motion + depth) so
   // the render pass stays compatible with WaterPass. Alpha blend over the scene
@@ -57,23 +57,23 @@ base::UniquePointer<FluidSurfacePass> FluidSurfacePass::Create(
   pass->pipeline_ = device.CreateGraphicsPipeline({
       .vertex = RX_SHADER(k_fluid_surface_vs_hlsl),
       .fragment = RX_SHADER(k_fluid_surface_ps_hlsl),
-      .raster = {.cull = CullMode::kNone},
+      .raster = {.cull = gpu::CullMode::kNone},
       .depth = {.test = true,
                 .write = true,
-                .compare = CompareOp::kGreater,  // reversed z
+                .compare = gpu::CompareOp::kGreater,  // reversed z
                 .format = depth_format},
       .color_formats = {color_format, motion_format},
-      .blend = {BlendMode::kAlpha, BlendMode::kAlpha},
+      .blend = {gpu::BlendMode::kAlpha, gpu::BlendMode::kAlpha},
       .sets = {{.shared = globals_layout},
                // Set 1: our transient fluid set (VS lifts the grid from state +
                // bed + params; PS additionally reads velocity for flow foam).
-               {.slots = {{0, BindingType::kCombinedTextureSampler},   // state RGBA32F
-                          {1, BindingType::kCombinedTextureSampler},   // bed R32F
-                          {2, BindingType::kCombinedTextureSampler},   // velocity RGBA16F
-                          {3, BindingType::kUniformBuffer}},           // params CB
-                .stages = kShaderStageVertex | kShaderStageFragment},
+               {.slots = {{0, gpu::BindingType::kCombinedTextureSampler},   // state RGBA32F
+                          {1, gpu::BindingType::kCombinedTextureSampler},   // bed R32F
+                          {2, gpu::BindingType::kCombinedTextureSampler},   // velocity RGBA16F
+                          {3, gpu::BindingType::kUniformBuffer}},           // params CB
+                .stages = gpu::kShaderStageVertex | gpu::kShaderStageFragment},
                {.shared = environment_layout}},
-      .push_constant_size = PushSize<FluidSurfacePush>(),
+      .push_constant_size = gpu::PushSize<FluidSurfacePush>(),
       .debug_name = "fluid_surface",
   });
   if (!pass->pipeline_) {
@@ -87,8 +87,8 @@ FluidSurfacePass::~FluidSurfacePass() {
   if (pipeline_) device_.DestroyPipeline(pipeline_);
 }
 
-void FluidSurfacePass::Draw(PassContext& ctx, BindingSetHandle globals,
-                            BindingSetHandle environment, const FluidSim& sim, u32 frame_slot,
+void FluidSurfacePass::Draw(PassContext& ctx, gpu::BindingSetHandle globals,
+                            gpu::BindingSetHandle environment, const FluidSim& sim, u32 frame_slot,
                             f32 time) {
   const u32 grid = rx::Min(sim.domain().resolution, kMaxGridResolution);
   if (grid == 0) return;
@@ -100,10 +100,10 @@ void FluidSurfacePass::Draw(PassContext& ctx, BindingSetHandle globals,
   // (InGeneral) exactly like the water-field rings the transparent env set
   // wraps. The params CB is the current frame slot's copy the solver filled.
   ctx.cmd->BindTransient(
-      1, {InGeneral(Bind::Combined(0, sim.state_view(), sampler_)),
-          InGeneral(Bind::Combined(1, sim.bed_view(), sampler_)),
-          InGeneral(Bind::Combined(2, sim.velocity_view(), sampler_)),
-          Bind::Uniform(3, sim.params_buffer(frame_slot))});
+      1, {gpu::InGeneral(gpu::Bind::Combined(0, sim.state_view(), sampler_)),
+          gpu::InGeneral(gpu::Bind::Combined(1, sim.bed_view(), sampler_)),
+          gpu::InGeneral(gpu::Bind::Combined(2, sim.velocity_view(), sampler_)),
+          gpu::Bind::Uniform(3, sim.params_buffer(frame_slot))});
 
   FluidSurfacePush push;
   push.time = time;

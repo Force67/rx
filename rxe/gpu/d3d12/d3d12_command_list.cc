@@ -14,7 +14,7 @@
 #include "foundation/logging/log.h"
 #include "foundation/math/scalar.h"
 
-namespace rx::render::d3d12 {
+namespace rx::gpu::d3d12 {
 namespace {
 
 // Tightly packed row footprint for buffer<->texture copies. For BC formats a
@@ -959,4 +959,4 @@ void D3D12CommandList::WriteTimestamp(TimestampPoolHandle pool, u32 index, bool 
 void D3D12CommandList::BeginDebugLabel(const char* name) { (void)name; }
 void D3D12CommandList::EndDebugLabel() {}
 
-}  // namespace rx::render::d3d12
+}  // namespace rx::gpu::d3d12

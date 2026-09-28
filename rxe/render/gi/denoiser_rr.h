@@ -18,9 +18,12 @@
 typedef struct NVSDK_NGX_Handle NVSDK_NGX_Handle;
 typedef struct NVSDK_NGX_Parameter NVSDK_NGX_Parameter;
 
+namespace rx::gpu {
+class Device;
+}  // namespace rx::gpu
+
 namespace rx::render {
 
-class Device;
 
 class RrDenoiser {
  public:
@@ -44,9 +47,9 @@ class RrDenoiser {
     ResourceHandle specular_hit_distance = kInvalidResource;
   };
 
-  bool Initialize(Device& device, Extent2D extent);
-  void Resize(Device& device, Extent2D extent);
-  void Destroy(Device& device);
+  bool Initialize(gpu::Device& device, gpu::Extent2D extent);
+  void Resize(gpu::Device& device, gpu::Extent2D extent);
+  void Destroy(gpu::Device& device);
   bool available() const { return handle_ != nullptr; }
 
   // Adds the evaluate pass writing the denoised color into output.
@@ -54,10 +57,10 @@ class RrDenoiser {
                   const Frame& frame);
 
  private:
-  bool CreateFeature(Device& device, Extent2D extent);
+  bool CreateFeature(gpu::Device& device, gpu::Extent2D extent);
   void ReleaseFeature();
 
-  Extent2D extent_{};
+  gpu::Extent2D extent_{};
   bool ngx_acquired_ = false;
   bool has_history_ = false;
   u32 previous_frame_ = 0;

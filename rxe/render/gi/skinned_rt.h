@@ -8,10 +8,13 @@
 #include "rxe/gpu/rhi/command_list.h"
 #include "rxe/gpu/rhi/resources.h"
 
+namespace rx::gpu {
+class Device;
+}  // namespace rx::gpu
+
 namespace rx::render {
 
 class BindlessRegistry;
-class Device;
 class MaterialSystem;
 class RayTracingContext;
 
@@ -37,8 +40,8 @@ class RayTracingContext;
 // face that does not match the rasterized one.
 class SkinnedRayTracing {
  public:
-  bool Initialize(Device& device);
-  void Destroy(Device& device);
+  bool Initialize(gpu::Device& device);
+  void Destroy(gpu::Device& device);
   bool available() const { return static_cast<bool>(pipeline_); }
 
   // Handle lifetime. Acquire returns 0 only when the pass is unavailable, and 0
@@ -50,9 +53,9 @@ class SkinnedRayTracing {
   // back rather than releasing them here is the point: a submitted TLAS
   // instance still carries the index, and a slot returned straight to the free
   // list would be reused under that frame. Safe for a handle that never drew.
-  void Release(Device& device, RayTracingContext* raytracing, u32 handle,
+  void Release(gpu::Device& device, RayTracingContext* raytracing, u32 handle,
                base::Vector<u32>& retire_to);
-  void InvalidateMesh(Device& device, RayTracingContext* raytracing, u64 mesh_key,
+  void InvalidateMesh(gpu::Device& device, RayTracingContext* raytracing, u64 mesh_key,
                        base::Vector<u32>& retire_to);
   void BeginFrame();
 
@@ -69,9 +72,9 @@ class SkinnedRayTracing {
   // reason RayTracingContext::ReserveTlas does: a mid-record allocation can
   // stall or free a resource the command list still references. Returns the
   // number of actors that will actually be recorded.
-  u32 Prepare(Device& device, BindlessRegistry& bindless, const MaterialSystem& materials,
+  u32 Prepare(gpu::Device& device, BindlessRegistry& bindless, const MaterialSystem& materials,
               RayTracingContext& raytracing,
-              const base::UnorderedMap<u64, GpuMesh>& meshes,
+              const base::UnorderedMap<u64, gpu::GpuMesh>& meshes,
               const base::Vector<Request>& requests);
 
   // The bindless mesh record an actor's TLAS instance must carry, so hit
@@ -91,7 +94,7 @@ class SkinnedRayTracing {
   // build that instances these actors, on the same queue: a refit rewrites the
   // structure the TLAS references, so a cross-queue overlap would traverse a
   // half-written BLAS.
-  void Record(CommandList& cmd, RayTracingContext& raytracing, const GpuBuffer& bone_palette);
+  void Record(gpu::CommandList& cmd, RayTracingContext& raytracing, const gpu::GpuBuffer& bone_palette);
 
  private:
   // Alternating half of an actor. The deformed buffer is per-slot too, not just
@@ -99,7 +102,7 @@ class SkinnedRayTracing {
   // instance's custom_index names, so a shared buffer would pair this frame's
   // attributes with last frame's geometry. Two 21k-vertex copies are ~2 MB.
   struct Slot {
-    GpuBuffer posed;  // asset::Vertex layout, deformed on the frames it is current
+    gpu::GpuBuffer posed;  // asset::Vertex layout, deformed on the frames it is current
     u32 bindless = kInvalidIndex;
     bool valid = false;
   };
@@ -110,8 +113,8 @@ class SkinnedRayTracing {
     u32 skin_offset = 0;
     Slot slots[2];
     u32 current = 0;          // the slot this frame deforms and instances
-    GpuBuffer base_vertices;  // the mesh's bind-pose buffer (not owned)
-    GpuBuffer skin_stream;    // the mesh's bone index/weight buffer (not owned)
+    gpu::GpuBuffer base_vertices;  // the mesh's bind-pose buffer (not owned)
+    gpu::GpuBuffer skin_stream;    // the mesh's bone index/weight buffer (not owned)
     bool live = false;    // buffers + structures exist
     bool active = false;  // requested this frame
     bool allocated = false;
@@ -123,14 +126,14 @@ class SkinnedRayTracing {
     return (static_cast<u64>(handle) << 1) | slot;
   }
 
-  void RetireActor(Device& device, RayTracingContext* raytracing, u32 handle,
+  void RetireActor(gpu::Device& device, RayTracingContext* raytracing, u32 handle,
                     base::Vector<u32>& retire_to);
 
   // Recycles a released handle's slot. Handles are 1-based so 0 stays "none".
   base::Vector<Actor> actors_;
   base::Vector<u32> free_handles_;
   base::Vector<u32> recording_;  // handle-1 of every actor Record must touch
-  PipelineHandle pipeline_;
+  gpu::PipelineHandle pipeline_;
 };
 
 }  // namespace rx::render

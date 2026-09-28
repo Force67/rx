@@ -19,24 +19,24 @@ struct ApPush {
 
 }  // namespace
 
-bool AerialPerspective::Initialize(Device& device) {
-  sampler_ = device.GetSampler({.min_filter = Filter::kLinear,
-                                .mag_filter = Filter::kLinear,
-                                .mip_filter = Filter::kNearest,
-                                .address_u = AddressMode::kClampToEdge,
-                                .address_v = AddressMode::kClampToEdge,
-                                .address_w = AddressMode::kClampToEdge,
+bool AerialPerspective::Initialize(gpu::Device& device) {
+  sampler_ = device.GetSampler({.min_filter = gpu::Filter::kLinear,
+                                .mag_filter = gpu::Filter::kLinear,
+                                .mip_filter = gpu::Filter::kNearest,
+                                .address_u = gpu::AddressMode::kClampToEdge,
+                                .address_v = gpu::AddressMode::kClampToEdge,
+                                .address_w = gpu::AddressMode::kClampToEdge,
                                 .max_lod = 0.0f});
   if (!sampler_) return false;
 
   pipeline_ = device.CreateComputePipeline({
       .shader = RX_SHADER(k_aerial_perspective_cs_hlsl),
-      .sets = {{.slots = {{0, BindingType::kStorageImage},
-                          {1, BindingType::kSampledImage},
-                          {2, BindingType::kSampledImage},
-                          {3, BindingType::kCombinedTextureSampler},
-                          {4, BindingType::kCombinedTextureSampler}}}},
-      .push_constant_size = PushSize<ApPush>(),
+      .sets = {{.slots = {{0, gpu::BindingType::kStorageImage},
+                          {1, gpu::BindingType::kSampledImage},
+                          {2, gpu::BindingType::kSampledImage},
+                          {3, gpu::BindingType::kCombinedTextureSampler},
+                          {4, gpu::BindingType::kCombinedTextureSampler}}}},
+      .push_constant_size = gpu::PushSize<ApPush>(),
       .debug_name = "aerial_perspective",
   });
   if (!pipeline_) {
@@ -46,18 +46,18 @@ bool AerialPerspective::Initialize(Device& device) {
   return true;
 }
 
-void AerialPerspective::Destroy(Device& device) {
+void AerialPerspective::Destroy(gpu::Device& device) {
   device.DestroyPipeline(pipeline_);
   pipeline_ = {};
   sampler_ = {};  // cached by the device, not destroyed by callers
 }
 
 ResourceHandle AerialPerspective::AddToGraph(RenderGraph& graph, ResourceHandle color,
-                                             ResourceHandle depth, TextureView transmittance,
-                                             TextureView multiscatter, Extent2D extent,
+                                             ResourceHandle depth, gpu::TextureView transmittance,
+                                             gpu::TextureView multiscatter, gpu::Extent2D extent,
                                              const Frame& frame) {
   ResourceHandle out = graph.CreateTexture({.name = "aerial_perspective",
-                                            .format = Format::kRGBA16Float,
+                                            .format = gpu::Format::kRGBA16Float,
                                             .width = extent.width,
                                             .height = extent.height});
   graph.AddPass(
@@ -87,11 +87,11 @@ ResourceHandle AerialPerspective::AddToGraph(RenderGraph& graph, ResourceHandle 
         push.steps = frame.steps;
 
         ctx.cmd->BindPipeline(pipeline_);
-        ctx.cmd->BindTransient(0, {Bind::Storage(0, ctx.graph->image(out)),
-                                   Bind::Sampled(1, ctx.graph->image(color)),
-                                   Bind::Sampled(2, ctx.graph->image(depth)),
-                                   Bind::Combined(3, transmittance, sampler_),
-                                   Bind::Combined(4, multiscatter, sampler_)});
+        ctx.cmd->BindTransient(0, {gpu::Bind::Storage(0, ctx.graph->image(out)),
+                                   gpu::Bind::Sampled(1, ctx.graph->image(color)),
+                                   gpu::Bind::Sampled(2, ctx.graph->image(depth)),
+                                   gpu::Bind::Combined(3, transmittance, sampler_),
+                                   gpu::Bind::Combined(4, multiscatter, sampler_)});
         ctx.cmd->Push(push);
         ctx.cmd->Dispatch2D(extent);
       });

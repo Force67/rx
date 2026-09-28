@@ -29,15 +29,15 @@ struct FogPush {
 
 }  // namespace
 
-bool VolumetricFog::Initialize(Device& device) {
+bool VolumetricFog::Initialize(gpu::Device& device) {
   pipeline_ = device.CreateComputePipeline({
       .shader = RX_SHADER(k_fog_cs_hlsl),
-      .sets = {{.slots = {{0, BindingType::kStorageImage},
-                          {1, BindingType::kSampledImage},
-                          {2, BindingType::kSampledImage},
-                          {3, BindingType::kAccelStruct},
-                          {4, BindingType::kUniformBuffer}}}},
-      .push_constant_size = PushSize<FogPush>(),
+      .sets = {{.slots = {{0, gpu::BindingType::kStorageImage},
+                          {1, gpu::BindingType::kSampledImage},
+                          {2, gpu::BindingType::kSampledImage},
+                          {3, gpu::BindingType::kAccelStruct},
+                          {4, gpu::BindingType::kUniformBuffer}}}},
+      .push_constant_size = gpu::PushSize<FogPush>(),
       .debug_name = "volumetric_fog",
   });
   if (!pipeline_) {
@@ -46,17 +46,17 @@ bool VolumetricFog::Initialize(Device& device) {
   }
   // One per in-flight frame: the pass rewrites it while the previous frame may
   // still be reading its own copy.
-  for (GpuBuffer& camera : camera_) {
-    camera = device.CreateBuffer(sizeof(FogCamera), kBufferUsageUniform, true);
+  for (gpu::GpuBuffer& camera : camera_) {
+    camera = device.CreateBuffer(sizeof(FogCamera), gpu::kBufferUsageUniform, true);
     if (!camera.mapped) return false;
   }
   return true;
 }
 
-void VolumetricFog::Destroy(Device& device) {
+void VolumetricFog::Destroy(gpu::Device& device) {
   device.DestroyPipeline(pipeline_);
   pipeline_ = {};
-  for (GpuBuffer& camera : camera_) {
+  for (gpu::GpuBuffer& camera : camera_) {
     if (camera) device.DestroyBuffer(camera);
     camera = {};
   }
@@ -64,9 +64,9 @@ void VolumetricFog::Destroy(Device& device) {
 
 ResourceHandle VolumetricFog::AddToGraph(RenderGraph& graph, RayTracingContext& raytracing,
                                          u32 tlas_slot, ResourceHandle color, ResourceHandle depth,
-                                         Extent2D extent, const Frame& frame) {
+                                         gpu::Extent2D extent, const Frame& frame) {
   ResourceHandle fogged = graph.CreateTexture({.name = "fogged",
-                                               .format = Format::kRGBA16Float,
+                                               .format = gpu::Format::kRGBA16Float,
                                                .width = extent.width, .height = extent.height});
   const u32 slot = frame.frame_index % 2;
   graph.AddPass(
@@ -103,11 +103,11 @@ ResourceHandle VolumetricFog::AddToGraph(RenderGraph& graph, RayTracingContext& 
         push.frame_index = frame.frame_index;
 
         ctx.cmd->BindPipeline(pipeline_);
-        ctx.cmd->BindTransient(0, {Bind::Storage(0, ctx.graph->image(fogged)),
-                                   Bind::Sampled(1, ctx.graph->image(color)),
-                                   Bind::Sampled(2, ctx.graph->image(depth)),
-                                   Bind::Accel(3, raytracing.tlas(tlas_slot)),
-                                   Bind::Uniform(4, camera_[slot], 0, sizeof(FogCamera))});
+        ctx.cmd->BindTransient(0, {gpu::Bind::Storage(0, ctx.graph->image(fogged)),
+                                   gpu::Bind::Sampled(1, ctx.graph->image(color)),
+                                   gpu::Bind::Sampled(2, ctx.graph->image(depth)),
+                                   gpu::Bind::Accel(3, raytracing.tlas(tlas_slot)),
+                                   gpu::Bind::Uniform(4, camera_[slot], 0, sizeof(FogCamera))});
         ctx.cmd->Push(push);
         ctx.cmd->Dispatch2D(extent);
       });

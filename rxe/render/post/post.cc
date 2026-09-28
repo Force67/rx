@@ -15,26 +15,26 @@
 
 namespace rx::render {
 
-base::UniquePointer<PostPass> PostPass::Create(Device& device, Format output_format) {
+base::UniquePointer<PostPass> PostPass::Create(gpu::Device& device, gpu::Format output_format) {
   auto pass = base::UniquePointer<PostPass>(new PostPass(device));
 
-  pass->sampler_ = device.GetSampler({.address_u = AddressMode::kClampToEdge,
-                                      .address_v = AddressMode::kClampToEdge,
-                                      .address_w = AddressMode::kClampToEdge});
+  pass->sampler_ = device.GetSampler({.address_u = gpu::AddressMode::kClampToEdge,
+                                      .address_v = gpu::AddressMode::kClampToEdge,
+                                      .address_w = gpu::AddressMode::kClampToEdge});
 
   pass->pipeline_ = device.CreateGraphicsPipeline({
       .vertex = RX_SHADER(k_fullscreen_vs_slang),
       .fragment = RX_SHADER(k_tonemap_ps_hlsl),
-      .raster = {.cull = CullMode::kNone},
+      .raster = {.cull = gpu::CullMode::kNone},
       .color_formats = {output_format},
-      .blend = {BlendMode::kOpaque},
-      .sets = {{.slots = {{0, BindingType::kCombinedTextureSampler},
-                          {1, BindingType::kCombinedTextureSampler},
-                          {2, BindingType::kStorageBuffer},
-                          {3, BindingType::kCombinedTextureSampler},  // grading strip lut
-                          {4, BindingType::kCombinedTextureSampler}},  // tight flare source
-                .stages = kShaderStageFragment}},
-      .push_constant_size = PushSize<Params>(),
+      .blend = {gpu::BlendMode::kOpaque},
+      .sets = {{.slots = {{0, gpu::BindingType::kCombinedTextureSampler},
+                          {1, gpu::BindingType::kCombinedTextureSampler},
+                          {2, gpu::BindingType::kStorageBuffer},
+                          {3, gpu::BindingType::kCombinedTextureSampler},  // grading strip lut
+                          {4, gpu::BindingType::kCombinedTextureSampler}},  // tight flare source
+                .stages = gpu::kShaderStageFragment}},
+      .push_constant_size = gpu::PushSize<Params>(),
       .debug_name = "post_tonemap",
   });
   if (!pass->pipeline_) {
@@ -155,8 +155,8 @@ void SampleCube(const CubeLut& lut, f32 fr, f32 fg, f32 fb, f32 out[3]) {
 
 bool PostPass::CreateLut() {
   const u32 width = kLutSize * kLutSize;
-  lut_ = device_.CreateImage2D(Format::kRGBA8Unorm, {width, kLutSize},
-                               kTextureUsageSampled | kTextureUsageTransferDst);
+  lut_ = device_.CreateImage2D(gpu::Format::kRGBA8Unorm, {width, kLutSize},
+                               gpu::kTextureUsageSampled | gpu::kTextureUsageTransferDst);
   if (!lut_) return false;
   UploadLut(ColorGrade::kNeutral);
   return true;
@@ -188,18 +188,18 @@ void PostPass::UploadLut(ColorGrade grade) {
 void PostPass::UploadLutPixels(base::Vector<u8>& pixels) {
   const u32 size = kLutSize;
   const u32 width = size * size;
-  GpuBuffer staging =
-      device_.CreateBufferWithData(ByteSpan(pixels.data(), pixels.size()), kBufferUsageTransferSrc);
+  gpu::GpuBuffer staging =
+      device_.CreateBufferWithData(ByteSpan(pixels.data(), pixels.size()), gpu::kBufferUsageTransferSrc);
   bool first = !lut_ready_;
-  device_.ImmediateSubmit([&](CommandList& cmd) {
-    cmd.Barrier(Transition(
-        lut_, first ? ResourceState::kUndefined : ResourceState::kShaderReadFragment,
-        ResourceState::kCopyDst));
+  device_.ImmediateSubmit([&](gpu::CommandList& cmd) {
+    cmd.Barrier(gpu::Transition(
+        lut_, first ? gpu::ResourceState::kUndefined : gpu::ResourceState::kShaderReadFragment,
+        gpu::ResourceState::kCopyDst));
 
-    BufferTextureCopy copy{.extent = {width, size}};
+    gpu::BufferTextureCopy copy{.extent = {width, size}};
     cmd.CopyBufferToTexture(staging, lut_, base::Span(&copy, 1));
 
-    cmd.Barrier(Transition(lut_, ResourceState::kCopyDst, ResourceState::kShaderReadFragment));
+    cmd.Barrier(gpu::Transition(lut_, gpu::ResourceState::kCopyDst, gpu::ResourceState::kShaderReadFragment));
   });
   device_.DestroyBuffer(staging);
   lut_ready_ = true;
@@ -254,18 +254,18 @@ PostPass::~PostPass() {
   device_.DestroyImage(lut_);
 }
 
-void PostPass::Record(PassContext& ctx, TextureView input, TextureView bloom, TextureView flare,
-                      const GpuBuffer& exposure, u64 exposure_size, TextureView output,
-                      Extent2D output_extent, const Params& params) {
-  ColorAttachment color{.view = output, .load = LoadOp::kDontCare,  // fully overwritten
-                        .store = StoreOp::kStore};
+void PostPass::Record(PassContext& ctx, gpu::TextureView input, gpu::TextureView bloom, gpu::TextureView flare,
+                      const gpu::GpuBuffer& exposure, u64 exposure_size, gpu::TextureView output,
+                      gpu::Extent2D output_extent, const Params& params) {
+  gpu::ColorAttachment color{.view = output, .load = gpu::LoadOp::kDontCare,  // fully overwritten
+                        .store = gpu::StoreOp::kStore};
   ctx.cmd->BeginRendering({.extent = output_extent, .colors = base::Span(&color, 1)});
   ctx.cmd->BindPipeline(pipeline_);
-  ctx.cmd->BindTransient(0, {Bind::Combined(0, input, sampler_),
-                             Bind::Combined(1, bloom, sampler_),
-                             Bind::StorageBuffer(2, exposure, 0, exposure_size),
-                             Bind::Combined(3, lut_.view, sampler_),
-                             Bind::Combined(4, flare, sampler_)});
+  ctx.cmd->BindTransient(0, {gpu::Bind::Combined(0, input, sampler_),
+                             gpu::Bind::Combined(1, bloom, sampler_),
+                             gpu::Bind::StorageBuffer(2, exposure, 0, exposure_size),
+                             gpu::Bind::Combined(3, lut_.view, sampler_),
+                             gpu::Bind::Combined(4, flare, sampler_)});
   ctx.cmd->Push(params);
   ctx.cmd->Draw(3);
   ctx.cmd->EndRendering();

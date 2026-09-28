@@ -14,20 +14,20 @@ namespace rx::render {
 // caller emits the same opaque + transparent draws it would otherwise shade.
 class OverdrawPass {
  public:
-  bool Initialize(Device& device, Format color_format);
-  void Destroy(Device& device);
+  bool Initialize(gpu::Device& device, gpu::Format color_format);
+  void Destroy(gpu::Device& device);
 
   // Clears `color_view` and additive-renders the geometry. draw is invoked with
   // the pipeline bound; for each mesh it pushes the full {view_proj, model}
   // 128-byte block (push constants always start at offset 0 in the RHI) and
   // issues the draws. view_proj is also pushed up front.
-  void Render(CommandList& cmd, TextureView color_view, Extent2D extent, const Mat4& view_proj,
-              const base::Function<void(CommandList&)>& draw);
-  void BindInstanced(CommandList& cmd, const Mat4& view_proj);
+  void Render(gpu::CommandList& cmd, gpu::TextureView color_view, gpu::Extent2D extent, const Mat4& view_proj,
+              const base::Function<void(gpu::CommandList&)>& draw);
+  void BindInstanced(gpu::CommandList& cmd, const Mat4& view_proj);
 
  private:
-  PipelineHandle pipeline_;
-  PipelineHandle instanced_pipeline_;
+  gpu::PipelineHandle pipeline_;
+  gpu::PipelineHandle instanced_pipeline_;
 };
 
 }  // namespace rx::render

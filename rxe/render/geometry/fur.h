@@ -5,9 +5,12 @@
 #include "rxe/render/core/render_graph.h"
 #include "rxe/gpu/rhi/resources.h"
 
+namespace rx::gpu {
+class Device;
+}  // namespace rx::gpu
+
 namespace rx::render {
 
-class Device;
 
 // Shell-based hair/fur on the raster path: draws an owned sphere as N concentric
 // shells pushed out along the normal, and carves tapering hair strands out of
@@ -22,8 +25,8 @@ class FurPass {
     f32 base_color[3] = {0.46f, 0.32f, 0.17f};  // warm brown coat
   };
 
-  bool Initialize(Device& device, Format color_format, Format depth_format);
-  void Destroy(Device& device);
+  bool Initialize(gpu::Device& device, gpu::Format color_format, gpu::Format depth_format);
+  void Destroy(gpu::Device& device);
 
   void AddToGraph(RenderGraph& graph, ResourceHandle color, ResourceHandle depth, const Mat4& model,
                   const Mat4& view_proj, const Vec3& sun_dir, const Vec3& sun_color, f32 ambient,
@@ -33,10 +36,10 @@ class FurPass {
 
  private:
   static constexpr f32 radius_ = 1.0f;
-  PipelineHandle pipeline_;
-  GpuBuffer vertices_;
-  GpuBuffer indices_;
-  GpuBuffer camera_[2];  // view projection, too big for the push block
+  gpu::PipelineHandle pipeline_;
+  gpu::GpuBuffer vertices_;
+  gpu::GpuBuffer indices_;
+  gpu::GpuBuffer camera_[2];  // view projection, too big for the push block
   u32 camera_slot_ = 0;
   u32 index_count_ = 0;
 };

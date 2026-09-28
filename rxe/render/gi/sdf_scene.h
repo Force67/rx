@@ -36,7 +36,7 @@ class SdfScene {
   };
 
   struct MeshSdf {
-    GpuBuffer sdf;         // res.x*res.y*res.z signed floats, local units
+    gpu::GpuBuffer sdf;         // res.x*res.y*res.z signed floats, local units
     f32 box_min[3] = {};   // local-space min corner of the volume
     f32 voxel = 0;         // local-space voxel size (cubic)
     u32 res[3] = {};       // per-axis voxel count (16..64)
@@ -45,7 +45,7 @@ class SdfScene {
     f32 gen_ms = 0;        // generation time for this mesh
   };
 
-  explicit SdfScene(Device& device) : device_(device) {}
+  explicit SdfScene(gpu::Device& device) : device_(device) {}
   ~SdfScene();
 
   SdfScene(const SdfScene&) = delete;
@@ -77,7 +77,7 @@ class SdfScene {
   f32 last_gen_ms() const { return last_gen_ms_; }
 
  private:
-  Device& device_;
+  gpu::Device& device_;
   JobSystem jobs_;
   base::UnorderedMap<u64, MeshSdf> meshes_;
   u64 total_bytes_ = 0;

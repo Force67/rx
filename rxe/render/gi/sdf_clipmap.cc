@@ -76,71 +76,71 @@ f32 ClipVoxel(u32 clip) {
 }  // namespace
 
 SdfClipmap::~SdfClipmap() {
-  for (PipelineHandle* p : {&clear_pipeline_, &compose_pipeline_, &debug_pipeline_}) {
+  for (gpu::PipelineHandle* p : {&clear_pipeline_, &compose_pipeline_, &debug_pipeline_}) {
     if (*p) device_.DestroyPipeline(*p);
     *p = {};
   }
-  for (GpuImage* img : {&distance_, &albedo_, &emissive_}) {
+  for (gpu::GpuImage* img : {&distance_, &albedo_, &emissive_}) {
     if (*img) device_.DestroyImage(*img);
     *img = {};
   }
-  for (GpuBuffer& b : globals_buffers_) {
+  for (gpu::GpuBuffer& b : globals_buffers_) {
     if (b) device_.DestroyBuffer(b);
   }
 }
 
 bool SdfClipmap::Initialize() {
-  const TextureUsageFlags usage = kTextureUsageStorage | kTextureUsageSampled;
+  const gpu::TextureUsageFlags usage = gpu::kTextureUsageStorage | gpu::kTextureUsageSampled;
   const u32 total_z = kRes * kClips;
-  distance_ = device_.CreateImage3D(Format::kR16Float, kRes, kRes, total_z, usage);
-  albedo_ = device_.CreateImage3D(Format::kRGBA8Unorm, kRes, kRes, total_z, usage);
-  emissive_ = device_.CreateImage3D(Format::kRGBA8Unorm, kRes, kRes, total_z, usage);
+  distance_ = device_.CreateImage3D(gpu::Format::kR16Float, kRes, kRes, total_z, usage);
+  albedo_ = device_.CreateImage3D(gpu::Format::kRGBA8Unorm, kRes, kRes, total_z, usage);
+  emissive_ = device_.CreateImage3D(gpu::Format::kRGBA8Unorm, kRes, kRes, total_z, usage);
   if (!distance_ || !albedo_ || !emissive_) {
     RX_WARN("sdf clipmap volumes unavailable (no 3d storage image support)");
     return false;
   }
 
-  sampler_ = device_.GetSampler({.min_filter = Filter::kLinear,
-                                 .mag_filter = Filter::kLinear,
-                                 .mip_filter = Filter::kNearest,
-                                 .address_u = AddressMode::kClampToEdge,
-                                 .address_v = AddressMode::kClampToEdge,
-                                 .address_w = AddressMode::kClampToEdge,
+  sampler_ = device_.GetSampler({.min_filter = gpu::Filter::kLinear,
+                                 .mag_filter = gpu::Filter::kLinear,
+                                 .mip_filter = gpu::Filter::kNearest,
+                                 .address_u = gpu::AddressMode::kClampToEdge,
+                                 .address_v = gpu::AddressMode::kClampToEdge,
+                                 .address_w = gpu::AddressMode::kClampToEdge,
                                  .max_lod = 0.0f});
   if (!sampler_) return false;
 
-  for (GpuBuffer& b : globals_buffers_) {
-    b = device_.CreateBuffer(sizeof(SdfGlobals), kBufferUsageUniform, true);
+  for (gpu::GpuBuffer& b : globals_buffers_) {
+    b = device_.CreateBuffer(sizeof(SdfGlobals), gpu::kBufferUsageUniform, true);
     if (!b.mapped) return false;
   }
 
   clear_pipeline_ = device_.CreateComputePipeline({
       .shader = RX_SHADER(k_sdf_clear_cs_hlsl),
-      .sets = {{.slots = {{0, BindingType::kStorageImage},
-                          {1, BindingType::kStorageImage},
-                          {2, BindingType::kStorageImage}}}},
-      .push_constant_size = PushSize<ClearPush>(),
+      .sets = {{.slots = {{0, gpu::BindingType::kStorageImage},
+                          {1, gpu::BindingType::kStorageImage},
+                          {2, gpu::BindingType::kStorageImage}}}},
+      .push_constant_size = gpu::PushSize<ClearPush>(),
       .debug_name = "sdf_clear",
   });
   compose_pipeline_ = device_.CreateComputePipeline({
       .shader = RX_SHADER(k_sdf_compose_cs_hlsl),
-      .sets = {{.slots = {{0, BindingType::kStorageImage},
-                          {1, BindingType::kStorageImage},
-                          {2, BindingType::kStorageImage},
-                          {3, BindingType::kStorageBuffer},
-                          {4, BindingType::kUniformBuffer}}}},
-      .push_constant_size = PushSize<ComposePush>(),
+      .sets = {{.slots = {{0, gpu::BindingType::kStorageImage},
+                          {1, gpu::BindingType::kStorageImage},
+                          {2, gpu::BindingType::kStorageImage},
+                          {3, gpu::BindingType::kStorageBuffer},
+                          {4, gpu::BindingType::kUniformBuffer}}}},
+      .push_constant_size = gpu::PushSize<ComposePush>(),
       .debug_name = "sdf_compose",
   });
   debug_pipeline_ = device_.CreateComputePipeline({
       .shader = RX_SHADER(k_sdf_debug_cs_hlsl),
-      .sets = {{.slots = {{0, BindingType::kStorageImage},
-                          {1, BindingType::kUniformBuffer},
-                          {2, BindingType::kSampledImage},
-                          {3, BindingType::kSampledImage},
-                          {4, BindingType::kSampledImage},
-                          {5, BindingType::kSampler}}}},
-      .push_constant_size = PushSize<DebugPush>(),
+      .sets = {{.slots = {{0, gpu::BindingType::kStorageImage},
+                          {1, gpu::BindingType::kUniformBuffer},
+                          {2, gpu::BindingType::kSampledImage},
+                          {3, gpu::BindingType::kSampledImage},
+                          {4, gpu::BindingType::kSampledImage},
+                          {5, gpu::BindingType::kSampler}}}},
+      .push_constant_size = gpu::PushSize<DebugPush>(),
       .debug_name = "sdf_debug",
   });
   if (!clear_pipeline_ || !compose_pipeline_ || !debug_pipeline_) {
@@ -150,11 +150,11 @@ bool SdfClipmap::Initialize() {
 
   // Prime the volumes to kGeneral (the compose pass clears each clip it touches;
   // the first frame recomposes all four, so no explicit clear is needed here).
-  device_.ImmediateSubmit([this](CommandList& cmd) {
-    TextureBarrier b[3] = {
-        Transition(distance_, ResourceState::kUndefined, ResourceState::kGeneral),
-        Transition(albedo_, ResourceState::kUndefined, ResourceState::kGeneral),
-        Transition(emissive_, ResourceState::kUndefined, ResourceState::kGeneral)};
+  device_.ImmediateSubmit([this](gpu::CommandList& cmd) {
+    gpu::TextureBarrier b[3] = {
+        gpu::Transition(distance_, gpu::ResourceState::kUndefined, gpu::ResourceState::kGeneral),
+        gpu::Transition(albedo_, gpu::ResourceState::kUndefined, gpu::ResourceState::kGeneral),
+        gpu::Transition(emissive_, gpu::ResourceState::kUndefined, gpu::ResourceState::kGeneral)};
     cmd.TextureBarriers(b);
   });
   volumes_initialized_ = true;
@@ -234,9 +234,9 @@ void SdfClipmap::AddComposeToGraph(RenderGraph& graph, const SdfScene& scene,
       "sdf_compose", [](RenderGraph::PassBuilder&) {},
       [this, scene_ptr, jobs = base::move(jobs), instances = base::move(instances), camera,
        frame_index](PassContext& ctx) {
-        CommandList* cmd = ctx.cmd;
+        gpu::CommandList* cmd = ctx.cmd;
         // Order this frame's writes after any prior-frame reads of the volumes.
-        cmd->MemoryBarrier(BarrierScope::kComputeRead, BarrierScope::kComputeWrite);
+        cmd->MemoryBarrier(gpu::BarrierScope::kComputeRead, gpu::BarrierScope::kComputeWrite);
 
         const u32 groups = SdfClipmap::kRes / 4;
         for (const ClipJob& j : jobs) {
@@ -245,11 +245,11 @@ void SdfClipmap::AddComposeToGraph(RenderGraph& graph, const SdfScene& scene,
           cp.dims[1] = j.clip;
           cp.params[0] = SdfClipmap::kFarDistance;
           cmd->BindPipeline(clear_pipeline_);
-          cmd->BindTransient(0, {Bind::Storage(0, distance_), Bind::Storage(1, albedo_),
-                                 Bind::Storage(2, emissive_)});
+          cmd->BindTransient(0, {gpu::Bind::Storage(0, distance_), gpu::Bind::Storage(1, albedo_),
+                                 gpu::Bind::Storage(2, emissive_)});
           cmd->Push(cp);
           cmd->Dispatch(groups, groups, groups);
-          cmd->MemoryBarrier(BarrierScope::kComputeWrite, BarrierScope::kComputeRead);
+          cmd->MemoryBarrier(gpu::BarrierScope::kComputeWrite, gpu::BarrierScope::kComputeRead);
 
           base::Vector<ComposeCandidate> unbounded;
           base::Vector<ComposeCandidate> bounded_quality;
@@ -335,25 +335,25 @@ void SdfClipmap::AddComposeToGraph(RenderGraph& graph, const SdfScene& scene,
             cmd->BindPipeline(compose_pipeline_);
             // The clip origin/voxel the shader needs is SdfGlobals::clip_origin
             // for this dispatch's clip, written above for this frame.
-            cmd->BindTransient(0, {Bind::Storage(0, distance_), Bind::Storage(1, albedo_),
-                                   Bind::Storage(2, emissive_),
-                                   Bind::StorageBuffer(3, mesh->sdf, 0, mesh->sdf.size),
-                                   Bind::Uniform(4, globals_buffers_[frame_index % 2], 0,
+            cmd->BindTransient(0, {gpu::Bind::Storage(0, distance_), gpu::Bind::Storage(1, albedo_),
+                                   gpu::Bind::Storage(2, emissive_),
+                                   gpu::Bind::StorageBuffer(3, mesh->sdf, 0, mesh->sdf.size),
+                                   gpu::Bind::Uniform(4, globals_buffers_[frame_index % 2], 0,
                                                  sizeof(SdfGlobals))});
             cmd->Push(pp);
             cmd->Dispatch(groups, groups, groups);
             // RMW ordering across overlapping instance dispatches.
-            cmd->MemoryBarrier(BarrierScope::kComputeWrite, BarrierScope::kComputeRead);
+            cmd->MemoryBarrier(gpu::BarrierScope::kComputeWrite, gpu::BarrierScope::kComputeRead);
           };
           for (const ComposeCandidate& candidate : unbounded) compose(candidate);
           for (size_t i = 0; i < bounded_quality_count; ++i) compose(bounded_quality[i]);
         }
         // Make the composed volumes visible to later readers (debug / S2 trace).
-        cmd->MemoryBarrier(BarrierScope::kComputeWrite, BarrierScope::kComputeRead);
+        cmd->MemoryBarrier(gpu::BarrierScope::kComputeWrite, gpu::BarrierScope::kComputeRead);
       });
 }
 
-void SdfClipmap::AddDebugPass(RenderGraph& graph, ResourceHandle lit, Extent2D extent,
+void SdfClipmap::AddDebugPass(RenderGraph& graph, ResourceHandle lit, gpu::Extent2D extent,
                               const Mat4& inv_view_proj, const Vec3& camera, u32 mode,
                               u32 frame_index) {
   if (!volumes_initialized_ || lit == kInvalidResource) return;
@@ -361,7 +361,7 @@ void SdfClipmap::AddDebugPass(RenderGraph& graph, ResourceHandle lit, Extent2D e
       "sdf_debug",
       [lit](RenderGraph::PassBuilder& b) { b.Write(lit, ResourceUsage::kStorageWrite); },
       [this, lit, extent, inv_view_proj, camera, mode, frame_index](PassContext& ctx) {
-        const GpuImage& out = ctx.graph->image(lit);
+        const gpu::GpuImage& out = ctx.graph->image(lit);
         DebugPush push{};
         push.inv_view_proj = inv_view_proj;
         push.camera_pos[0] = camera.x;
@@ -373,10 +373,10 @@ void SdfClipmap::AddDebugPass(RenderGraph& graph, ResourceHandle lit, Extent2D e
         push.misc[0] = mode;
         ctx.cmd->BindPipeline(debug_pipeline_);
         ctx.cmd->BindTransient(
-            0, {Bind::Storage(0, out), Bind::Uniform(1, globals_buffers_[frame_index % 2], 0,
+            0, {gpu::Bind::Storage(0, out), gpu::Bind::Uniform(1, globals_buffers_[frame_index % 2], 0,
                                                      sizeof(SdfGlobals)),
-                InGeneral(Bind::Sampled(2, distance_)), InGeneral(Bind::Sampled(3, albedo_)),
-                InGeneral(Bind::Sampled(4, emissive_)), Bind::Sampler(5, sampler_)});
+                gpu::InGeneral(gpu::Bind::Sampled(2, distance_)), gpu::InGeneral(gpu::Bind::Sampled(3, albedo_)),
+                gpu::InGeneral(gpu::Bind::Sampled(4, emissive_)), gpu::Bind::Sampler(5, sampler_)});
         ctx.cmd->Push(push);
         ctx.cmd->Dispatch2D(out.extent);
       });

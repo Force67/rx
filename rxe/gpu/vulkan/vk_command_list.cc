@@ -3,7 +3,7 @@
 #include "foundation/math/scalar.h"
 #include "rxe/gpu/vulkan/vk_backend.h"
 
-namespace rx::render::vk {
+namespace rx::gpu::vk {
 
 void VulkanCommandList::BindPipeline(PipelineHandle pipeline) {
   if (!device_.WaitPipelineReady(Rec(pipeline))) {
@@ -511,4 +511,4 @@ void VulkanCommandList::EndDebugLabel() {
   vkCmdEndDebugUtilsLabelEXT(cmd_);
 }
 
-}  // namespace rx::render::vk
+}  // namespace rx::gpu::vk

@@ -137,7 +137,7 @@ DebugUi::~DebugUi() { Shutdown(); }
 bool DebugUi::Initialize(Window& window, render::Renderer& renderer, asset::Vfs* vfs) {
   vfs_ = vfs;
   SDL_Window* sdl_window = static_cast<SDL_Window*>(window.native_handles().window);
-  render::Device* device = renderer.device();
+  gpu::Device* device = renderer.device();
   if (!sdl_window || !device || device->is_stub()) return false;
 
   IMGUI_CHECKVERSION();
@@ -236,8 +236,8 @@ void DebugUi::Build(render::Renderer& renderer, scene::FlyCamera& camera, const 
                                                        process_memory)
                             ? static_cast<u64>(process_memory.resident_set_bytes)
                             : 0;
-    if (render::Device* device = renderer.device()) {
-      const render::Device::MemoryBudget memory = device->memory_budget();
+    if (gpu::Device* device = renderer.device()) {
+      const gpu::Device::MemoryBudget memory = device->memory_budget();
       gpu_memory_bytes_ = memory.used_bytes;
       gpu_memory_budget_bytes_ = memory.budget_bytes;
     } else {
@@ -249,7 +249,7 @@ void DebugUi::Build(render::Renderer& renderer, scene::FlyCamera& camera, const 
 
   if (visible_) {
     render::RenderSettings& settings = renderer.settings();
-    const render::DeviceCaps* caps = renderer.caps();
+    const gpu::DeviceCaps* caps = renderer.caps();
 
     ImGui::SetNextWindowPos({16, 16}, ImGuiCond_FirstUseEver);
     ImGui::SetNextWindowSize({460, 640}, ImGuiCond_FirstUseEver);
@@ -389,7 +389,7 @@ void DebugUi::Build(render::Renderer& renderer, scene::FlyCamera& camera, const 
     // backbuffer; the backend binds it inside the ui pass, where the renderer
     // has filled blur_source in.
     view->needs_blur = true;
-    view->ui_draw = [this, view](render::CommandList& cmd) {
+    view->ui_draw = [this, view](gpu::CommandList& cmd) {
       imgui_renderer_.SetBackdrop(view->blur_source, view->blur_sampler);
       imgui_renderer_.Render(ImGui::GetDrawData(), cmd);
     };
@@ -476,7 +476,7 @@ void DebugUi::DrawDisplayTab(render::Renderer& renderer, render::RenderSettings&
 }
 
 void DebugUi::DrawRayTracingTab(render::Renderer& renderer, render::RenderSettings& settings,
-                                const render::DeviceCaps* caps) {
+                                const gpu::DeviceCaps* caps) {
   const bool ray_query = caps && caps->ray_query;
   if (!ray_query) {
     ImGui::TextColored({1, 0.6f, 0.3f, 1}, "no ray-query support; RT features disabled");
@@ -581,7 +581,7 @@ void DebugUi::DrawRayTracingTab(render::Renderer& renderer, render::RenderSettin
   ImGui::EndDisabled();
 }
 
-void DebugUi::DrawLightingTab(render::RenderSettings& settings, const render::DeviceCaps* caps) {
+void DebugUi::DrawLightingTab(render::RenderSettings& settings, const gpu::DeviceCaps* caps) {
   // Day/night cycle: scrub the time of day (drives the sun, sky and ambient) and
   // the rate game time passes. While the cycle runs it owns the sun, so the
   // manual sun controls below only stick when time is frozen (Time scale 0) or
@@ -618,7 +618,7 @@ void DebugUi::DrawLightingTab(render::RenderSettings& settings, const render::De
 
 }
 
-void DebugUi::DrawGiTab(render::RenderSettings& settings, const render::DeviceCaps* caps) {
+void DebugUi::DrawGiTab(render::RenderSettings& settings, const gpu::DeviceCaps* caps) {
   const bool ray_query = caps && caps->ray_query;
   ImGui::Checkbox("Image based lighting", &settings.ibl);
   if (settings.ibl) {
@@ -689,7 +689,7 @@ void DebugUi::DrawPostTab(render::RenderSettings& settings) {
 }
 
 void DebugUi::DrawDiagnosticsTab(render::Renderer& renderer, scene::FlyCamera& camera,
-                                 render::RenderSettings& settings, const render::DeviceCaps* caps) {
+                                 render::RenderSettings& settings, const gpu::DeviceCaps* caps) {
   int debug_view = static_cast<int>(settings.debug_view);
   if (ImGui::Combo("Debug view", &debug_view, kDebugViews, IM_ARRAYSIZE(kDebugViews))) {
     settings.debug_view = static_cast<render::DebugView>(debug_view);
@@ -724,9 +724,9 @@ void DebugUi::DrawDiagnosticsTab(render::Renderer& renderer, scene::FlyCamera& c
     }
   }
 
-  if (render::Device* device = renderer.device();
+  if (gpu::Device* device = renderer.device();
       device && ImGui::CollapsingHeader("GPU memory")) {
-    render::Device::MemoryBudget mem = device->memory_budget();
+    gpu::Device::MemoryBudget mem = device->memory_budget();
     const f64 mb = 1.0 / (1024.0 * 1024.0);
     ImGui::Text("used %.0f / %.0f MB", mem.used_bytes * mb, mem.budget_bytes * mb);
     if (mem.budget_bytes > 0) {

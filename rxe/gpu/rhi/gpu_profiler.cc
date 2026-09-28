@@ -8,7 +8,7 @@
 #include "rxe/gpu/rhi/command_list.h"
 #include "rxe/gpu/rhi/device.h"
 
-namespace rx::render {
+namespace rx::gpu {
 namespace {
 base::Option<const char*> TimingFile{"gpu.timings.file", nullptr, "RX_GPU_TIMINGS_FILE"};
 }  // namespace
@@ -139,4 +139,4 @@ void GpuProfiler::EndFrameTotal(CommandList& cmd) {
   }
 }
 
-}  // namespace rx::render
+}  // namespace rx::gpu

@@ -36,20 +36,20 @@ class LightGrid {
   static constexpr u32 kCellsPerCascade = kCells * kCells * kCells;
   static constexpr u32 kTotalCells = kCellsPerCascade * kCascades;
 
-  bool Initialize(Device& device);
-  void Destroy(Device& device);
+  bool Initialize(gpu::Device& device);
+  void Destroy(gpu::Device& device);
 
   // Snaps every cascade to the camera, uploads the per-cascade params, and adds
   // the binning dispatch. `lights` is the same StructuredBuffer<Light> the
   // froxel cluster pass consumes; `light_count` is capped to kMaxLights.
-  void AddToGraph(RenderGraph& graph, const GpuBuffer& lights, u32 light_count,
+  void AddToGraph(RenderGraph& graph, const gpu::GpuBuffer& lights, u32 light_count,
                   const Vec3& camera, u32 frame_index, bool async = false);
 
-  const GpuBuffer& params_buffer(u32 frame_index) const {
+  const gpu::GpuBuffer& params_buffer(u32 frame_index) const {
     return params_buffers_[frame_index % 2];
   }
-  const GpuBuffer& counts_buffer() const { return counts_; }
-  const GpuBuffer& ids_buffer() const { return ids_; }
+  const gpu::GpuBuffer& counts_buffer() const { return counts_; }
+  const gpu::GpuBuffer& ids_buffer() const { return ids_; }
   static u64 params_size() { return sizeof(GridParams); }
 
  private:
@@ -58,11 +58,11 @@ class LightGrid {
     u32 info[4];                // x cells/axis, y cascades, z max per cell, w unused
   };
 
-  Device* device_ = nullptr;
-  PipelineHandle pipeline_;
-  GpuBuffer params_buffers_[2];  // host visible, ping-pong by frame parity
-  GpuBuffer counts_;             // device-local storage
-  GpuBuffer ids_;                // device-local storage
+  gpu::Device* device_ = nullptr;
+  gpu::PipelineHandle pipeline_;
+  gpu::GpuBuffer params_buffers_[2];  // host visible, ping-pong by frame parity
+  gpu::GpuBuffer counts_;             // device-local storage
+  gpu::GpuBuffer ids_;                // device-local storage
 };
 
 }  // namespace rx::render

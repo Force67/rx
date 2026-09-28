@@ -164,10 +164,10 @@ class MaterialSystem {
 
   // Looks up an uploaded texture by asset hash (null when absent). Used by
   // systems that bind textures outside the material sets (decal atlas).
-  const GpuImage* find_texture(u64 hash) const;
+  const gpu::GpuImage* find_texture(u64 hash) const;
 
   // registry may be null (no raytracing); hit-shading tables are skipped.
-  static base::UniquePointer<MaterialSystem> Create(Device& device, BindlessRegistry* registry);
+  static base::UniquePointer<MaterialSystem> Create(gpu::Device& device, BindlessRegistry* registry);
   ~MaterialSystem();
 
   MaterialSystem(const MaterialSystem&) = delete;
@@ -200,7 +200,7 @@ class MaterialSystem {
   bool UpdateMaterialParams(const asset::Material& material, u64 id_salt = 0);
 
   // Set for a material hash; 0 or unknown hashes get the default material.
-  BindingSetHandle set(u64 material_hash) const;
+  gpu::BindingSetHandle set(u64 material_hash) const;
 
   // Blended materials draw in the sorted transparent pass instead of the
   // opaque one. Unknown hashes are opaque.
@@ -256,7 +256,7 @@ class MaterialSystem {
   // does: it renders geometry it has no mesh pipeline for and only needs the
   // one map.
   struct BaseColor {
-    const GpuImage* image = nullptr;
+    const gpu::GpuImage* image = nullptr;
     f32 alpha_cutoff = 0.0f;
   };
   BaseColor material_base_color(u64 material_hash) const;
@@ -265,7 +265,7 @@ class MaterialSystem {
   // BindlessRegistry::kInvalidIndex when absent. Used to texture particles.
   u32 bindless_texture(u64 texture_hash) const;
 
-  BindingLayoutHandle set_layout() const { return set_layout_; }
+  gpu::BindingLayoutHandle set_layout() const { return set_layout_; }
   u32 texture_count() const { return static_cast<u32>(texture_records_.size()); }
   u32 material_count() const { return static_cast<u32>(sets_.size()); }
 
@@ -321,7 +321,7 @@ class MaterialSystem {
 
   struct TextureRecord {
     u64 key = 0;  // salted asset hash (textures_ key), for map upkeep
-    GpuImage image;
+    gpu::GpuImage image;
     // What was uploaded, which is what decides kFlagNormalReconstructZ. The
     // asset-side intent is not enough: a normal map that declined to compress
     // is still rgba8 and still has a real z.
@@ -340,7 +340,7 @@ class MaterialSystem {
   };
 
   struct MaterialRuntime {
-    BindingSetHandle set;
+    gpu::BindingSetHandle set;
     u32 pool = 0;         // param_buffers_ index of the uniform slot
     u32 param_index = 0;  // slot within the pool
     u64 map_keys[12] = {};  // salted texture hashes for bindings 1..12
@@ -350,19 +350,19 @@ class MaterialSystem {
   };
 
   struct Retired {
-    GpuImage image;
-    BindingSetHandle set;
+    gpu::GpuImage image;
+    gpu::BindingSetHandle set;
     u32 bindless_slot = BindlessRegistry::kInvalidIndex;
     u32 frame = 0;
   };
 
-  explicit MaterialSystem(Device& device) : device_(device) {}
+  explicit MaterialSystem(gpu::Device& device) : device_(device) {}
 
   bool CreateDefaults();
   // first_mip > 0 uploads only the chain's tail (baked-mips sources only).
-  GpuImage UploadTextureImage(const asset::Texture& texture, u32 first_mip = 0);
+  gpu::GpuImage UploadTextureImage(const asset::Texture& texture, u32 first_mip = 0);
   bool AddPool();
-  BindingSetHandle AllocateSet();
+  gpu::BindingSetHandle AllocateSet();
   // The bindless record the ray paths shade from. Built in one place so the
   // uniform and the record cannot describe two different materials.
   BindlessRegistry::MaterialRecord BuildBindlessRecord(const asset::Material& material,
@@ -371,10 +371,10 @@ class MaterialSystem {
   // bindings need. No GPU state is touched.
   void BuildParams(const asset::Material& material, u64 id_salt, Params& params,
                    u64 out_map_keys[12]);
-  bool WriteSet(BindingSetHandle set, u32 pool, u32 param_index,
+  bool WriteSet(gpu::BindingSetHandle set, u32 pool, u32 param_index,
                 const asset::Material& material, u64 id_salt, u64 out_map_keys[12]);
-  void WriteSetBindings(BindingSetHandle set, const MaterialRuntime& runtime);
-  const GpuImage* texture_or(u64 hash, const GpuImage& fallback) const;
+  void WriteSetBindings(gpu::BindingSetHandle set, const MaterialRuntime& runtime);
+  const gpu::GpuImage* texture_or(u64 hash, const gpu::GpuImage& fallback) const;
   TextureRecord* record_for(u64 hash);
   // Registers (or returns) the bindless slot for an uploaded texture.
   u32 EnsureBindless(u64 key);
@@ -387,16 +387,16 @@ class MaterialSystem {
   // create + destroy a VMA allocation per streamed texture, fragmenting the
   // GPU heap over long sessions. Safe to reuse because uploads go through the
   // synchronous ImmediateSubmit.
-  GpuBuffer* AcquireStaging(u64 bytes);
+  gpu::GpuBuffer* AcquireStaging(u64 bytes);
 
-  Device& device_;
+  gpu::Device& device_;
   BindlessRegistry* registry_ = nullptr;
-  SamplerHandle sampler_;
+  gpu::SamplerHandle sampler_;
   u32 sets_in_last_pool_ = 0;
-  GpuBuffer staging_;
+  gpu::GpuBuffer staging_;
   u64 staging_bytes_ = 0;
 
-  base::Vector<GpuBuffer> param_buffers_;  // one per pool, host visible
+  base::Vector<gpu::GpuBuffer> param_buffers_;  // one per pool, host visible
   base::Vector<base::UniquePointer<TextureRecord>> texture_records_;
   base::Vector<MaterialRuntime> material_records_;
   base::Vector<Retired> retired_;
@@ -409,8 +409,8 @@ class MaterialSystem {
   base::UnorderedMap<u64, u32> bindless_materials_;  // material hash -> registry index
   base::UnorderedMap<u64, MaterialColor> colors_;    // material hash -> flat colour factors
   base::UnorderedMap<u64, AlphaCoverage> texture_alpha_;  // texture key -> baked opacity map
-  BindingLayoutHandle set_layout_;
-  BindingSetHandle default_set_;
+  gpu::BindingLayoutHandle set_layout_;
+  gpu::BindingSetHandle default_set_;
   u64 budget_bytes_ = 0;    // 0 = unlimited
   u64 resident_bytes_ = 0;  // material texture bytes currently on the GPU
   u32 current_frame_ = 0;   // last BeginFrame; timestamps retires outside UpdateStreaming
@@ -420,9 +420,9 @@ class MaterialSystem {
   u64 logged_ops_ = 0;    // promote+demote count at the last activity log
   u32 logged_frame_ = 0;
 
-  GpuImage white_;        // srgb-safe 1x1 white, also neutral mr/emissive
-  GpuImage flat_normal_;  // 1x1 (0.5, 0.5, 1)
-  GpuImage black_;        // 1x1 transparent black; the neutral (absent) residual
+  gpu::GpuImage white_;        // srgb-safe 1x1 white, also neutral mr/emissive
+  gpu::GpuImage flat_normal_;  // 1x1 (0.5, 0.5, 1)
+  gpu::GpuImage black_;        // 1x1 transparent black; the neutral (absent) residual
 };
 
 }  // namespace rx::render

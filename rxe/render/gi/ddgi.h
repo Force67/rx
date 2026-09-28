@@ -38,8 +38,8 @@ class DdgiSystem {
     f32 energy_scale = 1.0f;
   };
 
-  static base::UniquePointer<DdgiSystem> Create(Device& device, TextureView sky_view,
-                                            SamplerHandle sky_sampler, BindlessRegistry& bindless);
+  static base::UniquePointer<DdgiSystem> Create(gpu::Device& device, gpu::TextureView sky_view,
+                                            gpu::SamplerHandle sky_sampler, BindlessRegistry& bindless);
   ~DdgiSystem();
 
   DdgiSystem(const DdgiSystem&) = delete;
@@ -65,35 +65,35 @@ class DdgiSystem {
     f32 params[4];
   };
 
-  explicit DdgiSystem(Device& device) : device_(device) {}
+  explicit DdgiSystem(gpu::Device& device) : device_(device) {}
 
-  bool CreateResources(TextureView sky_view, SamplerHandle sky_sampler);
+  bool CreateResources(gpu::TextureView sky_view, gpu::SamplerHandle sky_sampler);
   bool CreatePipelines();
 
-  Device& device_;
+  gpu::Device& device_;
   Settings settings_;
-  SamplerHandle sampler_;
+  gpu::SamplerHandle sampler_;
 
-  GpuImage irradiance_;  // rgba16f atlas, 2d array view bound to shading
-  GpuImage distance_;    // rg16f moments atlas
-  GpuImage rays_;        // rgba16f: radiance + hit distance, ray x probe
+  gpu::GpuImage irradiance_;  // rgba16f atlas, 2d array view bound to shading
+  gpu::GpuImage distance_;    // rg16f moments atlas
+  gpu::GpuImage rays_;        // rgba16f: radiance + hit distance, ray x probe
   // TODO(rhi): the shaders declare (RW)Texture2DArray for the atlases and the
   // old code bound single-layer 2d-array views of the 2D images; the RHI has
   // no array-view creation API yet, so these alias the default 2D views.
-  TextureView irradiance_array_view_;
-  TextureView distance_array_view_;
-  GpuBuffer volume_buffers_[2];  // host visible, ping pong by frame parity
+  gpu::TextureView irradiance_array_view_;
+  gpu::TextureView distance_array_view_;
+  gpu::GpuBuffer volume_buffers_[2];  // host visible, ping pong by frame parity
   bool atlas_initialized_ = false;
   bool history_valid_ = false;
   Vec3 origin_{};
 
-  TextureView sky_view_;
-  SamplerHandle sky_sampler_;
+  gpu::TextureView sky_view_;
+  gpu::SamplerHandle sky_sampler_;
   BindlessRegistry* bindless_ = nullptr;
 
-  PipelineHandle rays_pipeline_;
-  PipelineHandle blend_pipeline_;
-  PipelineHandle border_pipeline_;
+  gpu::PipelineHandle rays_pipeline_;
+  gpu::PipelineHandle blend_pipeline_;
+  gpu::PipelineHandle border_pipeline_;
 };
 
 }  // namespace rx::render

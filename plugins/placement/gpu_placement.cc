@@ -14,10 +14,10 @@
 
 namespace rx::placement {
 
-using render::BarrierScope;
-using render::BindingType;
-using render::ResourceState;
-namespace Bind = render::Bind;
+using gpu::BarrierScope;
+using gpu::BindingType;
+using gpu::ResourceState;
+namespace Bind = gpu::Bind;
 
 namespace {
 
@@ -98,7 +98,7 @@ constexpr u32 kDensityFloatsPerJob =
 
 }  // namespace
 
-bool GpuPlacement::Initialize(render::Device& device, const PlacementSystem& system) {
+bool GpuPlacement::Initialize(gpu::Device& device, const PlacementSystem& system) {
   max_jobs_ = system.config().max_jobs_per_update;
   point_capacity_ = max_jobs_ * kPatternPointCount;
 
@@ -161,31 +161,31 @@ bool GpuPlacement::Initialize(render::Device& device, const PlacementSystem& sys
 
   ops_ = device.CreateBufferWithData(
       ByteSpan(reinterpret_cast<const u8*>(ops.data()), ops.size() * sizeof(u32)),
-      render::kBufferUsageStorage);
+      gpu::kBufferUsageStorage);
   layers_ = device.CreateBufferWithData(
       ByteSpan(reinterpret_cast<const u8*>(layers.data()), layers.size() * sizeof(LayerGpu)),
-      render::kBufferUsageStorage);
+      gpu::kBufferUsageStorage);
   pattern_ = device.CreateBufferWithData(
       ByteSpan(reinterpret_cast<const u8*>(kPatternXY), sizeof(kPatternXY)),
-      render::kBufferUsageStorage);
+      gpu::kBufferUsageStorage);
 
   world_sampler_ = device.GetSampler({
-      .min_filter = render::Filter::kLinear,
-      .mag_filter = render::Filter::kLinear,
-      .address_u = render::AddressMode::kClampToEdge,
-      .address_v = render::AddressMode::kClampToEdge,
+      .min_filter = gpu::Filter::kLinear,
+      .mag_filter = gpu::Filter::kLinear,
+      .address_u = gpu::AddressMode::kClampToEdge,
+      .address_v = gpu::AddressMode::kClampToEdge,
   });
 
   for (BufferSet& set : sets_) {
     set.density = device.CreateBuffer(
         static_cast<u64>(max_jobs_) * kDensityFloatsPerJob * sizeof(f32),
-        render::kBufferUsageStorage);
+        gpu::kBufferUsageStorage);
     set.points = device.CreateBuffer(static_cast<u64>(point_capacity_) * sizeof(PointGpu),
-                                     render::kBufferUsageStorage);
-    set.counts = device.CreateBuffer(sizeof(u32), render::kBufferUsageStorage, true);
+                                     gpu::kBufferUsageStorage);
+    set.counts = device.CreateBuffer(sizeof(u32), gpu::kBufferUsageStorage, true);
     set.instances =
         device.CreateBuffer(static_cast<u64>(point_capacity_) * sizeof(InstanceGpu),
-                            render::kBufferUsageStorage, true);
+                            gpu::kBufferUsageStorage, true);
     if (!set.counts.mapped || !set.instances.mapped) return false;
   }
 
@@ -193,7 +193,7 @@ bool GpuPlacement::Initialize(render::Device& device, const PlacementSystem& sys
   return true;
 }
 
-void GpuPlacement::Shutdown(render::Device& device) {
+void GpuPlacement::Shutdown(gpu::Device& device) {
   if (!initialized_) return;
   device.WaitIdle();
   for (BufferSet& set : sets_) {
@@ -213,7 +213,7 @@ void GpuPlacement::Shutdown(render::Device& device) {
   initialized_ = false;
 }
 
-void GpuPlacement::SyncWorldData(render::Device& device, const WorldData& world) {
+void GpuPlacement::SyncWorldData(gpu::Device& device, const WorldData& world) {
   const u32 resolution = world.resolution();
   const u32 map_count = world.map_count();
   bool recreate = !world_maps_ || synced_map_count_ != map_count;
@@ -221,8 +221,8 @@ void GpuPlacement::SyncWorldData(render::Device& device, const WorldData& world)
     device.WaitIdle();
     if (world_maps_) device.DestroyImage(world_maps_);
     world_maps_ = device.CreateImage2DArray(
-        render::Format::kR32Float, resolution, resolution, map_count,
-        render::kTextureUsageSampled | render::kTextureUsageTransferDst);
+        gpu::Format::kR32Float, resolution, resolution, map_count,
+        gpu::kTextureUsageSampled | gpu::kTextureUsageTransferDst);
     synced_map_count_ = map_count;
     synced_revisions_.clear();
     synced_revisions_.resize(map_count, 0);
@@ -231,19 +231,19 @@ void GpuPlacement::SyncWorldData(render::Device& device, const WorldData& world)
   for (u32 map = 0; map < map_count; ++map) {
     if (synced_revisions_[map] == world.revision(map)) continue;
     base::Span<const f32> texels = world.texels(map);
-    render::GpuBuffer staging = device.CreateBuffer(
-        texels.size() * sizeof(f32), render::kBufferUsageTransferSrc, true);
+    gpu::GpuBuffer staging = device.CreateBuffer(
+        texels.size() * sizeof(f32), gpu::kBufferUsageTransferSrc, true);
     base::MemCopy(staging.mapped, texels.data(), texels.size() * sizeof(f32));
     const bool first_upload = synced_revisions_[map] == 0;
-    device.ImmediateSubmit([&](render::CommandList& cmd) {
-      cmd.Barrier(render::Transition(world_maps_,
+    device.ImmediateSubmit([&](gpu::CommandList& cmd) {
+      cmd.Barrier(gpu::Transition(world_maps_,
                                      first_upload ? ResourceState::kUndefined
                                                   : ResourceState::kShaderReadCompute,
                                      ResourceState::kCopyDst));
-      render::BufferTextureCopy copy;
+      gpu::BufferTextureCopy copy;
       copy.array_layer = map;
       cmd.CopyBufferToTexture(staging, world_maps_, base::Span(&copy, 1));
-      cmd.Barrier(render::Transition(world_maps_, ResourceState::kCopyDst,
+      cmd.Barrier(gpu::Transition(world_maps_, ResourceState::kCopyDst,
                                      ResourceState::kShaderReadCompute));
     });
     device.DestroyBuffer(staging);
@@ -251,7 +251,7 @@ void GpuPlacement::SyncWorldData(render::Device& device, const WorldData& world)
   }
 }
 
-void GpuPlacement::RecordBatch(render::CommandList& cmd, const PlacementSystem& system,
+void GpuPlacement::RecordBatch(gpu::CommandList& cmd, const PlacementSystem& system,
                                base::Span<const TileKey> tiles, BufferSet& set) {
   const WorldData& world = system.world();
   const f32 map_inv_extent = 1.0f / world.extent();
@@ -327,7 +327,7 @@ void GpuPlacement::RecordBatch(render::CommandList& cmd, const PlacementSystem& 
   cmd.MemoryBarrier(BarrierScope::kComputeWrite, BarrierScope::kHostRead);
 }
 
-void GpuPlacement::RecordJobs(render::CommandList& cmd, PlacementSystem& system, u32 slot) {
+void GpuPlacement::RecordJobs(gpu::CommandList& cmd, PlacementSystem& system, u32 slot) {
   BufferSet& set = sets_[slot];
   set.jobs.clear();
   base::Span<const TileKey> pending = system.pending();
@@ -368,7 +368,7 @@ void GpuPlacement::Consume(u32 slot, PlacementSystem& system,
   set.jobs.clear();
 }
 
-void GpuPlacement::GenerateImmediate(render::Device& device, PlacementSystem& system,
+void GpuPlacement::GenerateImmediate(gpu::Device& device, PlacementSystem& system,
                                      base::Span<const TileKey> tiles,
                                      base::Vector<PlacedInstance>& out) {
   BufferSet& set = sets_[kBufferSets - 1];
@@ -376,7 +376,7 @@ void GpuPlacement::GenerateImmediate(render::Device& device, PlacementSystem& sy
     const u32 count = rx::Min<u32>(static_cast<u32>(tiles.size()) - offset, max_jobs_);
     base::Span<const TileKey> batch = tiles.subspan(offset, count);
     device.ImmediateSubmit(
-        [&](render::CommandList& cmd) { RecordBatch(cmd, system, batch, set); });
+        [&](gpu::CommandList& cmd) { RecordBatch(cmd, system, batch, set); });
     ReadResults(set, out);
     for (const TileKey& key : batch) system.MarkLive(key);
   }

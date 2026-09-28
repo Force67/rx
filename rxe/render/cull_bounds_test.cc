@@ -29,6 +29,7 @@
 
 using namespace rx;
 using namespace rx::render;
+namespace gpu = rx::gpu;
 
 namespace {
 
@@ -70,28 +71,28 @@ Mat4 RotatedScale(f32 radians, const Vec3& scale, f32 tx) {
 }  // namespace
 
 int main() {
-  DeviceDesc desc;
+  gpu::DeviceDesc desc;
   const char* rhi = ::getenv("RX_RHI");
-  desc.backend = (rhi && ::strcmp(rhi, "d3d12") == 0) ? Backend::kD3D12 : Backend::kVulkan;
+  desc.backend = (rhi && ::strcmp(rhi, "d3d12") == 0) ? gpu::Backend::kD3D12 : gpu::Backend::kVulkan;
   desc.enable_validation = ::getenv("RX_VALIDATION") != nullptr;
-  base::UniquePointer<Device> device = Device::CreateOffscreen(desc);
+  base::UniquePointer<gpu::Device> device = gpu::Device::CreateOffscreen(desc);
   if (!device) return Fail("CreateOffscreen returned null");
   if (device->is_stub()) {
     ::printf("cull_bounds_test: no %s driver, skipping (null backend)\n",
-                BackendName(desc.backend));
+                gpu::BackendName(desc.backend));
     return 0;
   }
   ::printf("cull_bounds_test: device '%s'\n", device->caps().adapter_name.c_str());
 
   // Same set layout as GpuCull::Initialize.
-  PipelineHandle pipeline = device->CreateComputePipeline({
+  gpu::PipelineHandle pipeline = device->CreateComputePipeline({
       .shader = RX_SHADER(k_cull_cs_hlsl),
-      .sets = {{.slots = {{0, BindingType::kStorageBuffer},
-                          {1, BindingType::kStorageBuffer},
-                          {2, BindingType::kStorageBuffer},
-                          {3, BindingType::kSampledImage},
-                          {4, BindingType::kUniformBuffer}}}},
-      .push_constant_size = PushSize<CullPush>(),
+      .sets = {{.slots = {{0, gpu::BindingType::kStorageBuffer},
+                          {1, gpu::BindingType::kStorageBuffer},
+                          {2, gpu::BindingType::kStorageBuffer},
+                          {3, gpu::BindingType::kSampledImage},
+                          {4, gpu::BindingType::kUniformBuffer}}}},
+      .push_constant_size = gpu::PushSize<CullPush>(),
       .debug_name = "cull_bounds_test",
   });
   if (!pipeline) return Fail("cull pipeline creation failed");
@@ -104,20 +105,20 @@ int main() {
   const Vec3 kSquash{4.0f, 0.25f, 0.25f};
   const u32 kInstances = 3;
 
-  GpuBuffer instances = device->CreateBuffer(kInstances * sizeof(GpuCull::Instance),
-                                             kBufferUsageStorage, true);
-  GpuBuffer commands = device->CreateBuffer(kInstances * sizeof(GpuCull::Command),
-                                            kBufferUsageStorage, true);
-  GpuBuffer counts = device->CreateBuffer(16, kBufferUsageStorage, true);
-  GpuBuffer reproject = device->CreateBuffer(sizeof(Mat4), kBufferUsageUniform, true);
+  gpu::GpuBuffer instances = device->CreateBuffer(kInstances * sizeof(GpuCull::Instance),
+                                             gpu::kBufferUsageStorage, true);
+  gpu::GpuBuffer commands = device->CreateBuffer(kInstances * sizeof(GpuCull::Command),
+                                            gpu::kBufferUsageStorage, true);
+  gpu::GpuBuffer counts = device->CreateBuffer(16, gpu::kBufferUsageStorage, true);
+  gpu::GpuBuffer reproject = device->CreateBuffer(sizeof(Mat4), gpu::kBufferUsageUniform, true);
   if (!instances.mapped || !commands.mapped || !counts.mapped || !reproject.mapped) {
     return Fail("host-visible buffer creation failed");
   }
   // The occlusion test is off, but the descriptor still has to be a live image
   // or the dispatch reads an unwritten binding.
-  GpuImage hiz = device->CreateImage2D(Format::kR32Float, {1, 1}, kTextureUsageSampled);
-  device->ImmediateSubmit([&](CommandList& cmd) {
-    cmd.Barrier(Transition(hiz, ResourceState::kUndefined, ResourceState::kShaderReadAll));
+  gpu::GpuImage hiz = device->CreateImage2D(gpu::Format::kR32Float, {1, 1}, gpu::kTextureUsageSampled);
+  device->ImmediateSubmit([&](gpu::CommandList& cmd) {
+    cmd.Barrier(gpu::Transition(hiz, gpu::ResourceState::kUndefined, gpu::ResourceState::kShaderReadAll));
   });
 
   GpuCull::Instance* inst = static_cast<GpuCull::Instance*>(instances.mapped);
@@ -154,11 +155,11 @@ int main() {
   push.misc[1] = 1;  // frustum on
   push.misc[2] = 0;  // occlusion off: no hi-z to bind
 
-  device->ImmediateSubmit([&](CommandList& cmd) {
+  device->ImmediateSubmit([&](gpu::CommandList& cmd) {
     cmd.BindPipeline(pipeline);
-    cmd.BindTransient(0, {Bind::StorageBuffer(0, instances), Bind::StorageBuffer(1, commands),
-                          Bind::StorageBuffer(2, counts), Bind::Sampled(3, hiz),
-                          Bind::Uniform(4, reproject, 0, sizeof(Mat4))});
+    cmd.BindTransient(0, {gpu::Bind::StorageBuffer(0, instances), gpu::Bind::StorageBuffer(1, commands),
+                          gpu::Bind::StorageBuffer(2, counts), gpu::Bind::Sampled(3, hiz),
+                          gpu::Bind::Uniform(4, reproject, 0, sizeof(Mat4))});
     cmd.Push(push);
     cmd.Dispatch(1, 1, 1);
   });

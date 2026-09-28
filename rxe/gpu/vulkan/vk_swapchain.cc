@@ -4,7 +4,7 @@
 #include "foundation/math/scalar.h"
 #include "rxe/gpu/vulkan/vk_backend.h"
 
-namespace rx::render::vk {
+namespace rx::gpu::vk {
 
 base::UniquePointer<VulkanSwapchain> VulkanSwapchain::Create(VulkanDevice& device, u32 width,
                                                          u32 height, bool vsync, bool hdr) {
@@ -223,4 +223,4 @@ AcquireResult VulkanSwapchain::AcquireSecond(u32 slot, u32* out_image_index) {
   }
 }
 
-}  // namespace rx::render::vk
+}  // namespace rx::gpu::vk
