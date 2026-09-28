@@ -1,0 +1,26 @@
+# Include violations that existed when the lint landed. Fix one,
+# then delete its line. Format: <rule> <including file> <included file>
+entity-free engine/net/bubble.h engine/ecs/world.h
+entity-free engine/net/bubble.h engine/scene/components.h
+entity-free engine/net/replication.h engine/ecs/world.h
+entity-free engine/net/replication.h engine/scene/components.h
+entity-free engine/net/session.cc engine/scene/components.h
+entity-free engine/net/session.h engine/ecs/world.h
+undeclared engine/inventory/item_catalog.h engine/physics/shape_desc.h
+undeclared engine/weather/weather.cc engine/render/atmosphere/lightning_envelope.h
+undeclared engine/weather/weather.h engine/render/atmosphere/cloudscape_types.h
+undeclared engine/weather/weather.h engine/render/core/settings.h
+undeclared runtime/scene_authoring.cc runtime/scene_authoring.h
+undeclared test/adaptive_water_test.cc engine/render/geometry/adaptive_water.h
+undeclared test/cloth_collision_test.cc engine/physics/cloth_collision.h
+undeclared test/hair_bsdf_test.cc engine/render/pipeline/hair_material.h
+undeclared test/human_brdf_test.cc engine/render/pipeline/human_material.h
+undeclared test/instance_store_test.cc engine/render/geometry/instance_store.h
+undeclared test/instance_store_test.cc engine/render/rhi/swapchain.h
+undeclared test/procedural_grass_test.cc engine/render/geometry/procedural_grass.h
+undeclared test/rcgi_history_test.cc engine/render/gi/rcgi_history.h
+undeclared test/rcgi_interior_test.cc engine/render/gi/rcgi_interior.h
+undeclared test/rt_instance_cull_test.cc engine/render/gi/rt_instance_cull.h
+undeclared test/rt_slot_tracker_test.cc engine/render/gi/rt_slot_tracker.h
+undeclared test/scene_authoring_test.cc runtime/scene_authoring.h
+undeclared test/settings_ini_test.cc engine/render/core/settings_ini.h

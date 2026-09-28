@@ -1374,6 +1374,19 @@ function(rx_forbid_exceptions dir)
 endfunction()
 rx_forbid_exceptions(${CMAKE_CURRENT_SOURCE_DIR})
 
+# The include lint (docs/STRUCTURE.md): every target's includes must resolve to
+# itself or to a target it links, plus the layering rules on top.
+include(${CMAKE_CURRENT_SOURCE_DIR}/cmake/module_graph.cmake)
+rx_write_module_graph()
+if(RX_BUILD_TESTS)
+  find_package(Python3 COMPONENTS Interpreter)
+  if(Python3_FOUND)
+    add_test(NAME checkincludes COMMAND Python3::Interpreter
+      ${CMAKE_CURRENT_SOURCE_DIR}/tools/checkincludes/checkincludes.py
+      ${CMAKE_BINARY_DIR}/modules.json)
+  endif()
+endif()
+
 # install()/export rules, generated last so every module target (and the
 # RX_INSTALL_* feature flags the modules set) already exists.
 if(RX_INSTALL)
