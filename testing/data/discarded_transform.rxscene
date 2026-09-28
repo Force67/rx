@@ -5,7 +5,7 @@ rxscene 1
 # BuildSceneShapes refuse the file, so the anchor solve never runs there and the
 # most important of the three cases below could not fire.
 #
-#   rx --validate test/data/discarded_transform.rxscene --json
+#   rx --validate testing/data/discarded_transform.rxscene --json
 #
 # Three entities contradict the pass that places them and three warnings are
 # expected. The other two entities agree with it, which is what a SaveScene

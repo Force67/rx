@@ -12,3 +12,16 @@ rx_add_module(weather
   thunder_synth.cc
 )
 target_link_libraries(rx_weather PUBLIC rx::foundation rx::render rx::audio)
+
+if(RX_BUILD_TESTS)
+  # rx::weather unit tests: pure CPU logic (deterministic scheduling, region
+  # restriction, transition blending, scripted override, surface + wind + lightning
+  # integrals), no GPU, so plain `ctest` runs them everywhere.
+  add_executable(weather_test weather_test.cc)
+  target_link_libraries(weather_test PRIVATE rx::weather rx::foundation)
+  add_test(NAME weather_test COMMAND weather_test)
+
+  add_executable(thunder_synth_test thunder_synth_test.cc)
+  target_link_libraries(thunder_synth_test PRIVATE rx::weather rx::audio rx::foundation)
+  add_test(NAME thunder_synth_test COMMAND thunder_synth_test)
+endif()

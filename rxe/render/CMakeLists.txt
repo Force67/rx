@@ -540,3 +540,262 @@ foreach(sym pathtrace_cs_hlsl recon_gbuffer_cs_hlsl pathtrace_gbuffer_cs_hlsl)
 endforeach()
 
 rx_embed_shaders(rx_render ${RX_RENDER_SHADERS})
+
+if(RX_BUILD_TESTS)
+  add_executable(instance_store_test geometry/instance_store_test.cc)
+  target_link_libraries(instance_store_test PRIVATE rx::render rx::foundation)
+  add_test(NAME instance_store_test COMMAND instance_store_test)
+
+  add_executable(settings_ini_test core/settings_ini_test.cc)
+  target_link_libraries(settings_ini_test PRIVATE rx::render rx::foundation)
+  add_test(NAME settings_ini_test COMMAND settings_ini_test)
+
+  # Character surface model: the neutral-parity contract, control independence,
+  # terminator energy, tier monotonicity. Pure CPU (the mirror of
+  # human_brdf.hlsli), so plain `ctest` runs it everywhere.
+  add_executable(human_brdf_test pipeline/human_brdf_test.cc)
+  target_link_libraries(human_brdf_test PRIVATE rx::render rx::foundation)
+  add_test(NAME human_brdf_test COMMAND human_brdf_test)
+
+  # Hair BSDF: energy over the sphere, reciprocity, pigment coupling, multiple
+  # scattering behaviour, tier monotonicity. Pure CPU (the mirror of
+  # hair_bsdf.hlsli), so plain `ctest` runs it everywhere.
+  add_executable(hair_bsdf_test pipeline/hair_bsdf_test.cc)
+  target_link_libraries(hair_bsdf_test PRIVATE rx::render rx::foundation)
+  add_test(NAME hair_bsdf_test COMMAND hair_bsdf_test)
+
+  add_executable(procedural_grass_test geometry/procedural_grass_test.cc)
+  target_link_libraries(procedural_grass_test PRIVATE rx::render rx::foundation)
+  add_test(NAME procedural_grass_test COMMAND procedural_grass_test)
+
+  # Solid-angle TLAS instance culler: the distance/angle predicate, the
+  # time-sliced group sweep, teleport accept-all and generation invalidation.
+  # Pure CPU logic (no GPU), so it always runs under plain ctest.
+  add_executable(rt_instance_cull_test gi/rt_instance_cull_test.cc)
+  target_link_libraries(rt_instance_cull_test PRIVATE rx::render rx::foundation)
+  add_test(NAME rt_instance_cull_test COMMAND rt_instance_cull_test)
+
+  # RCGI leak/occlusion hardening helpers: interior-volume classification and the
+  # probe-relocation offset packing round trip (header-only, mirrors the shader).
+  add_executable(rcgi_interior_test gi/rcgi_interior_test.cc)
+  target_link_libraries(rcgi_interior_test PRIVATE rx::render rx::foundation)
+  add_test(NAME rcgi_interior_test COMMAND rcgi_interior_test)
+
+  add_executable(rcgi_history_test gi/rcgi_history_test.cc)
+  target_link_libraries(rcgi_history_test PRIVATE rx::render rx::foundation)
+  add_test(NAME rcgi_history_test COMMAND rcgi_history_test)
+
+  # Async-TLAS slot validity bookkeeping: build/read slot selection, unbuilt-slot
+  # fallback, and BLAS-revision invalidation. Header-only pure logic (no GPU).
+  add_executable(rt_slot_tracker_test gi/rt_slot_tracker_test.cc)
+  target_link_libraries(rt_slot_tracker_test PRIVATE rx::render rx::foundation)
+  add_test(NAME rt_slot_tracker_test COMMAND rt_slot_tracker_test)
+endif()
+
+# GPU acceptance tests. They skip cleanly (null backend) when no Vulkan driver is
+# present, so plain `ctest` passes; a real run under vkrun proves the GPU path.
+if(RX_BUILD_TESTS AND (RX_RHI_VULKAN OR RX_RHI_D3D12))
+  add_executable(adaptive_water_test geometry/adaptive_water_test.cc)
+  target_link_libraries(adaptive_water_test PRIVATE rx::render rx::foundation)
+  add_test(NAME adaptive_water_test COMMAND adaptive_water_test)
+
+  # Texture-space decal baking: bake a stamp into a receiver's tile, read the
+  # atlas back, then evict the tile and prove the journal replays it. Skips the
+  # GPU half without a driver (the projector math still runs).
+  add_executable(decal_bake_test texturing/decal_bake_test.cc)
+  target_link_libraries(decal_bake_test PRIVATE rx::render rx::foundation)
+  add_test(NAME decal_bake_test COMMAND decal_bake_test)
+
+  # Offscreen RHI acceptance test: a surfaceless Vulkan device that clears+draws a
+  # triangle into a GpuImage and reads the pixels back through the RHI.
+  add_executable(offscreen_test offscreen_test.cc)
+  target_link_libraries(offscreen_test PRIVATE rx::render rx::foundation)
+  rx_embed_shaders(offscreen_test
+    offscreen_tri.vs.slang
+    offscreen_tri.ps.slang)
+  add_test(NAME offscreen_test COMMAND offscreen_test)
+
+  # Heightfield fluid solver: fills a bowl behind a ridge, steps the GPU sim,
+  # checks volume conservation + no NaNs, then removes the ridge and asserts the
+  # dam-break flood settles level. Skips (null backend) with no driver; the real
+  # GPU path runs under vkrun.
+  add_executable(fluid_sim_test geometry/fluid_sim_test.cc)
+  target_link_libraries(fluid_sim_test PRIVATE rx::render rx::foundation)
+  add_test(NAME fluid_sim_test COMMAND fluid_sim_test)
+
+  # Acceleration-structure compaction: builds a BLAS with allow_compaction,
+  # queries the compacted size across a submit boundary, compact-copies into a
+  # tight structure and builds a TLAS over it. Skips (exit 0) with no driver or
+  # no ray tracing; the real path runs under vkrun.
+  add_executable(compaction_test compaction_test.cc)
+  target_link_libraries(compaction_test PRIVATE rx::render rx::foundation)
+  add_test(NAME compaction_test COMMAND compaction_test)
+
+  add_executable(rt_failure_test rt_failure_test.cc)
+  target_link_libraries(rt_failure_test PRIVATE rx::render rx::foundation)
+  add_test(NAME rt_failure_test COMMAND rt_failure_test)
+
+  add_executable(raytracing_test gi/raytracing_test.cc)
+  target_link_libraries(raytracing_test PRIVATE rx::render rx::foundation)
+  rx_embed_shaders(raytracing_test gi/rt_query.cs.hlsl)
+  add_test(NAME raytracing_test COMMAND raytracing_test)
+  set_tests_properties(raytracing_test PROPERTIES FAIL_REGULAR_EXPRESSION "VUID|hazard detected")
+
+  add_executable(recon_temporal_test recon_temporal_test.cc)
+  target_link_libraries(recon_temporal_test PRIVATE rx::render rx::foundation)
+  target_include_directories(recon_temporal_test PRIVATE ${CMAKE_BINARY_DIR}/generated)
+  add_test(NAME recon_temporal_test COMMAND recon_temporal_test)
+  set_tests_properties(recon_temporal_test PROPERTIES FAIL_REGULAR_EXPRESSION "VUID|hazard detected")
+
+  add_executable(path_sampling_test path_sampling_test.cc)
+  target_link_libraries(path_sampling_test PRIVATE rx::render rx::foundation)
+  target_include_directories(path_sampling_test PRIVATE ${CMAKE_BINARY_DIR}/generated)
+  set(RX_SHADER_INCLUDE_DIRS ${PROJECT_SOURCE_DIR}/rxe/render/shaders)
+  set(RX_SHADER_DEPS_path_continue_cs_hlsl shaders/path_continue.hlsli)
+  rx_embed_shaders(path_sampling_test path_continue.cs.hlsl)
+  unset(RX_SHADER_INCLUDE_DIRS)
+  add_test(NAME path_sampling_test COMMAND path_sampling_test)
+  set_tests_properties(path_sampling_test PROPERTIES FAIL_REGULAR_EXPRESSION "VUID|hazard detected")
+
+  add_executable(path_alpha_test path_alpha_test.cc)
+  target_link_libraries(path_alpha_test PRIVATE rx::render rx::foundation)
+  set(RX_SHADER_INCLUDE_DIRS ${PROJECT_SOURCE_DIR}/rxe/render/shaders
+      ${PROJECT_SOURCE_DIR}/third_party/NRD/Shaders)
+  set(path_alpha_shaders path_alpha_recon.cs.hlsl path_alpha_di.cs.hlsl)
+  set(RX_SHADER_DEPS_path_alpha_recon_cs_hlsl shaders/gi/recon_gbuffer.cs.hlsl)
+  set(RX_SHADER_DEPS_path_alpha_di_cs_hlsl shaders/gi/recon_restir_di_spatial.cs.hlsl)
+  if(RX_NRD)
+    list(APPEND path_alpha_shaders path_alpha_nrd.cs.hlsl)
+    set(RX_SHADER_DEPS_path_alpha_nrd_cs_hlsl shaders/gi/pathtrace_gbuffer.cs.hlsl)
+  endif()
+  foreach(shader IN LISTS path_alpha_shaders)
+    get_filename_component(name ${shader} NAME)
+    string(MAKE_C_IDENTIFIER ${name} symbol)
+    list(APPEND RX_SHADER_DEPS_${symbol} shaders/rt_geometry.hlsli
+        shaders/material_record.hlsli shaders/path_continue.hlsli
+        shaders/path_motion.hlsli)
+  endforeach()
+  rx_embed_shaders(path_alpha_test ${path_alpha_shaders})
+  unset(RX_SHADER_INCLUDE_DIRS)
+  add_test(NAME path_alpha_test COMMAND path_alpha_test)
+  set_tests_properties(path_alpha_test PROPERTIES FAIL_REGULAR_EXPRESSION "VUID|hazard detected")
+
+  add_executable(upscaler_motion_test upscaler_motion_test.cc)
+  target_link_libraries(upscaler_motion_test PRIVATE rx::render rx::foundation)
+  add_test(NAME upscaler_motion_test COMMAND upscaler_motion_test)
+  set_tests_properties(upscaler_motion_test PROPERTIES FAIL_REGULAR_EXPRESSION "VUID|hazard detected|dispatch failed")
+  if(RX_DLSS)
+    add_test(NAME upscaler_motion_test_dlss COMMAND upscaler_motion_test)
+    set_tests_properties(upscaler_motion_test_dlss PROPERTIES
+      ENVIRONMENT "RX_TEST_UPSCALER=dlss" FAIL_REGULAR_EXPRESSION "VUID|hazard detected|evaluate failed")
+  endif()
+
+  add_executable(recon_atrous_test recon_atrous_test.cc)
+  target_link_libraries(recon_atrous_test PRIVATE rx::render rx::foundation)
+  target_include_directories(recon_atrous_test PRIVATE ${CMAKE_BINARY_DIR}/generated)
+  add_test(NAME recon_atrous_test COMMAND recon_atrous_test)
+  set_tests_properties(recon_atrous_test PROPERTIES FAIL_REGULAR_EXPRESSION "VUID|hazard detected")
+
+  add_executable(cloud_lighting_test cloud_lighting_test.cc)
+  target_link_libraries(cloud_lighting_test PRIVATE rx::render rx::foundation)
+  add_test(NAME cloud_lighting_test COMMAND cloud_lighting_test)
+
+  add_executable(lens_flare_test lens_flare_test.cc)
+  target_link_libraries(lens_flare_test PRIVATE rx::render rx::foundation)
+  add_test(NAME lens_flare_test COMMAND lens_flare_test)
+  set_tests_properties(lens_flare_test PROPERTIES FAIL_REGULAR_EXPRESSION "VUID|hazard detected")
+
+  add_executable(post_sampling_test post_sampling_test.cc)
+  target_link_libraries(post_sampling_test PRIVATE rx::render rx::foundation)
+  target_include_directories(post_sampling_test PRIVATE ${CMAKE_BINARY_DIR}/generated)
+  add_test(NAME post_sampling_test COMMAND post_sampling_test)
+  set_tests_properties(post_sampling_test PROPERTIES FAIL_REGULAR_EXPRESSION "VUID|hazard detected")
+
+  add_executable(path_motion_test path_motion_test.cc)
+  target_link_libraries(path_motion_test PRIVATE rx::render rx::foundation)
+  set(RX_SHADER_INCLUDE_DIRS ${PROJECT_SOURCE_DIR}/rxe/render/shaders
+      ${PROJECT_SOURCE_DIR}/third_party/NRD/Shaders)
+  set(path_motion_shaders path_motion_recon.cs.hlsl)
+  set(RX_SHADER_DEPS_path_motion_recon_cs_hlsl shaders/gi/recon_gbuffer.cs.hlsl)
+  if(RX_NRD)
+    list(APPEND path_motion_shaders path_motion_nrd.cs.hlsl)
+    set(RX_SHADER_DEPS_path_motion_nrd_cs_hlsl shaders/gi/pathtrace_gbuffer.cs.hlsl)
+  endif()
+  foreach(shader IN LISTS path_motion_shaders)
+    get_filename_component(name ${shader} NAME)
+    string(MAKE_C_IDENTIFIER ${name} symbol)
+    list(APPEND RX_SHADER_DEPS_${symbol} shaders/rt_geometry.hlsli
+        shaders/material_record.hlsli shaders/path_continue.hlsli
+        shaders/path_motion.hlsli)
+  endforeach()
+  rx_embed_shaders(path_motion_test ${path_motion_shaders})
+  unset(RX_SHADER_INCLUDE_DIRS)
+  add_test(NAME path_motion_test COMMAND path_motion_test)
+  set_tests_properties(path_motion_test PROPERTIES FAIL_REGULAR_EXPRESSION "VUID|hazard detected")
+
+  add_executable(path_material_test path_material_test.cc)
+  target_link_libraries(path_material_test PRIVATE rx::render rx::foundation)
+  add_test(NAME path_material_test COMMAND path_material_test)
+  set_tests_properties(path_material_test PROPERTIES FAIL_REGULAR_EXPRESSION "VUID|hazard detected")
+
+  # Cull bounding radius: runs cull.cs over a rotated, non-uniformly scaled
+  # instance straddling a frustum plane, the one case where reading the model
+  # matrix by row instead of by column under-reports the radius and culls
+  # visible geometry. Skips (exit 0) with no driver; the real path runs under
+  # vkrun.
+  add_executable(cull_bounds_test cull_bounds_test.cc)
+  target_link_libraries(cull_bounds_test PRIVATE rx::render rx::foundation)
+  target_include_directories(cull_bounds_test PRIVATE ${CMAKE_BINARY_DIR}/generated)
+  add_test(NAME cull_bounds_test COMMAND cull_bounds_test)
+
+  # Upload batch: buffers created inside Begin/FlushUploadBatch (nested scopes,
+  # implicit flush via ImmediateSubmit, soft-budget auto-submit) verified by
+  # readback. Skips (exit 0) with no driver; the real path runs under vkrun.
+  add_executable(upload_batch_test upload_batch_test.cc)
+  target_link_libraries(upload_batch_test PRIVATE rx::render rx::foundation)
+  add_test(NAME upload_batch_test COMMAND upload_batch_test)
+  # Validation on, and any VUID fails the test: the deferred-destroy case can
+  # only report an early free as "destroyed while in use", not as a bad readback.
+  set_tests_properties(upload_batch_test PROPERTIES
+    ENVIRONMENT "RX_VALIDATION=1"
+    FAIL_REGULAR_EXPRESSION "VUID")
+
+  # The same acceptance tests against the d3d12 backend (vkd3d on linux). The
+  # tests read RX_RHI to pick the backend and skip cleanly when the driver or
+  # feature is unavailable.
+  if(RX_RHI_D3D12)
+    foreach(name IN ITEMS cloud_lighting_test offscreen_test compaction_test)
+      add_test(NAME ${name}_d3d12 COMMAND ${name})
+      set_tests_properties(${name}_d3d12 PROPERTIES ENVIRONMENT "RX_RHI=d3d12")
+    endforeach()
+    foreach(name IN ITEMS lens_flare_test post_sampling_test recon_atrous_test raytracing_test
+        recon_temporal_test path_alpha_test path_sampling_test)
+      add_test(NAME ${name}_d3d12 COMMAND ${name})
+      set_tests_properties(${name}_d3d12 PROPERTIES
+        ENVIRONMENT "RX_RHI=d3d12" FAIL_REGULAR_EXPRESSION "VUID|hazard detected")
+    endforeach()
+  endif()
+
+  # Unsupported coverage is a CTest skip. The strict renderer gate rejects
+  # skips, while the general suite can still run on machines without a GPU.
+  foreach(name IN ITEMS offscreen_test recon_temporal_test recon_atrous_test
+      cloud_lighting_test lens_flare_test post_sampling_test path_alpha_test path_sampling_test
+      raytracing_test path_motion_test path_material_test upscaler_motion_test
+      rt_failure_test rt_slot_tracker_test rt_instance_cull_test)
+    foreach(suffix IN ITEMS "" "_d3d12" "_dlss")
+      if(TEST ${name}${suffix})
+        set_tests_properties(${name}${suffix} PROPERTIES
+          LABELS "renderer"
+          SKIP_RETURN_CODE 77
+          TIMEOUT 120
+          FAIL_REGULAR_EXPRESSION "VUID|hazard detected|evaluate failed|dispatch failed")
+      endif()
+    endforeach()
+  endforeach()
+
+  find_package(Python3 QUIET COMPONENTS Interpreter)
+  if(Python3_Interpreter_FOUND)
+    add_test(NAME renderer_gate_test
+      COMMAND ${Python3_EXECUTABLE} ${PROJECT_SOURCE_DIR}/testing/renderer/test_check.py)
+  endif()
+endif()

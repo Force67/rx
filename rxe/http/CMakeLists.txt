@@ -31,3 +31,12 @@ endif()
 if(WIN32)
   target_link_libraries(rx_http PRIVATE ws2_32)
 endif()
+
+if(RX_BUILD_TESTS)
+  # rx::http unit tests: url parsing, response-head parsing, chunked decoding and
+  # the refusals that happen before a socket is opened. Nothing here touches the
+  # network; the live fetch inside it only runs with RX_HTTP_LIVE set.
+  add_executable(http_test http_test.cc)
+  target_link_libraries(http_test PRIVATE rx::http rx::foundation)
+  add_test(NAME http_test COMMAND http_test)
+endif()

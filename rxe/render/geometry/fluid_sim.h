@@ -78,7 +78,7 @@ class FluidSim {
   }
 
  private:
-  friend struct FluidSimProbe;  // readback seam for test/fluid_sim_test.cc
+  friend struct FluidSimProbe;  // readback seam for rxe/render/geometry/fluid_sim_test.cc
 
   // Mirrors the shader's GpuParams CB the surface renderer maps world XZ with.
   struct GpuParams {
@@ -114,7 +114,7 @@ class FluidSim {
   bool have_domain_ = false;  // last AddToGraph was handed a domain
 };
 
-// Readback seam for test/fluid_sim_test.cc: exposes the solver's output images
+// Readback seam for rxe/render/geometry/fluid_sim_test.cc: exposes the solver's output images
 // (which the public API only surfaces as sampled views) so a test can
 // ReadbackImage them. Not part of the renderer/demo API.
 struct FluidSimProbe {

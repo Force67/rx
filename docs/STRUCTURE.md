@@ -142,16 +142,22 @@ rxe/physics/
 ```
 
 ```cmake
-rx_module(physics
-  SOURCES      physics_world.cc kinema_jolt.cc cloth_collision.cc
-  DEPS         foundation asset                           # public
-  PRIVATE_DEPS jolt kinema
-  TESTS        physics_world_test.cc
-  GPU_TESTS    )                                           # labeled "gpu"
+rx_add_module(physics physics_world.cc kinema_jolt.cc cloth_collision.cc)
+target_link_libraries(rx_physics PUBLIC rx::foundation rx::asset)
+target_link_libraries(rx_physics PRIVATE $<BUILD_INTERFACE:Jolt>)
+
+if(RX_BUILD_TESTS)
+  add_executable(cloth_collision_test cloth_collision_test.cc)
+  target_link_libraries(cloth_collision_test PRIVATE rx::physics rx::foundation)
+  add_test(NAME cloth_collision_test COMMAND cloth_collision_test)
+endif()
 ```
 
-- The folder a module lives in fixes what it may depend on. Configure fails
-  when a dependency points to a later folder or closes a cycle.
+- A module's tests are registered in its own `CMakeLists.txt`, below the
+  module. Plain `add_executable` blocks, not a wrapper: tests differ in guards,
+  shaders and properties, and a wrapper would have to grow every one of them.
+- The folder a module lives in fixes what it may depend on. The include lint
+  fails the test suite when a dependency points to a later folder.
 - Configure writes the target graph to `build/<preset>/modules.json`
   (`cmake/module_graph.cmake`).
   `tools/checkincludes` runs as a ctest. Every quoted include must resolve to
@@ -164,8 +170,9 @@ rx_module(physics
   `_sdl3.cc`, `_android.cc`, `_vulkan.cc`, `_d3d12.cc`. Native Vulkan calls
   outside `gpu/vulkan` (the NRD, DLSS and FSR3 glue, ugui's backend) live only
   in `_vulkan.cc` files.
-- GPU tests carry the `gpu` label. `vkrun ctest -L gpu` runs them for real;
-  plain `ctest` still skips them, but now visibly by label.
+- GPU renderer tests carry the `renderer` label and exit 77 (a CTest skip) when
+  the hardware is missing. `vkrun ctest -L renderer` runs them for real; plain
+  `ctest` reports them as skipped rather than passed.
 
 ## Foundation
 
@@ -358,7 +365,7 @@ once per process has to live in exactly one DSO:
 | `runtime/engine_context.h` | god object passed to every demo | phase 6, with the rest of `runtime/` |
 | `fly_camera` | duplicated in `runtime/` and `apps/editor/` | done (2b): `scene::FlyCamera`, fed a resolved `FlyCameraInput` |
 | `core/features.def` | one file every feature edits | phase 5: per-module flags self-register, which needs the one-per-process registry |
-| `CMakeLists.txt` | 1381 lines, registers every test centrally | phase 4, with tests next to their code |
+| `CMakeLists.txt` | 1381 lines, registers every test centrally | done (4b): each module registers its own |
 | `anim/locomotion` vs `engine/locomotion` | two modules called locomotion | done (2b): `anim::ProceduralGait` |
 
 ## Phases
@@ -387,7 +394,10 @@ and after.
      namespaces unchanged), replication gets its own plugin folder, includes
      are spelled from the repository root, and `engine/assets` plus `config/`
      become `rxe/resources/`.
-   - 4b: tests move next to their code (`rx_module(... TESTS)`).
+   - 4b (done): tests move next to their code and register in their module's
+     `CMakeLists.txt`; shared fixtures go to `testing/data`, the renderer gate
+     and feature gym tour to `testing/`. The top-level `CMakeLists.txt` drops
+     from 1400 lines to 600.
    - 4c: the grouping inside `rxe/`: `gpu/` out of `render`, `net/` gathering
      `http` and `rpc`, `ui/ugui`; `render/util` dissolves into `gpu/rhi`,
      `asset` and `ui/imgui`.

@@ -13,3 +13,12 @@ rx_add_module(script
 # directly, so this stays a low-level dependency of them, not the reverse. Only
 # core + ecs (the shared component backbone the HandlerContext points at).
 target_link_libraries(rx_script PUBLIC rx::foundation rx::ecs)
+
+if(RX_BUILD_TESTS)
+  # rx::script unit tests: the portable value/string primitives and the handler
+  # registry driven end-to-end against a real ecs::World, with no runtime, GPU or
+  # transport, so plain `ctest` runs them everywhere.
+  add_executable(script_test script_test.cc)
+  target_link_libraries(script_test PRIVATE rx::scene rx::script rx::ecs rx::foundation)
+  add_test(NAME script_test COMMAND script_test)
+endif()

@@ -4,7 +4,7 @@ rxscene 1
 # placement. One per pass, because a pass stops at its first error, and grids,
 # prefabs and anchors are three passes - so all three report from one file.
 #
-#   rx --validate test/data/broken_layout.rxscene --json
+#   rx --validate testing/data/broken_layout.rxscene --json
 #
 # The anchor failures that need the placement itself (a cycle, a target with
 # nothing to measure) each need their own file: both are found before any

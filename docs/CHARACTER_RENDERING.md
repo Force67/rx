@@ -43,7 +43,7 @@ resets to the region presets.
 | Reference comparison pass | `rxe/render/post/reference_compare.{h,cc}` |
 | The bench | `runtime/demo_lookdev.{h,cc}` (`--demo lookdev`) |
 | Residual fitting | `tools/fit_residual.py` |
-| Regression test | `test/human_brdf_test.cc` |
+| Regression test | `rxe/render/pipeline/human_brdf_test.cc` |
 
 ## 1. The one contract that matters
 
@@ -55,7 +55,7 @@ This is not a nicety. Without it, "enable the character model" silently
 re-shades every material that opted in, and every fit made before the change is
 worthless after it. It is defended in two places:
 
-- `test/human_brdf_test.cc` diffs the CPU mirror against the stock BRDF over a
+- `rxe/render/pipeline/human_brdf_test.cc` diffs the CPU mirror against the stock BRDF over a
   sweep of roughness, view and light directions, *including a non-zero light
   solid angle*, which is what caught `light_shape_response` re-shading every
   highlight in the frame when it was on by default.

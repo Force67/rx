@@ -1,7 +1,7 @@
 // Morph target acceptance test, in two parts.
 //
 // CPU: imports the Khronos AnimatedMorphCube (CC0, committed at
-// test/data/AnimatedMorphCube.glb) and checks the imported targets and weight
+// testing/data/AnimatedMorphCube.glb) and checks the imported targets and weight
 // animation, plus target naming/lookup and STEP sampling through a tiny
 // generated glTF (the cube ships no targetNames).
 //

@@ -40,3 +40,11 @@ if(ANDROID)
   target_sources(rx_window PRIVATE window_android.cc)
   target_link_libraries(rx_window PUBLIC volk android)
 endif()
+
+if(RX_BUILD_TESTS AND TARGET SDL3::SDL3)
+  # The other half: SDL's own event queue driven through the real backend, so
+  # the normalized-to-pixel translation is covered too. Skips without a display.
+  add_executable(input_touch_sdl_test input_touch_sdl_test.cc)
+  target_link_libraries(input_touch_sdl_test PRIVATE rx::window rx::events rx::foundation SDL3::SDL3)
+  add_test(NAME input_touch_sdl_test COMMAND input_touch_sdl_test)
+endif()

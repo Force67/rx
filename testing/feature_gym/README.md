@@ -15,7 +15,7 @@ errors fail the tour even if the captures look plausible. The full process log i
 saved as `process.log`, including on timeout.
 
 ```sh
-python3 tests/feature_gym/tour.py --runner vkrun
+python3 testing/feature_gym/tour.py --runner vkrun
 ```
 
 Add `--no-rt` to run the RCGI stop through the software SDF tracer.

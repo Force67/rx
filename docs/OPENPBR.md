@@ -155,10 +155,10 @@ verbatim into a field it documents as nanometres, so rx multiplies by 1000.
 
 ## Tests
 
-- `test/openpbr_test.cc` covers the MaterialX mapping, the unit and
+- `rxe/importers/materialx/openpbr_test.cc` covers the MaterialX mapping, the unit and
   anisotropy conversions, the seeded spec defaults, and that a legacy
   `standard_surface` document is not reinterpreted as OpenPBR.
-- `test/usd_scene_test.cc` covers the USD path end to end on a stage it writes
+- `rxe/importers/usd/usd_scene_test.cc` covers the USD path end to end on a stage it writes
   itself.
 
 `tools/get_openpbr_samples.sh` pulls the 83 Apache-2.0 example materials from

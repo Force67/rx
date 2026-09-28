@@ -18,3 +18,12 @@ if(RX_USD)
   set_source_files_properties(usd_loader.cc PROPERTIES
     COMPILE_DEFINITIONS "RX_HAVE_USD;nsel_CONFIG_SELECT_EXPECTED=1")
 endif()
+
+if(RX_BUILD_TESTS AND RX_USD)
+  # USD import: composition (a reference arc into a second layer), the z-up /
+  # metersPerUnit normalization and the UsdPreviewSurface / OpenPBR mappings, on a
+  # usda fixture the test writes itself.
+  add_executable(usd_scene_test usd_scene_test.cc)
+  target_link_libraries(usd_scene_test PRIVATE rx::usd rx::asset rx::foundation)
+  add_test(NAME usd_scene_test COMMAND usd_scene_test)
+endif()

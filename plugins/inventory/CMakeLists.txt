@@ -19,3 +19,13 @@ if(TARGET rx_physics)
   )
   target_link_libraries(rx_inventory_world PUBLIC rx::inventory rx::physics rx::scene)
 endif()
+
+if(RX_BUILD_TESTS AND RX_JOLT)
+  # rx::inventory: stacking/capacity/weight, transfer, equip/unequip, then the
+  # world-item lifecycle on real Jolt (drop -> settle -> pick up / hibernate /
+  # wake) and save/load roundtrips for inventories AND world items. Headless.
+  add_executable(inventory_test inventory_test.cc)
+  target_link_libraries(inventory_test PRIVATE
+    rx::inventory rx::inventory_world rx::physics rx::scene rx::ecs rx::foundation)
+  add_test(NAME inventory_test COMMAND inventory_test)
+endif()

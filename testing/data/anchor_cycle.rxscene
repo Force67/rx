@@ -4,7 +4,7 @@ rxscene 1
 # no order to resolve them in, so the load says so and names the loop instead of
 # picking one and placing the other against a position that has not settled.
 #
-#   rx --validate test/data/anchor_cycle.rxscene --json
+#   rx --validate testing/data/anchor_cycle.rxscene --json
 
 entity
 Name.value = "Lower"

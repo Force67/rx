@@ -153,7 +153,7 @@ if(RX_BUILD_TESTS)
       WORKING_DIRECTORY ${PROJECT_SOURCE_DIR})
   endforeach()
   add_test(NAME scene_validate_broken
-    COMMAND rx --validate ${PROJECT_SOURCE_DIR}/test/data/broken.rxscene --json
+    COMMAND rx --validate ${PROJECT_SOURCE_DIR}/testing/data/broken.rxscene --json
     WORKING_DIRECTORY ${PROJECT_SOURCE_DIR})
   set_tests_properties(scene_validate_broken PROPERTIES WILL_FAIL TRUE)
 
@@ -179,7 +179,7 @@ if(RX_BUILD_TESTS)
   # author's bug. Without this the fragment rule could silently grow to cover
   # every file and the check would be gone rather than fixed.
   add_test(NAME scene_validate_surface_without_shape
-    COMMAND rx --validate ${PROJECT_SOURCE_DIR}/test/data/broken.rxscene --json
+    COMMAND rx --validate ${PROJECT_SOURCE_DIR}/testing/data/broken.rxscene --json
     WORKING_DIRECTORY ${PROJECT_SOURCE_DIR})
   set_tests_properties(scene_validate_surface_without_shape PROPERTIES
     PASS_REGULAR_EXPRESSION "surface_without_shape.*Material with nothing to be")
@@ -190,7 +190,7 @@ if(RX_BUILD_TESTS)
   # that reported them would fire on every saved scene. Four warnings means the
   # check stopped distinguishing the two.
   add_test(NAME scene_validate_discarded_transform
-    COMMAND rx --validate ${PROJECT_SOURCE_DIR}/test/data/discarded_transform.rxscene
+    COMMAND rx --validate ${PROJECT_SOURCE_DIR}/testing/data/discarded_transform.rxscene
     WORKING_DIRECTORY ${PROJECT_SOURCE_DIR})
   set_tests_properties(scene_validate_discarded_transform PROPERTIES
     PASS_REGULAR_EXPRESSION "0 error\\(s\\), 3 warning\\(s\\)")
@@ -200,7 +200,7 @@ if(RX_BUILD_TESTS)
   # bake would divide by, so it is an error rather than a warning about an
   # odd-looking number.
   add_test(NAME scene_validate_degenerate_stretch
-    COMMAND rx --validate ${PROJECT_SOURCE_DIR}/test/data/broken.rxscene --json
+    COMMAND rx --validate ${PROJECT_SOURCE_DIR}/testing/data/broken.rxscene --json
     WORKING_DIRECTORY ${PROJECT_SOURCE_DIR})
   set_tests_properties(scene_validate_degenerate_stretch PROPERTIES
     PASS_REGULAR_EXPRESSION "degenerate_stretch.*Squashed to nothing.*Stretch.scale y is 0")
@@ -216,7 +216,7 @@ if(RX_BUILD_TESTS)
       "\"name\": \"brushed_aluminium\", \"path\": \"runtime/scenes/materials/brushed_aluminium.rxscene\"")
 
   add_test(NAME dump_materials_missing_directory
-    COMMAND rx --dump-materials ${PROJECT_SOURCE_DIR}/test/data/no_such_palette
+    COMMAND rx --dump-materials ${PROJECT_SOURCE_DIR}/testing/data/no_such_palette
     WORKING_DIRECTORY ${PROJECT_SOURCE_DIR})
   set_tests_properties(dump_materials_missing_directory PROPERTIES WILL_FAIL TRUE)
   # The two halves of the glTF reference check, which a pass/fail exit code
@@ -225,7 +225,7 @@ if(RX_BUILD_TESTS)
   # not have is the thing that fires. PASS_REGULAR_EXPRESSION ignores the exit
   # code, which is nonzero here for every other finding in that fixture.
   add_test(NAME scene_validate_model_reference
-    COMMAND rx --validate ${PROJECT_SOURCE_DIR}/test/data/broken.rxscene --json
+    COMMAND rx --validate ${PROJECT_SOURCE_DIR}/testing/data/broken.rxscene --json
     WORKING_DIRECTORY ${PROJECT_SOURCE_DIR})
   set_tests_properties(scene_validate_model_reference PROPERTIES
     PASS_REGULAR_EXPRESSION "unresolved_mesh.*TwoBoxes.gltf#mesh9.*a file that has 2")
@@ -237,7 +237,7 @@ if(RX_BUILD_TESTS)
   # prefab failures are three separate passes and share one file.
   foreach(case broken_layout anchor_cycle anchor_no_bounds prefab_cycle)
     add_test(NAME scene_validate_${case}
-      COMMAND rx --validate ${PROJECT_SOURCE_DIR}/test/data/${case}.rxscene
+      COMMAND rx --validate ${PROJECT_SOURCE_DIR}/testing/data/${case}.rxscene
       WORKING_DIRECTORY ${PROJECT_SOURCE_DIR})
     set_tests_properties(scene_validate_${case} PROPERTIES WILL_FAIL TRUE)
   endforeach()
@@ -247,25 +247,25 @@ if(RX_BUILD_TESTS)
   # that lands on the wrong entity's block is the failure mode these messages
   # exist to avoid.
   add_test(NAME scene_validate_grid_overflow
-    COMMAND rx --validate ${PROJECT_SOURCE_DIR}/test/data/broken_layout.rxscene
+    COMMAND rx --validate ${PROJECT_SOURCE_DIR}/testing/data/broken_layout.rxscene
     WORKING_DIRECTORY ${PROJECT_SOURCE_DIR})
   set_tests_properties(scene_validate_grid_overflow PROPERTIES
     PASS_REGULAR_EXPRESSION "broken_layout.rxscene:28.*Grid.of = \"Row\" names a grid of 1 cells")
 
   add_test(NAME scene_validate_prefab_missing
-    COMMAND rx --validate ${PROJECT_SOURCE_DIR}/test/data/broken_layout.rxscene
+    COMMAND rx --validate ${PROJECT_SOURCE_DIR}/testing/data/broken_layout.rxscene
     WORKING_DIRECTORY ${PROJECT_SOURCE_DIR})
   set_tests_properties(scene_validate_prefab_missing PROPERTIES
     PASS_REGULAR_EXPRESSION "Prefab.path = \"no_such_prefab.rxscene\" does not load")
 
   add_test(NAME scene_validate_anchor_dangling
-    COMMAND rx --validate ${PROJECT_SOURCE_DIR}/test/data/broken_layout.rxscene
+    COMMAND rx --validate ${PROJECT_SOURCE_DIR}/testing/data/broken_layout.rxscene
     WORKING_DIRECTORY ${PROJECT_SOURCE_DIR})
   set_tests_properties(scene_validate_anchor_dangling PROPERTIES
     PASS_REGULAR_EXPRESSION "broken_layout.rxscene:41.*names no entity in this scene")
 
   add_test(NAME scene_validate_anchor_cycle_names_loop
-    COMMAND rx --validate ${PROJECT_SOURCE_DIR}/test/data/anchor_cycle.rxscene
+    COMMAND rx --validate ${PROJECT_SOURCE_DIR}/testing/data/anchor_cycle.rxscene
     WORKING_DIRECTORY ${PROJECT_SOURCE_DIR})
   set_tests_properties(scene_validate_anchor_cycle_names_loop PROPERTIES
     PASS_REGULAR_EXPRESSION "closes a cycle \\(Lower -> Upper -> Lower\\)")
@@ -273,7 +273,7 @@ if(RX_BUILD_TESTS)
   # The guard that keeps a self-instancing prefab from expanding until memory
   # runs out, and the message that says which file closed the loop.
   add_test(NAME scene_validate_prefab_cycle_names_loop
-    COMMAND rx --validate ${PROJECT_SOURCE_DIR}/test/data/prefab_cycle.rxscene
+    COMMAND rx --validate ${PROJECT_SOURCE_DIR}/testing/data/prefab_cycle.rxscene
     WORKING_DIRECTORY ${PROJECT_SOURCE_DIR})
   set_tests_properties(scene_validate_prefab_cycle_names_loop PROPERTIES
     PASS_REGULAR_EXPRESSION "prefab_cycle_inner.rxscene:13.*instances itself")
@@ -324,4 +324,15 @@ if(TARGET rx_imgui)
   # so an edit lands in the files that ship; RX_PRESETS_DIR points it elsewhere.
   target_compile_definitions(rx PRIVATE
     RX_PRESETS_DIR_DEFAULT="${PROJECT_SOURCE_DIR}/rxe/resources/config")
+endif()
+
+if(RX_BUILD_TESTS AND TARGET viewer_scene_authoring)
+  # The .rxscene authoring passes themselves (viewer_scene_authoring, the
+  # viewer's own library in runtime/). `rx --validate` covers what a scene
+  # REFUSES; this covers what the numbers come out as, which no exit code can
+  # show. Null renderer throughout, so it needs no device even though it links
+  # rx::render for the signatures.
+  add_executable(scene_authoring_test scene_authoring_test.cc)
+  target_link_libraries(scene_authoring_test PRIVATE viewer_scene_authoring)
+  add_test(NAME scene_authoring_test COMMAND scene_authoring_test)
 endif()

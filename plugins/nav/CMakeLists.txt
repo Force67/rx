@@ -16,3 +16,12 @@ if(TARGET rx_render)
   rx_add_module(nav_viz nav_debug.cc)
   target_link_libraries(rx_nav_viz PUBLIC rx::nav rx::render)
 endif()
+
+if(RX_BUILD_TESTS)
+  # rx::nav unit tests: pure CPU logic over a synthetic terrain sampler (costed
+  # A*, entry-cost commitment, funnel, event repathing, position scoring), so
+  # plain `ctest` runs them everywhere.
+  add_executable(nav_test nav_test.cc)
+  target_link_libraries(nav_test PRIVATE rx::nav rx::scene rx::ecs rx::foundation)
+  add_test(NAME nav_test COMMAND nav_test)
+endif()

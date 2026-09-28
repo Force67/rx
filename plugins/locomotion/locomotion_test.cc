@@ -1,7 +1,7 @@
 // Jolt acceptance tests for rx::locomotion's rig + estimators
 // (docs/LOCOMOTION.md): rig build sanity, a stiff statue that holds a stand,
 // hip/knee motor-direction sign checks, unpowered collapse, and pure
-// ContactEstimator hysteresis. Style follows test/character_test.cc: hand-rolled
+// ContactEstimator hysteresis. Style follows plugins/character/character_test.cc: hand-rolled
 // Check/Near and a failure counter, plain main returning the count.
 
 #include <math.h>

@@ -9,7 +9,7 @@ namespace rx::physics {
 // Boat-type presets: fully tuned BoatDesc values (as vehicle_profiles does for
 // cars), one function per type whose doc comment states the handling signature;
 // measured orderings (draft, top speed, planing, turn rate, stability, laden vs
-// empty) are proven in test/boat_profiles_test.cc. Units follow BoatDesc:
+// empty) are proven in plugins/vehicles/boat_profiles_test.cc. Units follow BoatDesc:
 // metres/kg/s/newtons, +Z fwd, +Y up. Draft is EMERGENT from displacement, so
 // presets differ in mass and footprint to sit at different waterlines, and
 // SetCargo adds mass so a laden hull visibly sinks, turns and planes worse.

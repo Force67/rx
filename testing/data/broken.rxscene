@@ -5,7 +5,7 @@ rxscene 1
 # failures with nothing left to explain; everything here either loads and then
 # renders nothing (or the wrong thing), or is a number the loader refuses.
 #
-#   rx --validate test/data/broken.rxscene --json
+#   rx --validate testing/data/broken.rxscene --json
 #
 # The `load` finding is expected: a strict load refuses this file at the first
 # bad number (line 36), and the validator falls back to a lenient load so the
@@ -120,12 +120,12 @@ Renderable.mesh = "meshes/crate.glb"
 entity
 Name.value = "Model that is not on disk"
 Transform.position = 6 1 1
-Model.path = "test/data/NotHere.glb"
+Model.path = "testing/data/NotHere.glb"
 
 entity
 Name.value = "Model with no such mesh"
 Transform.position = 7 1 1
-Model.path = "test/data/TwoBoxes.gltf#mesh9"
+Model.path = "testing/data/TwoBoxes.gltf#mesh9"
 
 # surface_without_shape and pattern_without_shape (warnings): nothing consumes
 # either without a Shape on the same entity.
