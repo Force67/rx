@@ -1,6 +1,7 @@
 #ifndef RX_RENDER_CLOUDS_H_
 #define RX_RENDER_CLOUDS_H_
 
+#include "foundation/build_config/export.h"
 #include "foundation/math/math.h"
 #include "rxe/render/core/render_graph.h"
 #include "rxe/gpu/rhi/resources.h"
@@ -16,7 +17,7 @@ namespace rx::render {
 // (depth-aware, so terrain occludes clouds). Procedural density with Beer's-law
 // self-shadowing and a Henyey-Greenstein phase. A simplified Nubis-style model;
 // runs every frame, no ray tracing.
-class Clouds {
+class RX_RENDER_EXPORT Clouds {
  public:
   struct Frame {
     Mat4 inv_view_proj;

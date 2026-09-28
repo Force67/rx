@@ -35,13 +35,6 @@ base::StringRef ExtensionOf(base::StringRef path) {
 }  // namespace
 
 bool AudioSystem::Initialize(asset::Vfs* vfs) {
-#if defined(RX_SHARED_BUILD)
-  // Apply this DSO's env option overrides: under RX_SHARED base::Option's
-  // registry is per-DSO (hidden-visibility InitChain head), so the app's
-  // InitOptionsFromEnv() never reaches the audio DSO's options. See the same
-  // note in Renderer::Initialize. Compiled out in the static build.
-  base::InitOptionsFromEnv();
-#endif
   vfs_ = vfs;
   muted_ = Mute.get();
   master_ = rx::Clamp(Volume.get(), 0.0f, 1.0f);

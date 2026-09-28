@@ -51,7 +51,7 @@ struct DecalStamp {
 RX_RENDER_EXPORT Decal MakeDecalProjector(const Vec3& position, const Vec3& normal,
                                           const Vec3& up, f32 width, f32 height, f32 depth);
 
-class DecalBaker {
+class RX_RENDER_EXPORT DecalBaker {
  public:
   // The push-constant channel that carries the tile to the forward pass is one
   // byte wide (see Renderer's tint_packed packing), and 0 means "no layer".

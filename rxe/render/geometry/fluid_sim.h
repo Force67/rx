@@ -15,6 +15,7 @@
 // the domain, lava solving first so water sees B + C + d_lava as its bed. The
 // solver core produces the fields; a separate surface renderer draws them.
 
+#include "foundation/build_config/export.h"
 #include "foundation/math/math.h"
 #include "rxe/render/core/render_graph.h"
 #include "rxe/gpu/rhi/device.h"
@@ -44,7 +45,7 @@ struct FluidDomainDesc {
   f32 ambient_temperature = 20.0f;
 };
 
-class FluidSim {
+class RX_RENDER_EXPORT FluidSim {
  public:
   static constexpr u32 kMaxSources = 64;
   static constexpr u32 kMaxResolution = 1024;
@@ -117,7 +118,7 @@ class FluidSim {
 // Readback seam for rxe/render/geometry/fluid_sim_test.cc: exposes the solver's output images
 // (which the public API only surfaces as sampled views) so a test can
 // ReadbackImage them. Not part of the renderer/demo API.
-struct FluidSimProbe {
+struct RX_RENDER_EXPORT FluidSimProbe {
   static const gpu::GpuImage& state(const FluidSim& sim);
   static const gpu::GpuImage& velocity(const FluidSim& sim);
 };

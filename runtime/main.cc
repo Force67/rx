@@ -258,14 +258,6 @@ int main(int argc, char** argv) {
   const bool verify_shot = !config.shot_path.empty() && !::getenv("RX_UI_SHOT_SEQ");
   if (verify_shot) rx::fs::Remove(config.shot_path);
 
-#if defined(RX_SHARED_BUILD)
-  // The viewer's own base::Option knobs (viewer.cc, camera_input.cc,
-  // demo_scenes.cc, debug_ui.cc) live on this executable's InitChain, which
-  // under RX_SHARED is a separate instance from the engine DSOs' chains. Apply
-  // the executable's env overrides here; each engine DSO applies its own at
-  // subsystem init. Compiled out in the static build (one shared chain).
-  base::InitOptionsFromEnv();
-#endif
 
   rx::Viewer viewer(config);
   rx::app::Host host;

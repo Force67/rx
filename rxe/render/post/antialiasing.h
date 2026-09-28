@@ -1,6 +1,7 @@
 #ifndef RX_RENDER_ANTIALIASING_H_
 #define RX_RENDER_ANTIALIASING_H_
 
+#include "foundation/build_config/export.h"
 #include "foundation/build_config/types.h"
 #include "rxe/render/core/render_graph.h"
 #include "rxe/gpu/rhi/resources.h"
@@ -27,7 +28,7 @@ enum class AntiAliasingMode : u8 {
   kMsaa,
 };
 
-struct JitterSequence {
+struct RX_RENDER_EXPORT JitterSequence {
   // Halton (2,3) offsets in pixel units, centered around zero.
   static void Sample(u32 frame_index, u32 sample_count, f32* out_x, f32* out_y);
 };

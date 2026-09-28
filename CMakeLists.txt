@@ -45,12 +45,12 @@ option(RX_MIMALLOC "Route allocations through mimalloc (+memory tracking)" ON)
 option(RX_INSTALL "Generate install()/export rules for find_package(rx)"
   ${PROJECT_IS_TOP_LEVEL})
 
-# The "DLL test": build each rx module as a shared library instead of a static
-# archive. Off by default (the static build is the shipping configuration). This
-# is a correctness discipline, not a distribution mode: hidden visibility plus
-# explicit per-module export annotations (foundation/build_config/export.h) document each
-# module's real cross-DSO API and flush out ambient-state bugs.
-option(RX_SHARED "Build rx modules as shared libraries (experimental)" OFF)
+# The component build: each rx module is a shared library instead of a static
+# archive, so an edit relinks one .so. The `linux-dev` preset turns it on for
+# day-to-day work; the static build stays the shipping and benchmark
+# configuration. Hidden visibility plus explicit per-module export annotations
+# (foundation/build_config/export.h) keep each module's cross-DSO API honest.
+option(RX_SHARED "Build rx modules as shared libraries (the -dev presets)" OFF)
 
 if(RX_SHARED)
   if(RX_INSTALL)
@@ -63,12 +63,8 @@ if(RX_SHARED)
   # Third-party static archives (equilibrium::base, volk, VMA, Jolt, kinema, NRD,
   # FSR3) get linked into rx shared objects, so their objects must be PIC.
   set(CMAKE_POSITION_INDEPENDENT_CODE ON)
-  message(WARNING
-    "RX_SHARED is experimental. rx modules build as shared objects with hidden "
-    "visibility + explicit export annotations. Caveat: equilibrium's base::Option "
-    "registry (base::InitChain) is a per-DSO instance under hidden visibility, so "
-    "each option-owning DSO re-applies env overrides at init. "
-    "Env knobs work; the mechanism differs from the static single-registry build.")
+  # One base::Option / base::Feature registry per process, not per DSO: base's
+  # InitChain carries default visibility (base/containers/init_chain.h).
 else()
   set(RX_LIB_TYPE STATIC)
 endif()
@@ -190,8 +186,9 @@ if(NOT TARGET volk)
     # whole table instead is worse: it collides with SDL3's own Vulkan symbols.
     # The correct model is a fully-private volk copy per DSO that uses it, each
     # initialized by that DSO. Force hidden visibility so no volk symbol leaks
-    # out to interpose another DSO or SDL. (render initializes its copy in
-    # vk_device.cc; the viewer initializes the imgui copy, see debug_ui.cc.)
+    # out to interpose another DSO or SDL. rx::gpu fills its copy in
+    # vk_device.cc; every other DSO fills its own the first time it calls
+    # gpu::GetVulkanHandles (rxe/gpu/rhi/vulkan_interop.h).
     set_target_properties(volk PROPERTIES
       C_VISIBILITY_PRESET hidden
       VISIBILITY_INLINES_HIDDEN ON)

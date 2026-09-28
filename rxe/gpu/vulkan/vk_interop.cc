@@ -37,10 +37,11 @@ void LoadVulkanEntryPoints(u32 api_version) {
 
 }  // namespace vk
 
-VulkanHandles GetVulkanHandles(Device& device) {
+VulkanHandles QueryVulkanHandles(Device& device) {
   if (device.caps().backend != Backend::kVulkan) return {};
   auto& vk_device = static_cast<vk::VulkanDevice&>(device);
-  return {.instance = vk_device.instance(),
+  return {.get_instance_proc_addr = vkGetInstanceProcAddr,
+          .instance = vk_device.instance(),
           .physical_device = vk_device.physical_device(),
           .device = vk_device.device(),
           .graphics_queue = vk_device.graphics_queue(),

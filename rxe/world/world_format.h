@@ -110,7 +110,7 @@ struct WorldCellRecord {
 
 // The decoded index. Cells are sorted by id: lookup is a binary search and
 // iteration order never depends on cook order.
-struct WorldIndexData {
+struct RX_WORLD_EXPORT WorldIndexData {
   u32 version = 0;
   u64 world_id = 0;
   // Identifies the cook that produced this index; every payload carries the
@@ -250,7 +250,7 @@ struct WorldInstanceRecord {
   f32 scale = 1.0f;
 };
 
-struct WorldCellPayload {
+struct RX_WORLD_EXPORT WorldCellPayload {
   u32 version = 0;
   PayloadKind kind = PayloadKind::kEntities;
   u64 cell_id = 0;

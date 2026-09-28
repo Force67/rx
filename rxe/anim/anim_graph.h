@@ -4,6 +4,7 @@
 #include "base/memory/move.h"
 #include "base/memory/unique_pointer.h"
 #include "base/strings/string_ref.h"
+#include "foundation/build_config/export.h"
 #include "foundation/build_config/types.h"
 #include "rxe/asset/skeleton.h"
 
@@ -22,7 +23,7 @@ struct GraphState;
 // The graph is authored kinema-side (kinema stays a private detail of
 // rxe/anim, so it never appears in this header); BuildBipedLocomotionGraph is
 // the first such archetype factory.
-class AnimGraph {
+class RX_ANIM_EXPORT AnimGraph {
  public:
   AnimGraph();
   explicit AnimGraph(base::UniquePointer<internal::GraphState> state);
@@ -53,7 +54,7 @@ class AnimGraph {
 // forward root motion), a 1D walk<->run blend space on a "speed" parameter, and
 // a two-state machine (idle <-> locomotion) whose transitions are driven by
 // "speed". The result is shared by every RigPlayer of this rig.
-AnimGraph BuildBipedLocomotionGraph(const asset::Skeleton& skeleton);
+RX_ANIM_EXPORT AnimGraph BuildBipedLocomotionGraph(const asset::Skeleton& skeleton);
 
 }  // namespace rx::anim
 

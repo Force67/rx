@@ -10,6 +10,7 @@
 #include <ugui/rhi/rhi_types.h>
 #include "base/containers/unordered_map.h"
 #include "base/containers/vector.h"
+#include "foundation/build_config/export.h"
 
 namespace rx::ui {
 
@@ -19,7 +20,7 @@ namespace rx::ui {
 // into a command buffer the engine already opened with vkCmdBeginRendering on
 // the backbuffer, exactly where the debug ImGui overlay records. Also serves as
 // ultragui's TextureBackend so Image/SVG textures work in draw-data mode.
-class GuiRenderBackend final : public ugui::TextureBackend {
+class RX_UI_EXPORT GuiRenderBackend final : public ugui::TextureBackend {
  public:
   struct InitInfo {
     VkInstance instance = VK_NULL_HANDLE;

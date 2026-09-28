@@ -6,6 +6,7 @@
 #include <base/containers/vector.h>
 
 #include "base/memory/unique_pointer.h"
+#include "foundation/build_config/export.h"
 #include "foundation/build_config/types.h"
 #include "foundation/math/math.h"
 #include "rxe/render/gi/rt_slot_tracker.h"
@@ -46,7 +47,7 @@ enum RayMask : u8 {
 // BLASes build once per uploaded mesh, the TLAS rebuilds every frame from
 // the visible instances. TLAS slots rotate so a rebuild never races the frame
 // still in flight.
-class RayTracingContext {
+class RX_RENDER_EXPORT RayTracingContext {
  public:
   // Four ping-pong slots (not two): the async-TLAS path (RX_RT_ASYNC_TLAS)
   // builds slot N on the compute queue for the *next* frame while this frame's

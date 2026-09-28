@@ -331,22 +331,29 @@ out of scope.
 
 | preset | `RX_SHARED` | use |
 |---|---|---|
-| `linux-dev`, `windows-dev` | ON | day-to-day work: one DSO per module |
+| `linux-dev` (`build/linux-dev`) | ON | day-to-day work: one DSO per module |
 | `linux`, `windows`, `android`, ... | OFF | shipping, benchmarks, install/export |
 
-Benchmarks keep running on the static presets, so the shared build never skews
-a performance number.
+Benchmarks and captures keep running on the static presets, so the shared build
+never skews a performance number.
 
-Before `RX_SHARED` can be the default for development, anything that must exist
-once per process has to live in exactly one DSO:
+What has to exist once per process, and how the shared build keeps it so:
 
-- the `base::Option` registry (today one instance per DSO, see the CMake
-  warning): export it from `foundation` or build equilibrium base shared
-- the allocator override (`memory/new_override.cc`) and mimalloc; on Windows,
-  the shared CRT (`/MD`) everywhere
-- log sinks, the feature list and the app identity
-- volk: under `RX_SHARED`, volk is built as its own shared library so every
-  `_vulkan.cc` file sees one loaded function table
+- `base::Option` / `base::Feature` registry: equilibrium's `InitChain` and its
+  item types carry default visibility, so the chain root is one ELF-unique
+  symbol however many DSOs instantiate it. Before, an option set from a
+  platform tier's `[options]` was invisible outside the DSO that declared it.
+- volk: it cannot be shared (its table uses the Vulkan entry point names, which
+  collide with SDL3's), so each DSO keeps a private copy. `rx::gpu` fills its
+  own at device creation; every other DSO fills its copy inside
+  `gpu::GetVulkanHandles`, which every Vulkan interop caller already calls
+  first.
+- log sinks, the feature table, app identity and the memory tracker live in
+  `rx_foundation` and are reached through exported functions; the allocator
+  override is compiled into the executable only (`rx_enable_mimalloc`).
+- Windows: PE has no unique symbols, so a `windows-dev` preset first needs
+  equilibrium's base linked as a DLL and the shared CRT (`/MD`) everywhere. Not
+  done yet.
 
 ## Violations to fix before moving files
 
@@ -413,8 +420,11 @@ and after.
      `rx::gpu::d3d12`, `rx::gpu::null`); window, events and the imgui renderer
      into `rx::ui`; `WorldClock` into `rx::app`, `exr_write` into `rx::asset`.
      The include lint now checks namespaces too.
-5. **Development shared build.** Add the single-instance fixes and the `-dev`
-   presets, then per-module feature flags on the single registry.
+5. **Development shared build.**
+   - 5a (done): the whole tree links as shared objects (missing exports
+     added), one option registry per process, per-DSO volk filled through
+     `GetVulkanHandles`, and the `linux-dev` preset.
+   - 5b: per-module feature flags on the single registry.
 6. **Plugins and apps.** Add `RX_PLUGIN`, `PluginRegistry` and `rx_add_app`.
    `runtime/` becomes `apps/shell/`, the tools move into `apps/`, and
    `EngineContext` goes away.

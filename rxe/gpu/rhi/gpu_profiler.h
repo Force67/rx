@@ -6,6 +6,7 @@
 #include <base/containers/vector.h>
 
 #include "base/strings/xstring.h"
+#include "foundation/build_config/export.h"
 #include "foundation/build_config/types.h"
 #include "rxe/gpu/rhi/types.h"
 
@@ -23,7 +24,7 @@ class Device;
 // reports the count, and each slot grows to that size the next time it comes
 // round (a pool can only be replaced where its last submission has retired),
 // so the miss lasts at most one cycle through the slots.
-class GpuProfiler {
+class RX_GPU_EXPORT GpuProfiler {
  public:
   struct PassTiming {
     base::String name;

@@ -9,6 +9,7 @@
 #include "base/functional/function.h"
 #include "base/memory/unique_pointer.h"
 #include "base/strings/xstring.h"
+#include "foundation/build_config/export.h"
 #include "foundation/build_config/types.h"
 #include "rxe/gpu/rhi/bindings.h"
 #include "rxe/gpu/rhi/command_list.h"
@@ -29,7 +30,7 @@ enum class Backend : u8 {
           // renderer's control flow testable without a GPU or a loader
 };
 
-const char* BackendName(Backend backend);
+RX_GPU_EXPORT const char* BackendName(Backend backend);
 
 struct DeviceDesc {
   Backend backend = Backend::kAuto;
@@ -110,7 +111,7 @@ enum class PresentResult : u8 {
 // a null-backend device (is_stub() true) comes back when no loader, no
 // capable GPU or no presentable window is available, and every operation on
 // it is a safe no-op.
-class Device {
+class RX_GPU_EXPORT Device {
  public:
   static constexpr u32 kMaxFramesInFlight = 2;
 

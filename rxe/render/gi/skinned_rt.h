@@ -4,6 +4,7 @@
 #include <base/containers/unordered_map.h>
 #include <base/containers/vector.h>
 
+#include "foundation/build_config/export.h"
 #include "foundation/build_config/types.h"
 #include "rxe/gpu/rhi/command_list.h"
 #include "rxe/gpu/rhi/resources.h"
@@ -38,7 +39,7 @@ class RayTracingContext;
 // Morph targets are NOT applied: a morphed actor registers anyway (skinning is
 // what moves the silhouette) but warns once, rather than quietly ray tracing a
 // face that does not match the rasterized one.
-class SkinnedRayTracing {
+class RX_RENDER_EXPORT SkinnedRayTracing {
  public:
   bool Initialize(gpu::Device& device);
   void Destroy(gpu::Device& device);

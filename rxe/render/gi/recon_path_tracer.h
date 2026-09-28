@@ -1,6 +1,7 @@
 #ifndef RX_RENDER_RECON_PATH_TRACER_H_
 #define RX_RENDER_RECON_PATH_TRACER_H_
 
+#include "foundation/build_config/export.h"
 #include "foundation/math/math.h"
 #include "rxe/render/core/render_graph.h"
 #include "rxe/gpu/rhi/resources.h"
@@ -19,7 +20,7 @@ class RayTracingContext;
 // its own temporal accumulation (motion reproject + history rejection + clamp +
 // moments/variance) and an a-trous wavelet filter, and composites albedo back in.
 // Fully in-tree and tunable, with debug views. Needs ray query.
-class ReconPathTracer {
+class RX_RENDER_EXPORT ReconPathTracer {
  public:
   struct Frame {
     Mat4 inv_view_proj;

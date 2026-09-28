@@ -3,6 +3,7 @@
 
 
 #include "base/strings/xstring.h"
+#include "foundation/build_config/export.h"
 #include "foundation/build_config/types.h"
 #include "rxe/render/core/render_graph.h"
 #include "rxe/gpu/rhi/device.h"
@@ -19,7 +20,7 @@ namespace rx::render {
 //
 // It also accumulates a per-region error metric, which is what lets the lookdev
 // tool's fitting be a measurement instead of a preference.
-class ReferenceCompare {
+class RX_RENDER_EXPORT ReferenceCompare {
  public:
   enum class Mode : u8 {
     kOff,

@@ -6,6 +6,7 @@
 
 #include "base/memory/unique_pointer.h"
 #include "base/strings/xstring.h"
+#include "foundation/build_config/export.h"
 #include "rxe/render/core/render_graph.h"
 #include "rxe/render/core/settings.h"
 #include "rxe/gpu/rhi/device.h"
@@ -16,7 +17,7 @@ namespace rx::render {
 // applies the srgb transfer function and writes the backbuffer. Any gap
 // between render and output resolution is absorbed here by the linear
 // sampler until a real upscaler owns it.
-class PostPass {
+class RX_RENDER_EXPORT PostPass {
  public:
   static base::UniquePointer<PostPass> Create(gpu::Device& device, gpu::Format output_format);
   ~PostPass();

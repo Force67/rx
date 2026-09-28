@@ -7,13 +7,14 @@
 // resolution after the AA/upscale resolve; uv velocities are resolution
 // independent).
 
+#include "foundation/build_config/export.h"
 #include "foundation/math/math.h"
 #include "rxe/render/core/render_graph.h"
 #include "rxe/gpu/rhi/device.h"
 
 namespace rx::render {
 
-class MotionBlurPass {
+class RX_RENDER_EXPORT MotionBlurPass {
  public:
   bool Initialize(gpu::Device& device);
   void Destroy(gpu::Device& device);

@@ -3,6 +3,7 @@
 
 
 #include "base/memory/unique_pointer.h"
+#include "foundation/build_config/export.h"
 #include "foundation/build_config/types.h"
 #include "rxe/render/core/render_graph.h"
 
@@ -61,11 +62,11 @@ class Upscaler {
 
 // Returns null if the SDK for the requested kind is not compiled in or the
 // device does not support it. Caller falls back to TAA.
-base::UniquePointer<Upscaler> CreateUpscaler(const UpscalerDesc& desc, class gpu::Device& device);
+RX_RENDER_EXPORT base::UniquePointer<Upscaler> CreateUpscaler(const UpscalerDesc& desc, class gpu::Device& device);
 
 // The spelling the --upscaler flag and the settings ini use, for logging which
 // backend a fallback actually landed on.
-const char* UpscalerName(UpscalerKind kind);
+RX_RENDER_EXPORT const char* UpscalerName(UpscalerKind kind);
 
 }  // namespace rx::render
 

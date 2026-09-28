@@ -454,17 +454,6 @@ bool Renderer::InitializeOffscreen(const RendererDesc &desc, u32 width,
 
 bool Renderer::InitializeCommon(const RendererDesc &desc, ui::Window *window,
                                 u32 width, u32 height) {
-#if defined(RX_SHARED_BUILD)
-  // base::Option self-registers through base::InitChain, whose list head is a
-  // vague-linkage function-local static. Under RX_SHARED every module is built
-  // with hidden visibility, so that head is a SEPARATE instance per DSO: the
-  // app's InitOptionsFromEnv() (host.cc) only walks the app DSO's chain and
-  // never sees this DSO's render options (RX_ASYNC_COMPUTE, RX_DEBUG_VIEW,
-  // ...). Re-run it here so the render DSO applies its own env overrides before
-  // any option is read. Disjoint chains, so no option is applied twice. In the
-  // static build there is one shared chain and this is compiled out.
-  base::InitOptionsFromEnv();
-#endif
   desc_ = desc;
   settings_.aa_mode = desc.aa_mode;
   settings_.upscaler = desc.upscaler;

@@ -19,6 +19,9 @@
 namespace rx::gpu {
 
 struct VulkanHandles {
+  // The loader entry point the device was created through; what another DSO
+  // needs to fill its own volk table.
+  PFN_vkGetInstanceProcAddr get_instance_proc_addr = nullptr;
   VkInstance instance = VK_NULL_HANDLE;
   VkPhysicalDevice physical_device = VK_NULL_HANDLE;
   VkDevice device = VK_NULL_HANDLE;
@@ -27,8 +30,30 @@ struct VulkanHandles {
   VmaAllocator allocator = nullptr;
 };
 
+// Null-filled when `device` is not the Vulkan backend. Callers use
+// GetVulkanHandles below instead.
+RX_GPU_EXPORT VulkanHandles QueryVulkanHandles(Device& device);
+
 // Null-filled when `device` is not the Vulkan backend.
-RX_GPU_EXPORT VulkanHandles GetVulkanHandles(Device& device);
+//
+// Under RX_SHARED every DSO carries its own private volk table (see the top-level
+// CMakeLists for why it cannot be shared), and only the device's own DSO fills
+// its copy. Every interop consumer asks for the handles before its first vk*
+// call, so this is the one place to fill the calling module's copy: inline and
+// hidden, it runs in the caller's DSO against that DSO's table, once per device.
+inline VulkanHandles GetVulkanHandles(Device& device) {
+  VulkanHandles handles = QueryVulkanHandles(device);
+#if defined(RX_SHARED_BUILD)
+  static VkDevice loaded = VK_NULL_HANDLE;
+  if (handles.device != VK_NULL_HANDLE && handles.device != loaded) {
+    volkInitializeCustom(handles.get_instance_proc_addr);
+    volkLoadInstanceOnly(handles.instance);
+    volkLoadDevice(handles.device);
+    loaded = handles.device;
+  }
+#endif
+  return handles;
+}
 
 // Frames-in-flight the renderer cycles (== the number of distinct frame slots a
 // SceneHookContext::frame_slot can take). An app sizing per-frame resources for
