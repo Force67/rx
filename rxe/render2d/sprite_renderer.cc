@@ -4,7 +4,7 @@
 #include <string.h>
 
 #include "foundation/logging/log.h"
-#include "rxe/render/rhi/bindings.h"
+#include "rxe/gpu/rhi/bindings.h"
 
 #include "base/memory/mem_ops.h"
 #include "base/memory/move.h"

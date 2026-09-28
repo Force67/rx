@@ -3,7 +3,7 @@
 
 #include "foundation/build_config/types.h"
 #include "rxe/render/core/render_graph.h"
-#include "rxe/render/rhi/resources.h"
+#include "rxe/gpu/rhi/resources.h"
 
 namespace rx::render {
 

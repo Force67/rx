@@ -2,7 +2,7 @@
 
 #include "foundation/logging/log.h"
 #include "foundation/math/scalar.h"
-#include "rxe/render/rhi/device.h"
+#include "rxe/gpu/rhi/device.h"
 #include "shaders/bloom_down_cs_hlsl.h"
 #include "shaders/bloom_up_cs_hlsl.h"
 

@@ -2,7 +2,7 @@
 
 #include "base/memory/unique_pointer.h"
 #include "foundation/logging/log.h"
-#include "rxe/render/rhi/device.h"
+#include "rxe/gpu/rhi/device.h"
 
 namespace rx::render {
 

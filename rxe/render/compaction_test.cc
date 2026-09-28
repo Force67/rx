@@ -16,8 +16,8 @@
 
 #include "base/memory/mem_ops.h"
 #include "base/memory/unique_pointer.h"
-#include "rxe/render/rhi/command_list.h"
-#include "rxe/render/rhi/device.h"
+#include "rxe/gpu/rhi/command_list.h"
+#include "rxe/gpu/rhi/device.h"
 
 using namespace rx::render;
 

@@ -7,8 +7,8 @@
 #include "base/memory/unique_pointer.h"
 #include "foundation/logging/log.h"
 #include "rxe/asset/asset_id.h"
-#include "rxe/net/rpc_channel.h"
-#include "rxe/net/znet_util.h"
+#include "rxe/net/transport/rpc_channel.h"
+#include "rxe/net/transport/znet_util.h"
 #include "rxe/scene/components.h"
 
 namespace rx::net {

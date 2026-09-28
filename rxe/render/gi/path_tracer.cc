@@ -6,7 +6,7 @@
 #include "base/numeric_limits.h"
 #include "foundation/logging/log.h"
 #include "rxe/render/gi/raytracing.h"
-#include "rxe/render/rhi/device.h"
+#include "rxe/gpu/rhi/device.h"
 #include "shaders/pathtrace_cs_hlsl.h"
 #if defined(RX_HAS_NRD)
 #include "shaders/pathtrace_composite_cs_hlsl.h"

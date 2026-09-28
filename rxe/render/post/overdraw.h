@@ -4,7 +4,7 @@
 
 #include "base/functional/function.h"
 #include "foundation/math/math.h"
-#include "rxe/render/rhi/device.h"
+#include "rxe/gpu/rhi/device.h"
 
 namespace rx::render {
 

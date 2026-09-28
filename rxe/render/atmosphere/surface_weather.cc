@@ -4,7 +4,7 @@
 
 #include "base/memory/mem_ops.h"
 #include "foundation/logging/log.h"
-#include "rxe/render/rhi/device.h"
+#include "rxe/gpu/rhi/device.h"
 #include "shaders/surface_weather_cs_hlsl.h"
 
 namespace rx::render {

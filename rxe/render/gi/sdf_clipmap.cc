@@ -10,7 +10,7 @@
 #include "foundation/logging/log.h"
 #include "foundation/math/scalar.h"
 #include "rxe/render/gi/sdf_scene.h"
-#include "rxe/render/rhi/bindings.h"
+#include "rxe/gpu/rhi/bindings.h"
 #include "shaders/sdf_clear_cs_hlsl.h"
 #include "shaders/sdf_compose_cs_hlsl.h"
 #include "shaders/sdf_debug_cs_hlsl.h"

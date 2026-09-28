@@ -9,7 +9,7 @@
 // (VK_NO_PROTOTYPES) before the ffx vk headers.
 #include "base/memory/unique_pointer.h"
 #include "base/strings/xstring.h"
-#include "rxe/render/rhi/vulkan_interop.h"
+#include "rxe/gpu/rhi/vulkan_interop.h"
 
 #include <FidelityFX/host/ffx_frameinterpolation.h>
 #include <FidelityFX/host/ffx_opticalflow.h>

@@ -16,8 +16,8 @@
 #include "plugins/placement/gpu_placement.h"
 #include "plugins/placement/placement.h"
 #include "plugins/placement/world_data.h"
-#include "rxe/render/rhi/command_list.h"
-#include "rxe/render/rhi/device.h"
+#include "rxe/gpu/rhi/command_list.h"
+#include "rxe/gpu/rhi/device.h"
 
 namespace {
 

@@ -56,7 +56,7 @@ if(@RX_INSTALL_UI@ AND NOT TARGET ultragui)
   add_library(yogacore STATIC IMPORTED)
   set_target_properties(yogacore PROPERTIES
     IMPORTED_LOCATION "${_rx_deps_lib}/libyogacore.a")
-  # Built with ULTRAGUI_USE_BASE (rxe/ui/CMakeLists.txt): its headers pick
+  # Built with ULTRAGUI_USE_BASE (rxe/ui/ugui/CMakeLists.txt): its headers pick
   # base containers only when the define is seen, so it travels with them.
   add_library(ultragui STATIC IMPORTED)
   set_target_properties(ultragui PROPERTIES
@@ -150,15 +150,17 @@ if(TARGET rx::ui AND TARGET ultragui)
   set_property(TARGET rx::ui APPEND PROPERTY INTERFACE_LINK_LIBRARIES ultragui)
 endif()
 
-# volk / VMA are PUBLIC on rx::render (headers propagate), the SDK archives are
-# link-only.
-if(TARGET rx::render)
-  set_property(TARGET rx::render APPEND PROPERTY
+# volk / VMA are PUBLIC on rx::gpu (headers propagate), vkd3d and the SDK
+# archives are link-only.
+if(TARGET rx::gpu)
+  set_property(TARGET rx::gpu APPEND PROPERTY
     INTERFACE_LINK_LIBRARIES volk GPUOpen::VulkanMemoryAllocator)
   if(@RX_INSTALL_RHI_D3D12@)
-    set_property(TARGET rx::render APPEND PROPERTY
+    set_property(TARGET rx::gpu APPEND PROPERTY
       INTERFACE_LINK_LIBRARIES $<LINK_ONLY:PkgConfig::VKD3D>)
   endif()
+endif()
+if(TARGET rx::render)
   if(@RX_INSTALL_FSR3@)
     set_property(TARGET rx::render APPEND PROPERTY
       INTERFACE_LINK_LIBRARIES $<LINK_ONLY:rx::ffx_fsr3>)

@@ -26,8 +26,8 @@
 #include "base/optional.h"
 #include "base/strings/xstring.h"
 #include "foundation/strings/format.h"
-#include "rxe/rpc/rpc_message.h"
-#include "rxe/rpc/rpc_value.h"
+#include "rxe/net/rpc/rpc_message.h"
+#include "rxe/net/rpc/rpc_value.h"
 
 namespace rpc = rx::rpc;
 using rx::u8;

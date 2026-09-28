@@ -10,7 +10,7 @@
 #include "rxe/render/gi/light_grid.h"
 #include "rxe/render/gi/rcgi_history.h"
 #include "rxe/render/gi/rcgi_interior.h"
-#include "rxe/render/rhi/device.h"
+#include "rxe/gpu/rhi/device.h"
 
 namespace rx::render {
 

@@ -4,9 +4,9 @@
 
 #include "base/memory/mem_ops.h"
 #include "foundation/logging/log.h"
-#include "rxe/render/rhi/device.h"
-#include "rxe/render/rhi/vulkan_interop.h"
-#include "rxe/render/util/shader_util.h"
+#include "rxe/gpu/rhi/device.h"
+#include "rxe/gpu/rhi/vulkan_interop.h"
+#include "rxe/gpu/rhi/shader_util.h"
 #include "shaders/nrd_pack_cs_hlsl.h"
 
 #include <NRD.h>

@@ -32,7 +32,7 @@
 #include "rxe/ecs/world.h"
 #include "rxe/render/core/presets.h"
 #include "rxe/render/core/settings_ini.h"
-#include "rxe/render/util/imgui_theme.h"
+#include "rxe/ui/imgui/imgui_theme.h"
 
 #ifndef RX_BUILD_ID
 #define RX_BUILD_ID "unknown"

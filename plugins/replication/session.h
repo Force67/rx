@@ -21,7 +21,7 @@
 #include "plugins/replication/bubble.h"
 #include "plugins/replication/replication.h"
 #include "rxe/ecs/world.h"
-#include "rxe/net/protocol.h"
+#include "rxe/net/transport/protocol.h"
 
 namespace rx::net {
 

@@ -7,7 +7,7 @@
 #include "base/memory/mem_ops.h"
 #include "rxe/render/core/bindless.h"
 #include "rxe/render/gi/raytracing.h"
-#include "rxe/render/rhi/device.h"
+#include "rxe/gpu/rhi/device.h"
 #include "shaders/path_continue_cs_hlsl.h"
 #include "shaders/recon_restir_di_spatial_cs_hlsl.h"
 #include "shaders/recon_restir_di_temporal_cs_hlsl.h"

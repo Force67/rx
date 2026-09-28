@@ -15,7 +15,7 @@
 #include "rxe/render/core/render_graph.h"
 #include "rxe/render/geometry/hair_groom.h"
 #include "rxe/render/pipeline/hair_material.h"
-#include "rxe/render/rhi/device.h"
+#include "rxe/gpu/rhi/device.h"
 
 namespace rx::render {
 

@@ -7,7 +7,7 @@
 #include "foundation/logging/log.h"
 #include "foundation/math/scalar.h"
 #include "plugins/placement/placement_pattern.h"
-#include "rxe/render/rhi/command_list.h"
+#include "rxe/gpu/rhi/command_list.h"
 #include "shaders/placement_density_cs_hlsl.h"
 #include "shaders/placement_generate_cs_hlsl.h"
 #include "shaders/placement_transform_cs_hlsl.h"

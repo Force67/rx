@@ -1,7 +1,7 @@
 #include "rxe/render/screenspace/ssgi.h"
 
 #include "foundation/logging/log.h"
-#include "rxe/render/rhi/device.h"
+#include "rxe/gpu/rhi/device.h"
 #include "shaders/ssgi_cs_hlsl.h"
 
 namespace rx::render {

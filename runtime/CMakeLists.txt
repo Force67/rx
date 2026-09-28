@@ -317,8 +317,8 @@ rx_embed_shaders(rx
   shaders/scenehook_rhi.ms.hlsl
 )
 
-if(TARGET rx_imgui)
-  target_link_libraries(rx PRIVATE rx::imgui)
+if(TARGET rx_imgui AND TARGET rx_imgui_renderer)
+  target_link_libraries(rx PRIVATE rx::imgui rx::imgui_renderer)
   target_compile_definitions(rx PRIVATE RX_HAS_IMGUI=1)
   # The debug ui lists, loads and saves the platform tiers in the source tree,
   # so an edit lands in the files that ship; RX_PRESETS_DIR points it elsewhere.

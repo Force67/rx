@@ -23,8 +23,8 @@
 #include "base/memory/unique_pointer.h"
 #include "foundation/math/math.h"
 #include "rxe/render/pipeline/gpu_cull.h"
-#include "rxe/render/rhi/command_list.h"
-#include "rxe/render/rhi/device.h"
+#include "rxe/gpu/rhi/command_list.h"
+#include "rxe/gpu/rhi/device.h"
 #include "shaders/cull_cs_hlsl.h"
 
 using namespace rx;

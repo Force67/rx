@@ -5,7 +5,7 @@
 #include "base/memory/mem_ops.h"
 #include "foundation/logging/log.h"
 #include "rxe/render/gi/raytracing.h"
-#include "rxe/render/rhi/device.h"
+#include "rxe/gpu/rhi/device.h"
 #include "shaders/reflection_trace_cs_hlsl.h"
 #include "shaders/reflection_upscale_cs_hlsl.h"
 

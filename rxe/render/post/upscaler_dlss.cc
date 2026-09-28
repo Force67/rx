@@ -6,11 +6,11 @@
 
 #include "foundation/logging/log.h"
 #include "rxe/render/post/ngx_context.h"
-#include "rxe/render/rhi/device.h"
+#include "rxe/gpu/rhi/device.h"
 // Vulkan escape hatch: NGX speaks raw Vulkan. Also pulls volk
 // (VK_NO_PROTOTYPES) before the ngx vk header.
 #include "base/memory/unique_pointer.h"
-#include "rxe/render/rhi/vulkan_interop.h"
+#include "rxe/gpu/rhi/vulkan_interop.h"
 
 #include <nvsdk_ngx.h>
 #include <nvsdk_ngx_vk.h>

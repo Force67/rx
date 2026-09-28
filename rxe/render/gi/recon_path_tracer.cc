@@ -6,7 +6,7 @@
 #include "foundation/logging/log.h"
 #include "foundation/math/scalar.h"
 #include "rxe/render/gi/raytracing.h"
-#include "rxe/render/rhi/device.h"
+#include "rxe/gpu/rhi/device.h"
 #include "shaders/recon_atrous_cs_hlsl.h"
 #include "shaders/recon_composite_cs_hlsl.h"
 #include "shaders/recon_fog_cs_hlsl.h"

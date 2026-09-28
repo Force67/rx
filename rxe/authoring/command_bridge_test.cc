@@ -20,7 +20,7 @@
 #include "rxe/authoring/command_bridge.h"
 #include "rxe/authoring/command_endpoint.h"
 #include "rxe/ecs/world.h"
-#include "rxe/rpc/rpc_message.h"
+#include "rxe/net/rpc/rpc_message.h"
 #include "rxe/scene/components.h"
 #include "rxe/scene/scene_handlers.h"
 #include "rxe/script/handler_context.h"

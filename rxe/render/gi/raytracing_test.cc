@@ -8,7 +8,7 @@
 #include "rxe/render/gi/raytracing.h"
 #include "rxe/render/gi/skinned_rt.h"
 #include "rxe/render/pipeline/material_system.h"
-#include "rxe/render/rhi/device.h"
+#include "rxe/gpu/rhi/device.h"
 #include "shaders/rt_query_cs_hlsl.h"
 
 using namespace rx;

@@ -5,7 +5,7 @@
 #include "rxe/render/core/bindless.h"
 #include "rxe/render/gi/raytracing.h"
 #include "rxe/render/pipeline/material_system.h"
-#include "rxe/render/rhi/device.h"
+#include "rxe/gpu/rhi/device.h"
 #include "shaders/skin_cs_hlsl.h"
 
 namespace rx::render {

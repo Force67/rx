@@ -1,7 +1,7 @@
 #include "rxe/render/screenspace/ssao.h"
 
 #include "foundation/logging/log.h"
-#include "rxe/render/rhi/device.h"
+#include "rxe/gpu/rhi/device.h"
 #include "shaders/ssao_cs_hlsl.h"
 
 namespace rx::render {

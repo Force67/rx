@@ -9,8 +9,8 @@
 #include "foundation/build_config/types.h"
 #include "foundation/math/math.h"
 #include "rxe/render/gi/rt_slot_tracker.h"
-#include "rxe/render/rhi/command_list.h"
-#include "rxe/render/rhi/resources.h"
+#include "rxe/gpu/rhi/command_list.h"
+#include "rxe/gpu/rhi/resources.h"
 
 namespace rx::render {
 

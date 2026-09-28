@@ -4,7 +4,7 @@
 #include <string.h>
 
 #include "base/containers/vector.h"
-#include "rxe/render/rhi/device.h"
+#include "rxe/gpu/rhi/device.h"
 #include "shaders/recon_atrous_cs_hlsl.h"
 
 using namespace rx;

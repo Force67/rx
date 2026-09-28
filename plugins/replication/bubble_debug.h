@@ -17,7 +17,7 @@
 #include <base/containers/vector.h>
 
 #include "foundation/build_config/export.h"
-#include "rxe/net/protocol.h"
+#include "rxe/net/transport/protocol.h"
 #include "rxe/render/core/renderer.h"
 
 namespace rx::net {

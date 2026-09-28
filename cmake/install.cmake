@@ -36,7 +36,7 @@ set(RX_DEPS_LIBDIR ${CMAKE_INSTALL_LIBDIR}/rx)
 set(RX_DEPS_INCDIR ${CMAKE_INSTALL_INCLUDEDIR}/rx-deps)
 
 # rx module targets + export set
-set(RX_MODULE_NAMES foundation events window ecs script asset gltf usd materialx blend scene terrain render render2d physics vehicles locomotion anim audio
+set(RX_MODULE_NAMES foundation events window gpu ecs script asset gltf usd materialx blend scene terrain render imgui_renderer render2d physics vehicles locomotion anim audio
     weather rpc authoring character inventory inventory_world ui app)
 set(RX_INSTALL_TARGETS)
 foreach(_m ${RX_MODULE_NAMES})

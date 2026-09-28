@@ -4,7 +4,7 @@
 
 #include "base/memory/unique_pointer.h"
 #include "rxe/render/core/render_graph.h"
-#include "rxe/render/rhi/device.h"
+#include "rxe/gpu/rhi/device.h"
 
 namespace rx::render {
 

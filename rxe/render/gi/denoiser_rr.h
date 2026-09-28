@@ -13,7 +13,7 @@
 
 #include "foundation/math/math.h"
 #include "rxe/render/core/render_graph.h"
-#include "rxe/render/rhi/types.h"
+#include "rxe/gpu/rhi/types.h"
 
 typedef struct NVSDK_NGX_Handle NVSDK_NGX_Handle;
 typedef struct NVSDK_NGX_Parameter NVSDK_NGX_Parameter;

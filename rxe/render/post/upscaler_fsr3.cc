@@ -5,12 +5,12 @@
 #include <string.h>
 
 #include "foundation/logging/log.h"
-#include "rxe/render/rhi/device.h"
+#include "rxe/gpu/rhi/device.h"
 // Vulkan escape hatch: the FFX backend speaks raw Vulkan. Also pulls volk
 // (VK_NO_PROTOTYPES) before the ffx vk header.
 #include "base/memory/unique_pointer.h"
 #include "base/strings/xstring.h"
-#include "rxe/render/rhi/vulkan_interop.h"
+#include "rxe/gpu/rhi/vulkan_interop.h"
 
 // ffx_util.h calls std::popcount without including <bit>; FidelityFX is
 // vendored C++ we do not edit, so the include it forgot is supplied here.

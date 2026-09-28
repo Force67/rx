@@ -7,7 +7,7 @@
 #include "base/containers/span.h"
 #include "foundation/build_config/export.h"
 #include "foundation/math/math.h"
-#include "rxe/render/rhi/device.h"
+#include "rxe/gpu/rhi/device.h"
 
 namespace rx::render {
 

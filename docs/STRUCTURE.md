@@ -46,14 +46,14 @@ foundation/           what rx adds to equilibrium base (Chromium: base/); one mo
   algorithm/          StableSort, NthElement
 
 rxe/                  the engine (Chromium: content/)
-  gpu/
+  gpu/                one module: the RHI and the backends Device::Create picks from
     rhi/              the interface, shader loading, gpu profiler
-    vulkan/  d3d12/  null/
+    vulkan/  d3d12/  null/   selected by RX_RHI_VULKAN / RX_RHI_D3D12
   ui/
     window/           window + backends: window_sdl3.cc, window_android.cc, wayland_kde_hdr.cc
     events/           input, actions, bindings
     ugui/             libultragui integration + the splash plate
-    imgui/            imgui renderer + theme
+    imgui/            rx::imgui_renderer: imgui draw lists through the RHI, + theme
   storage/            vfs, .rxp archives, the install layout mounts
   asset/              asset database and the runtime formats: mesh, texture, material, skeleton, collision shape
   importers/
@@ -361,7 +361,7 @@ once per process has to live in exactly one DSO:
 | `audio/*_synth`, `vehicle_audio` | game audio inside the audio module | done (2b): vehicle audio to `engine/vehicles`, the thunder synth to `weather` |
 | `physics/aircraft` etc. | vehicles inside the physics module | done (2b): `engine/vehicles` |
 | `asset/usd_loader` etc. | every asset user links tinyusdz | done (2b): `engine/importers/*` |
-| `render/util` | grab-bag | phase 4, when `gpu/` exists to receive shader loading and the profiler |
+| `render/util` | grab-bag | done (4c): `gpu/rhi`, `asset/exr_write`, `ui/imgui` |
 | `runtime/engine_context.h` | god object passed to every demo | phase 6, with the rest of `runtime/` |
 | `fly_camera` | duplicated in `runtime/` and `apps/editor/` | done (2b): `scene::FlyCamera`, fed a resolved `FlyCameraInput` |
 | `core/features.def` | one file every feature edits | phase 5: per-module flags self-register, which needs the one-per-process registry |
@@ -398,8 +398,9 @@ and after.
      `CMakeLists.txt`; shared fixtures go to `testing/data`, the renderer gate
      and feature gym tour to `testing/`. The top-level `CMakeLists.txt` drops
      from 1400 lines to 600.
-   - 4c: the grouping inside `rxe/`: `gpu/` out of `render`, `net/` gathering
-     `http` and `rpc`, `ui/ugui`; `render/util` dissolves into `gpu/rhi`,
+   - 4c (done): the grouping inside `rxe/`: `gpu/` out of `render` (one
+     module, since `Device::Create` constructs every backend), `net/transport`,
+     `net/http`, `net/rpc`, `ui/ugui`; `render/util` dissolves into `gpu/rhi`,
      `asset` and `ui/imgui`.
    - 4d: namespace and module renames (`app` to `host`, `authoring` to
      `devtools`, `edit` split between `scene` and `editor`, the namespaces

@@ -11,7 +11,7 @@
 #include "foundation/time/frame_timer.h"
 #include "rxe/app/application.h"
 #include "rxe/app/services.h"
-#include "rxe/ui/splash.h"
+#include "rxe/ui/ugui/splash.h"
 
 namespace rx::app {
 

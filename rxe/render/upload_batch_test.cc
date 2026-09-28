@@ -20,8 +20,8 @@
 #include "base/threading/mutex.h"
 #include "base/threading/thread.h"
 #include "rxe/render/pipeline/material_system.h"
-#include "rxe/render/rhi/command_list.h"
-#include "rxe/render/rhi/device.h"
+#include "rxe/gpu/rhi/command_list.h"
+#include "rxe/gpu/rhi/device.h"
 
 using namespace rx::render;
 namespace asset = rx::asset;

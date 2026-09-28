@@ -27,8 +27,8 @@
 #include "rxe/edit/selection.h"
 #include "rxe/edit/undo.h"
 #include "rxe/scene/fly_camera.h"
-#include "rxe/ui/ugui_backend.h"
-#include "rxe/ui/ugui_platform.h"
+#include "rxe/ui/ugui/ugui_backend.h"
+#include "rxe/ui/ugui/ugui_platform.h"
 #include "rxe/world/world_bake.h"
 
 // libultragui

@@ -7,7 +7,7 @@
 #include "foundation/build_config/export.h"
 #include "foundation/build_config/types.h"
 #include "plugins/placement/placement.h"
-#include "rxe/render/rhi/device.h"
+#include "rxe/gpu/rhi/device.h"
 
 namespace rx::placement {
 

@@ -5,7 +5,7 @@
 #include "base/strings/xstring.h"
 #include "foundation/build_config/types.h"
 #include "rxe/render/core/render_graph.h"
-#include "rxe/render/rhi/device.h"
+#include "rxe/gpu/rhi/device.h"
 
 namespace rx::render {
 

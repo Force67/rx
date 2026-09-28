@@ -38,7 +38,7 @@ struct AppConfig {
   // RX_FIXED_DT wins when the caller set it, 0 included (host.cc).
   f32 fixed_delta = 0.0f;
   // Show the rx splash plate over the first seconds of a windowed run
-  // (rxe/ui/splash.h). An application turns it off only when it is not an
+  // (rxe/ui/ugui/splash.h). An application turns it off only when it is not an
   // rx-branded product; the host already suppresses it for headless and
   // lockstep-capture runs, which is where it would do damage. RX_SPLASH
   // overrides this in both directions.

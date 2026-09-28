@@ -74,97 +74,11 @@ rx_add_module(render
   geometry/fur.cc
   geometry/wboit.cc
   geometry/gaussian.cc
-  util/exr_write.cc
-  util/gpu_profiler.cc
-  rhi/rhi.cc
-  null/null_device.cc
 )
 
-# Graphics backends. Vulkan is the default everywhere it can run; d3d12 is the
-# native windows/xbox path, and on Linux it runs natively over vkd3d
-# (D3D12-on-Vulkan) for cross-backend validation. The null backend is always
-# built.
-option(RX_RHI_VULKAN "Build the Vulkan render backend" ON)
-if(WIN32)
-  option(RX_RHI_D3D12 "Build the D3D12 render backend" ON)
-else()
-  # Default to ON when a D3D12 provider is available (the nix dev shell
-  # provides both WineHQ vkd3d and vkd3d-proton).
-  find_package(PkgConfig QUIET)
-  if(PkgConfig_FOUND)
-    pkg_check_modules(VKD3D_PROBE QUIET libvkd3d libvkd3d-utils)
-    if(NOT VKD3D_PROBE_FOUND)
-      pkg_check_modules(VKD3D_PROBE QUIET libvkd3d-proton-d3d12)
-    endif()
-  endif()
-  if(VKD3D_PROBE_FOUND)
-    option(RX_RHI_D3D12 "Build the D3D12 render backend" ON)
-  else()
-    option(RX_RHI_D3D12 "Build the D3D12 render backend" OFF)
-  endif()
-endif()
-
-if(RX_RHI_VULKAN)
-  target_sources(rx_render PRIVATE
-    vulkan/vk_device.cc
-    vulkan/vk_swapchain.cc
-    vulkan/vk_command_list.cc
-    vulkan/vk_convert.cc
-    vulkan/vk_interop.cc
-    vulkan/vma_impl.cc
-    util/shader_util.cc
-  )
-  # PUBLIC: interop consumers (gui backend, thumbnailer, upscalers) gate their
-  # Vulkan paths on this define.
-  target_compile_definitions(rx_render PUBLIC RX_RHI_VULKAN)
-  # The device floor is a property of the shaders, not a taste: a driver that
-  # cannot load the SPIR-V this build emits must be rejected at enumeration
-  # rather than accepted and then failing every pipeline.
-  if(RX_SPIRV_1_4)
-    target_compile_definitions(rx_render PUBLIC RX_SPIRV_1_4=1)
-  endif()
-endif()
-
-if(RX_RHI_D3D12)
-  target_sources(rx_render PRIVATE
-    d3d12/d3d12_device.cc
-    d3d12/d3d12_command_list.cc
-    d3d12/d3d12_swapchain.cc
-    d3d12/d3d12_convert.cc
-  )
-  # PUBLIC: RX_SHADER grows the DXIL sidecar reference under this define, so
-  # every consumer of the embed headers must agree.
-  target_compile_definitions(rx_render PUBLIC RX_RHI_D3D12)
-  # Linux D3D12 provider: WineHQ vkd3d (default) or vkd3d-proton, Proton's
-  # implementation, which exposes DXR 1.1 / mesh shaders / SM 6.6 and so runs
-  # the backend's ray tracing paths natively.
-  option(RX_VKD3D_PROTON "Use vkd3d-proton as the Linux D3D12 provider" OFF)
-  if(WIN32)
-    target_link_libraries(rx_render PRIVATE d3d12 dxgi)
-  elseif(RX_VKD3D_PROTON)
-    find_package(PkgConfig REQUIRED)
-    pkg_check_modules(VKD3D_PROTON REQUIRED IMPORTED_TARGET libvkd3d-proton-d3d12)
-    target_compile_definitions(rx_render PRIVATE RX_VKD3D_PROTON)
-    target_link_libraries(rx_render PRIVATE $<BUILD_INTERFACE:PkgConfig::VKD3D_PROTON>)
-    set(RX_INSTALL_RHI_D3D12 ON PARENT_SCOPE)
-  else()
-    find_package(PkgConfig REQUIRED)
-    pkg_check_modules(VKD3D REQUIRED IMPORTED_TARGET libvkd3d libvkd3d-utils)
-    # BUILD_INTERFACE: kept out of the installed export; rxConfig.cmake
-    # re-resolves vkd3d via pkg-config for find_package consumers.
-    target_link_libraries(rx_render PRIVATE $<BUILD_INTERFACE:PkgConfig::VKD3D>)
-    set(RX_INSTALL_RHI_D3D12 ON PARENT_SCOPE)
-  endif()
-endif()
-
-# volk / VMA are PUBLIC (their headers propagate through the RHI interop
-# surface). Wrapped in BUILD_INTERFACE so they stay out of the installed export;
-# rxConfig.cmake re-adds bundled imported equivalents for find_package consumers.
-# Under RX_SHARED volk is compiled hidden (see the top-level CMakeLists), so each
-# DSO that links it gets a private, non-interposing copy it initializes itself.
-target_link_libraries(rx_render
-  PUBLIC rx::foundation rx::window rx::asset
-         $<BUILD_INTERFACE:volk> $<BUILD_INTERFACE:GPUOpen::VulkanMemoryAllocator>)
+# rx::gpu carries volk and VMA publicly, so the upscaler and denoiser glue sees
+# them through it.
+target_link_libraries(rx_render PUBLIC rx::gpu rx::foundation rx::window rx::asset)
 target_link_libraries(rx_render PRIVATE $<BUILD_INTERFACE:rx::stb_impl>)
 
 if(RX_FSR3)
@@ -197,10 +111,6 @@ if(RX_NRD)
   target_compile_definitions(rx_render PUBLIC RX_HAS_NRD)
   target_link_libraries(rx_render PRIVATE $<BUILD_INTERFACE:rx::nrd>)
   set(RX_INSTALL_NRD ON PARENT_SCOPE)
-endif()
-
-if(NOT MSVC)
-  set_source_files_properties(vulkan/vma_impl.cc PROPERTIES COMPILE_OPTIONS -w)
 endif()
 
 set(RX_RENDER_SHADERS
@@ -236,8 +146,6 @@ set(RX_RENDER_SHADERS
   shaders/pipeline/mesh_rt.ps.hlsl
   shaders/pipeline/mesh_sss.ps.hlsl
   shaders/pipeline/mesh_rt_sss.ps.hlsl
-  shaders/util/fullscreen.vs.slang
-  shaders/util/blit.ps.slang
   shaders/util/msaa_resolve.cs.hlsl
   shaders/util/depth_copy.ps.hlsl
   shaders/post/tonemap.ps.hlsl
@@ -515,20 +423,6 @@ set(RX_SHADER_NO_DXIL
   vgeo_vis.ps.hlsl
   vgeo_resolve.ps.hlsl
 )
-
-# Optional RHI imgui render backend. rxe/render must not hard-depend on
-# imgui, so this compiles only when the vendored imgui core target exists. It
-# links imgui core only (no SDL3, no raw-Vulkan backend, no second volk copy);
-# the shaders embed alongside the rest of the render module's.
-if(TARGET rx_imgui_core)
-  target_sources(rx_render PRIVATE util/imgui_renderer.cc)
-  # BUILD_INTERFACE: kept out of the installed export (find_package consumers
-  # bring their own imgui); add_subdirectory consumers link it directly.
-  target_link_libraries(rx_render PRIVATE $<BUILD_INTERFACE:rx_imgui_core>)
-  list(APPEND RX_RENDER_SHADERS
-    shaders/util/imgui.vs.hlsl
-    shaders/util/imgui.ps.hlsl)
-endif()
 
 
 foreach(sym recon_gbuffer_cs_hlsl pathtrace_gbuffer_cs_hlsl)
