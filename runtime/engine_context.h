@@ -7,12 +7,12 @@
 #include "base/strings/xstring.h"
 #include "debug_ui.h"
 #include "foundation/math/math.h"
+#include "rxe/app/services.h"
 #include "rxe/asset/asset_database.h"
 #include "rxe/asset/vfs.h"
 #include "rxe/audio/audio_system.h"
 #include "rxe/ecs/scheduler.h"
 #include "rxe/ecs/world.h"
-#include "rxe/host/services.h"
 #include "rxe/importers/usd/usd_loader.h"
 #include "rxe/physics/physics_world.h"
 #include "rxe/render/core/presets.h"
@@ -23,8 +23,8 @@
 
 namespace rx {
 
-// The viewer's boot configuration: the host::HostConfig fields plus the
-// front-door content selection (main.cc maps the overlap into HostConfig).
+// The viewer's boot configuration: the app::AppConfig fields plus the
+// front-door content selection (main.cc maps the overlap into AppConfig).
 struct EngineConfig {
   base::String scene_path;  // standalone gltf/glb or usd scene (e.g. sponza)
   base::String demo_scene;  // builtin demo scene id ("water", "materials", ...)
@@ -79,7 +79,7 @@ struct EngineConfig {
 
 // A dynamic physics body the host mirrors into an ECS transform after each
 // step (the viewer's name for the host's binding type).
-using PhysicsEntity = host::PhysicsBinding;
+using PhysicsEntity = app::PhysicsBinding;
 
 // Shared services the viewer subsystems (demo scenes, debug overlay) read
 // through: the host-owned engine services plus the viewer's own camera, UI
@@ -97,7 +97,7 @@ struct EngineContext {
   audio::AudioSystem* audio = nullptr;
   DebugUi* debug_ui = nullptr;
   base::Vector<PhysicsEntity>* physics_entities = nullptr;
-  base::Vector<host::HairStrandBinding>* hair_bindings = nullptr;
+  base::Vector<app::HairStrandBinding>* hair_bindings = nullptr;
   // Resolved semantic input this frame (move/look axes); null before the first
   // pump. Demos read it to drive interactive behaviour (e.g. locomotion speed).
   const ActionState* actions = nullptr;

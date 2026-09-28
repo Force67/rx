@@ -9,7 +9,7 @@
 #include "rxe/anim/procedural_gait.h"
 #include "rxe/asset/asset_database.h"
 #include "rxe/asset/mesh.h"
-#include "rxe/host/host_client.h"
+#include "rxe/app/application.h"
 #include "rxe/ui/events/input.h"
 
 #include "base/containers/map.h"
@@ -147,11 +147,11 @@ struct PlacementBrush {
   Vec3 last_position{};
 };
 
-class Editor final : public host::HostClient {
+class Editor final : public app::Application {
 public:
   explicit Editor(base::String open_path) : open_path_(base::move(open_path)) {}
 
-  bool OnInitialize(host::Services &services) override;
+  bool OnInitialize(app::Services &services) override;
   void OnUpdate(f32 dt) override;
   void OnBuildView(f32 dt, render::FrameView &view) override;
   void OnFrameEnd() override;
@@ -248,8 +248,8 @@ private:
   const MeshRecord *FindMesh(u64 hash) const;
   base::String EntityLabel(ecs::Entity e) const;
 
-  host::Services *services_ = nullptr;
-  host::Host *host_ = nullptr;
+  app::Services *services_ = nullptr;
+  app::Host *host_ = nullptr;
   Window *window_ = nullptr;
   render::Renderer *renderer_ = nullptr;
   ecs::World *world_ = nullptr;

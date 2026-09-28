@@ -73,7 +73,7 @@ rxe/                  the engine (Chromium: content/)
   world/              world format, map, streaming, overlays, claims
   world_bake/         offline world baking (tools and the editor link it, games do not)
   devtools/           the command bridge and endpoint (rxcall, agents)
-  host/               Host, HostClient, HostConfig, platform config, world clock
+  app/                Host, Application, AppConfig, platform config, world clock
   editor/             the editor itself: selection, undo, panels, editor ui
   resources/          everything in rxe://: fonts/, config/
 
@@ -121,10 +121,10 @@ of that:
 
 - **Entity-free modules.** `gpu`, `ui`, `storage`, `asset`, `importers`,
   `audio`, `net`, `physics`, `anim`, `render` and `render2d` may not depend on
-  `ecs`, `scene`, `script`, `world` or `host`. They work on their own handles, so
-  they can be tested without an entity world, and `scene`/`host` are the only
+  `ecs`, `scene`, `script`, `world` or `app`. They work on their own handles, so
+  they can be tested without an entity world, and `scene`/`app` are the only
   places that bind them to entities. This already holds today; the rule keeps it.
-- **Nothing depends on `host`.** It is the engine's composition root: the only
+- **Nothing depends on `app`.** It is the engine's composition root: the only
   module that knows every subsystem, with no feature logic of its own.
 - **Nothing a shipping game must link depends on `editor`, `world_bake` or
   `importers/usd`.** An app gets them only by asking.
@@ -196,7 +196,7 @@ nearly everywhere. Nothing in it may include `rxe/`.
 | `algorithm` | `core/sort.h` |
 
 The rest of `core` goes into `rxe/`: `window*` and `wayland_kde_hdr` to
-`ui/window`, `input*` to `ui/events`, and `world_clock` to `host` (simulation
+`ui/window`, `input*` to `ui/events`, and `world_clock` to `app` (simulation
 time is not foundation).
 
 ## Mapping of the other modules
@@ -222,7 +222,7 @@ Paths on the right are under `rxe/` unless they start with `plugins/` or `apps/`
 | `net/bubble_debug` | `plugins/replication/replication_debug` |
 | `http` | `net/http` |
 | `rpc` | `net/rpc` |
-| `app/*` | `host`. `app::Application` becomes `HostClient` (a `Client` is the interface an embedder implements), `AppConfig` becomes `HostConfig`. |
+| `app/*` | `app` (unchanged: `app::Host`, `app::Application`, `app::AppConfig`) |
 | `ecs`, `script`, `anim`, `render2d` | same name |
 | `scene/*`, `edit/reflect`, `edit/scene_io`, `edit/hierarchy` | `scene` (done in 4d-1). Loading a scene and composing world transforms are not editor features: the shell and `--validate` need them. |
 | `edit/selection`, `undo` | `editor` |
@@ -263,12 +263,12 @@ interface that the render graph drives. That gets its own design note and is
 the last phase here. Once it lands, `render/water` and the others can each
 become a module, and water or hair can become a plugin.
 
-## Host, plugins and apps
+## Application, plugins and apps
 
-`rxe/host` keeps today's shape. An app implements `HostClient`
+`rxe/app` keeps today's shape. An app implements `app::Application`
 (`OnInitialize`, `OnFixedStep`, `OnUpdate`, `OnBuildView`, `OnFrameEnd`,
 `OnShutdown`) and hands it to a `Host`. Identity (`id`, `name`, `title`) stays
-in `HostConfig`, as in CONFIG.md.
+in `AppConfig`, as in CONFIG.md.
 
 A plugin module registers itself through one function:
 
@@ -298,7 +298,7 @@ An out-of-tree game has the same shape as rx itself, minus the engine:
 ```
 mygame/
   CMakeLists.txt        add_subdirectory(rx) or find_package(rx); rx_add_app(...)
-  apps/mygame/          the game: main.cc (composition root), the HostClient, gameplay
+  apps/mygame/          the game: main.cc (composition root), the Application, gameplay
   plugins/<name>/       project plugins, the same shape as plugins/ in rx
   assets/  config/      content, as in CONFIG.md
 ```
@@ -402,9 +402,9 @@ and after.
      module, since `Device::Create` constructs every backend), `net/transport`,
      `net/http`, `net/rpc`, `ui/ugui`; `render/util` dissolves into `gpu/rhi`,
      `asset` and `ui/imgui`.
-   - 4d-1 (done): `app` becomes `host` (`HostClient`, `HostConfig`),
-     `authoring` becomes `devtools`, and reflection, `.rxscene` io and the
-     transform hierarchy move from `edit` into `scene`. What stays in `edit`
+   - 4d-1 (done): `authoring` becomes `devtools`, and reflection, `.rxscene`
+     io and the transform hierarchy move from `edit` into `scene`. `app` keeps
+     its name. What stays in `edit`
      (selection, undo) becomes `editor` in phase 6, with `apps/editor`.
    - 4d-2: namespace consolidation: flat foundation, `internal`, `rx::net`
      absorbing http and rpc, and `rx::importers`, `rx::vehicles`,
@@ -435,7 +435,7 @@ that moves a header appends to that file.
 | first-party apps | `rx::shell`, `rx::editor` |
 | third-party plugins, games | their own root, never `rx::`, as Chromium components use `autofill::` and not `chrome::` |
 
-Renames: `rx::app` becomes `rx::host`, `rx::authoring` becomes `rx::devtools`,
+Renames: `rx::authoring` becomes `rx::devtools`,
 `rx::http`/`rx::rpc` become `rx::net`, and `rx::edit` splits into `rx::scene`
 and `rx::editor`.
 

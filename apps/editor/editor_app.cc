@@ -22,7 +22,7 @@
 #include "rxe/anim/morph.h"
 #include "rxe/asset/primitives.h"
 #include "rxe/asset/vfs.h"
-#include "rxe/host/host.h"
+#include "rxe/app/host.h"
 #include "rxe/importers/blend/blend_import.h"
 #include "rxe/importers/gltf/gltf_loader.h"
 #include "rxe/importers/usd/usd_loader.h"
@@ -131,7 +131,7 @@ asset::Mesh MakeTurntable(f32 radius, f32 half_height, asset::AssetId id,
 } // namespace
 
 // Lifecycle
-bool Editor::OnInitialize(host::Services &s) {
+bool Editor::OnInitialize(app::Services &s) {
   services_ = &s;
   host_ = s.host;
   window_ = s.window;

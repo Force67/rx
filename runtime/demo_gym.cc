@@ -231,7 +231,7 @@ Mat4 ScaleMat(const Vec3& s) {
 Quat HeadingQuat(f32 yaw) { return QuatFromAxisAngle({0, -1, 0}, yaw); }
 
 // The character/platform/item update is physics-coupled, so it must advance on
-// the same fixed cadence host::Host steps Jolt at, not the variable render frame
+// the same fixed cadence app::Host steps Jolt at, not the variable render frame
 // delta (hitches / a varying refresh rate otherwise desync the controller from
 // physics). Mirror the Host's fixed step: RX_FIXED_DT when set, else the
 // FrameTimer default of 1/60 s.
@@ -761,7 +761,7 @@ void GymDemo::Update(f32 dt, const InputState& input, const ActionState& actions
   if (!script_.empty()) {
     steps = 1;
   } else {
-    // Mirror host::Host's fixed-step accumulator (same 0.25 s clamp against a
+    // Mirror app::Host's fixed-step accumulator (same 0.25 s clamp against a
     // spiral of death) so the physics-coupled update advances on the engine's
     // Jolt cadence rather than the raw render frame delta.
     static f32 sim_accum = 0.0f;

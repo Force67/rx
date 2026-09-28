@@ -22,7 +22,7 @@ BASELINE = os.path.join(os.path.dirname(os.path.abspath(__file__)), "baseline.tx
 # Modules that work on their own handles and must not know the entity world.
 ENTITY_FREE = {"foundation", "events", "window", "gpu", "imgui_renderer", "ui", "asset", "audio", "net", "http", "rpc", "physics",
                "anim", "render", "render2d"}
-ENTITY_WORLD = {"ecs", "scene", "script", "world", "edit", "devtools", "host"}
+ENTITY_WORLD = {"ecs", "scene", "script", "world", "edit", "devtools", "app"}
 # Headers only the editor and tools may use; a shipping game never links them.
 EDITOR_ONLY = {"rxe/edit/selection.h", "rxe/edit/undo.h", "rxe/world/world_bake.h"}
 HEADER_EXTS = (".h", ".hpp", ".inl", ".def")
@@ -185,7 +185,7 @@ def check(graph):
       for mod in sorted(mods):
         if mod in ENTITY_FREE and dep_mods & ENTITY_WORLD:
           found.append(("entity-free", "%s may not know the entity world" % mod))
-        if "host" in dep_mods:
+        if "app" in dep_mods:
           found.append(("host", "only apps may depend on the host"))
         if rel(dep) in EDITOR_ONLY:
           found.append(("editor-only", "a library may not use editor-only code"))

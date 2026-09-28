@@ -1,4 +1,4 @@
-#include "rxe/host/host.h"
+#include "rxe/app/host.h"
 
 #include <string.h>
 
@@ -11,8 +11,8 @@
 #include "base/memory/move.h"
 #include "base/memory/unique_pointer.h"
 #include "base/threading/thread.h"
+#include "rxe/app/platform_config.h"
 #include "rxe/asset/content_mounts.h"
-#include "rxe/host/platform_config.h"
 #include <base/hashing/cuid2.h>
 
 #include "foundation/algorithm/sort.h"
@@ -28,8 +28,8 @@
 // Host lifecycle and the per-frame heartbeat: subsystem bringup in dependency
 // order, the resolved render preset, the fixed-step simulation loop and the
 // render path that gathers entity draws into the FrameView and submits it.
-// Everything game-specific happens inside the HostClient callbacks.
-namespace rx::host {
+// Everything game-specific happens inside the Application callbacks.
+namespace rx::app {
 namespace {
 // Host-startup options. Namespace scope, so they register before
 // InitOptionsFromEnv() runs. WinW/WinH=0 keep the WindowDesc default
@@ -73,7 +73,7 @@ void ApplyMemoryPlan(const base::String& text) {
 
 }  // namespace
 
-bool Host::Initialize(const HostConfig& config, HostClient& app,
+bool Host::Initialize(const AppConfig& config, Application& app,
                       base::UniquePointer<Window> window) {
   config_ = config;
   app_ = &app;
@@ -82,10 +82,10 @@ bool Host::Initialize(const HostConfig& config, HostClient& app,
   // Identity first: the mounts, the per-user folders and the window all name
   // the app by it.
   BASE_FATAL_CHECK(base::IsValidCuid2(config_.id.c_str()),
-                   "HostConfig::id must be a cuid2: run `rx --new-app-id` for one");
+                   "AppConfig::id must be a cuid2: run `rx --new-app-id` for one");
   BASE_FATAL_CHECK(IsValidAppName(config_.name),
-                   "HostConfig::name must be a slug: lowercase [a-z0-9_-], not rxe or user");
-  BASE_FATAL_CHECK(!config_.title.empty(), "HostConfig::title must be set");
+                   "AppConfig::name must be a slug: lowercase [a-z0-9_-], not rxe or user");
+  BASE_FATAL_CHECK(!config_.title.empty(), "AppConfig::title must be set");
   SetAppIdentity({config_.id, config_.name, config_.title});
   // The engine's and the game's content (rxe://, <title>://) mount first: the
   // platform config lives there, and the application mounts over it later.
@@ -99,7 +99,7 @@ bool Host::Initialize(const HostConfig& config, HostClient& app,
   ApplyMemoryPlan(startup.memory);
   jobs_ = base::MakeUnique<JobSystem>();
   ConfigureClock(20.0f);
-  // An app that asked for lockstep (HostConfig::fixed_delta, i.e. a capture run)
+  // An app that asked for lockstep (AppConfig::fixed_delta, i.e. a capture run)
   // gets it unless the caller spoke about the clock themselves: RX_FIXED_DT set
   // to 0 is how you ask a capture for real wall-clock timing back, and a
   // nonzero one is re-applied every RunFrame below.
@@ -536,4 +536,4 @@ void Host::Shutdown() {
   if (jobs_) jobs_->WaitIdle();
 }
 
-}  // namespace rx::host
+}  // namespace rx::app

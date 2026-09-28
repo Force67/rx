@@ -8,7 +8,7 @@
 #include "foundation/files/file_system.h"
 #include "foundation/logging/log.h"
 #include "material_palette.h"
-#include "rxe/host/host.h"
+#include "rxe/app/host.h"
 #include "rxe/scene/reflect.h"
 #include "rxe/scene/scene_handlers.h"
 #include "rxe/script/handler_registry.h"
@@ -37,7 +37,7 @@ void PrintUsage() {
   RX_INFO("  --demo <id>           builtin scene: water | fluid | weather | materials | gaussian | cornell |");
   RX_INFO("                        featuregym | cloth | locomotion | ship | nav | gym | shooter | puppet | drive |");
   RX_INFO("                        placement | grass | lod | oit | fire | brick | silpom | sss | scenehook | ... (cube)");
-  RX_INFO("  --new-app-id          print a fresh cuid2 for HostConfig::id and exit");
+  RX_INFO("  --new-app-id          print a fresh cuid2 for AppConfig::id and exit");
   RX_INFO("  --dump-schema         print the .rxscene component schema as json and exit");
   RX_INFO("  --dump-commands       print the live command schema as json and exit");
   RX_INFO("  --dump-materials [dir]  print the material palette as json and exit (default");
@@ -146,7 +146,7 @@ void DumpCommands() {
 
 int main(int argc, char** argv) {
   rx::EngineConfig config;
-  rx::host::HostConfig app_config;
+  rx::app::AppConfig app_config;
   app_config.id = "dyrcg9826wzw53y6vr0g0cjx";
   app_config.name = "rx";
   app_config.title = "rx";
@@ -268,7 +268,7 @@ int main(int argc, char** argv) {
 #endif
 
   rx::Viewer viewer(config);
-  rx::host::Host host;
+  rx::app::Host host;
   if (!host.Initialize(app_config, viewer)) {
     RX_ERROR("engine initialization failed");
     return 1;

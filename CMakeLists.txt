@@ -306,7 +306,7 @@ if(NOT DEFINED RX_MODULES)
     inventory
     locomotion
     ui/ugui
-    host
+    app
   )
 endif()
 
@@ -449,7 +449,7 @@ if(RX_BUILD_RUNTIME)
   add_subdirectory(runtime)
 endif()
 
-# The editor application: a host::HostClient whose entire UI is rx::ui.
+# The editor application: an app::Application whose entire UI is rx::ui.
 if(RX_BUILD_EDITOR)
   add_subdirectory(apps/editor)
 endif()

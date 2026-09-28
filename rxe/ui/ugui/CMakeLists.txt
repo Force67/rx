@@ -1,6 +1,6 @@
 # The engine's retained-mode UI layer: libultragui driven in draw-data mode by
 # rx's own Vulkan backend, plus the splash plate every rx application shows at
-# startup. rx::host links this, so the plate needs no cooperation from the game;
+# startup. rx::app links this, so the plate needs no cooperation from the game;
 # the editor links it for its whole UI.
 
 # libultragui: sibling checkout ../libultragui (discovered like ../kinema).

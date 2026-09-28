@@ -2,7 +2,7 @@
 
 # rxConfig.cmake - package config for a find_package(rx) consumer.
 #
-# rx's static module archives (rx::foundation ... rx::host) come from rxTargets.cmake.
+# rx's static module archives (rx::foundation ... rx::app) come from rxTargets.cmake.
 # Their third-party link/usage closure is bundled with the package (see
 # cmake/install.cmake) and recreated here as IMPORTED targets, then re-attached
 # to the rx:: targets. Static archives never absorb their dependencies, so this

@@ -6,7 +6,7 @@ event loop; rx feeds it a `UguiHostState` viewport, pushes input into its queue
 and records its draw list through `GuiRenderBackend`, a Vulkan backend on the
 engine's own dynamic-rendering path (`FrameView::hud_draw`).
 
-`ui::Splash` is the engine's own consumer: the rx plate `host::Host` puts up over
+`ui::Splash` is the engine's own consumer: the rx plate `app::Host` puts up over
 the first seconds of every windowed run, with the wordmark embedded in the
 binary (`brand/`). It keeps a private `ugui::UIContext` and parks it, so an
 application's own ultragui UI keeps the thread's active widget registry the

@@ -15,7 +15,7 @@ namespace rx {
 //          settings folder (~/.config/<name>).
 //   title  what a person reads: window title, the application name drivers and
 //          compositors see.
-// host::Host sets it from HostConfig before anything asks; rx's own viewer and
+// app::Host sets it from AppConfig before anything asks; rx's own viewer and
 // editor carry one too. Until then it is rx's, with the fused test id.
 struct AppIdentity {
   base::String id;

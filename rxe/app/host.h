@@ -9,17 +9,17 @@
 #include "base/memory/unique_pointer.h"
 #include "foundation/build_config/export.h"
 #include "foundation/time/frame_timer.h"
-#include "rxe/host/host_client.h"
-#include "rxe/host/services.h"
+#include "rxe/app/application.h"
+#include "rxe/app/services.h"
 #include "rxe/ui/ugui/splash.h"
 
-namespace rx::host {
+namespace rx::app {
 
 // The composition root: owns every engine subsystem, brings them up in order,
 // runs the fixed-step simulation + render loop and tears them down. Game
-// policy enters only through the HostClient callbacks; the host appears in
+// policy enters only through the Application callbacks; the host appears in
 // no engine signature below this layer.
-class RX_HOST_EXPORT Host {
+class RX_APP_EXPORT Host {
  public:
   Host() = default;
   ~Host();
@@ -31,7 +31,7 @@ class RX_HOST_EXPORT Host {
   // creates one itself. A failed Initialize tears down whatever it had
   // brought up (the destructor calls Shutdown), so callers need not Shutdown
   // after a failure. `app` must outlive the host.
-  bool Initialize(const HostConfig& config, HostClient& app,
+  bool Initialize(const AppConfig& config, Application& app,
                   base::UniquePointer<Window> window = nullptr);
   int Run();
   // One iteration of the main loop. Returns false when the host wants to
@@ -74,8 +74,8 @@ class RX_HOST_EXPORT Host {
   // `headless` alone.
   bool rendering() const { return !config_.headless || config_.offscreen; }
 
-  HostConfig config_;
-  HostClient* app_ = nullptr;
+  AppConfig config_;
+  Application* app_ = nullptr;
 
   base::UniquePointer<Window> window_;
   base::UniquePointer<JobSystem> jobs_;
@@ -119,6 +119,6 @@ class RX_HOST_EXPORT Host {
   bool shut_down_ = false;
 };
 
-}  // namespace rx::host
+}  // namespace rx::app
 
 #endif  // RX_ENGINE_APP_HOST_H_

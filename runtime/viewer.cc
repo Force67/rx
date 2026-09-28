@@ -38,7 +38,7 @@
 // (glTF scene or builtin demo), the day/night sun, the debug overlay and the
 // capture hooks. The camera and its scripted drivers live in the sibling
 // camera_input.cc translation unit; the subsystems and the loop live in
-// host::Host.
+// app::Host.
 namespace rx {
 namespace {
 // Viewer options. Namespace scope, so they register before the host runs
@@ -111,7 +111,7 @@ Viewer::~Viewer() {
   }
 }
 
-bool Viewer::OnInitialize(host::Services& services) {
+bool Viewer::OnInitialize(app::Services& services) {
   host_ = services.host;
   window_ = services.window;
   renderer_ = services.renderer;

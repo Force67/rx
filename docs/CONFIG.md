@@ -6,7 +6,7 @@ through the vfs (`rxe/asset/vfs.h`); nothing is compiled into the binary.
 
 ## Identity
 
-Every app on `host::Host` sets three things in `HostConfig`. All are required;
+Every app on `app::Host` sets three things in `AppConfig`. All are required;
 startup stops on a bad one.
 
 | field | example | rules | used for |
@@ -43,7 +43,7 @@ so every rx app gains from them.
   rxe/config/*.ini        -> rxe://config/    engine builds only: the tiers, loose and editable
 ```
 
-`asset::MountContent` (called by `host::Host` at startup) mounts it, archives
+`asset::MountContent` (called by `app::Host` at startup) mounts it, archives
 before loose files, later mounts winning:
 
 | mount | from, in mount order |
@@ -158,7 +158,7 @@ tier file's options and memory plan apply once the tier is known.
 ### Precedence
 
 For render settings: built-in defaults < the layers above in order < `RX_*`
-env overrides that are actually set < `HostConfig::tune_settings`. The device
+env overrides that are actually set < `AppConfig::tune_settings`. The device
 clamps come after the files: a tier cannot turn on ray tracing a gpu lacks.
 For options: built-in default < the layers < the environment.
 

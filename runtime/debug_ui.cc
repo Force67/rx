@@ -27,9 +27,9 @@
 #include "foundation/memory/frame_arena.h"
 #include "foundation/memory/memory_tracker.h"
 #include "foundation/system/app_identity.h"
+#include "rxe/app/platform_config.h"
 #include "rxe/asset/vfs.h"
 #include "rxe/ecs/world.h"
-#include "rxe/host/platform_config.h"
 #include "rxe/render/core/presets.h"
 #include "rxe/render/core/settings_ini.h"
 #include "rxe/ui/imgui/imgui_theme.h"
@@ -283,9 +283,9 @@ void DebugUi::Build(render::Renderer& renderer, scene::FlyCamera& camera, const 
         const f32 cloud_coverage = settings.cloud_coverage;
         const render::CloudscapeControls cloudscape_controls = settings.cloudscape_controls;
         const render::WeatherSettings weather = settings.weather;
-        host::PlatformConfig tier;
+        app::PlatformConfig tier;
         if (vfs_)
-          host::ReadPlatformChain(*vfs_, GetAppIdentity().name, render::ResolvePreset(preset, *caps),
+          app::ReadPlatformChain(*vfs_, GetAppIdentity().name, render::ResolvePreset(preset, *caps),
                                  &tier);
         settings = render::PresetSettings(tier.render, *caps);
         settings.clouds = clouds;

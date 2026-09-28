@@ -4,17 +4,17 @@
 #include <base/containers/vector.h>
 
 #include "foundation/tasks/job_system.h"
+#include "rxe/app/world_clock.h"
 #include "rxe/asset/vfs.h"
 #include "rxe/audio/audio_system.h"
 #include "rxe/ecs/scheduler.h"
 #include "rxe/ecs/world.h"
-#include "rxe/host/world_clock.h"
 #include "rxe/physics/physics_world.h"
 #include "rxe/render/core/renderer.h"
 #include "rxe/ui/events/input_bindings.h"
 #include "rxe/ui/window/window.h"
 
-namespace rx::host {
+namespace rx::app {
 
 class Host;
 
@@ -63,6 +63,6 @@ struct Services {
   base::Vector<HairStrandBinding>* hair_bindings = nullptr;
 };
 
-}  // namespace rx::host
+}  // namespace rx::app
 
 #endif  // RX_ENGINE_APP_SERVICES_H_

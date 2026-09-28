@@ -1,4 +1,4 @@
-#include "rxe/host/platform_config.h"
+#include "rxe/app/platform_config.h"
 
 #include <stdlib.h>
 
@@ -13,7 +13,7 @@
 #include "rxe/render/core/settings.h"
 #include "rxe/render/core/settings_ini.h"
 
-namespace rx::host {
+namespace rx::app {
 namespace {
 
 constexpr int kMaxIncludeDepth = 8;
@@ -156,4 +156,4 @@ void ApplyPlatformOptions(PlatformConfig& config) {
   }
 }
 
-}  // namespace rx::host
+}  // namespace rx::app

@@ -1,4 +1,4 @@
-# The rx viewer: a host::HostClient on top of host::Host, adding the built-in
+# The rx viewer: an app::Application on top of app::Host, adding the built-in
 # demo scenes / glTF loading, the fly camera and the imgui debug overlay. The
 # debug overlay compiles to a stub when imgui is absent, so the same
 # translation units serve headless builds.
@@ -28,7 +28,7 @@ set(RX_RUNTIME_SOURCES
 )
 
 set(RX_RUNTIME_MODULES
-  rx::host
+  rx::app
   rx::foundation
   rx::window
   rx::events

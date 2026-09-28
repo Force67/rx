@@ -109,17 +109,12 @@ prefix  rxe/http/ rxe/net/http/
 prefix  rxe/rpc/ rxe/net/rpc/
 prefix  rxe/ui/ rxe/ui/ugui/
 
-# Phase 4d-1: app becomes host, authoring becomes devtools, and the runtime half
-# of edit (reflection, .rxscene io, the transform hierarchy) moves into scene
-include rxe/app/application.h rxe/host/host_client.h
-prefix  rxe/app/ rxe/host/
+# Phase 4d-1: authoring becomes devtools, and the runtime half of edit
+# (reflection, .rxscene io, the transform hierarchy) moves into scene
 prefix  rxe/authoring/ rxe/devtools/
 include rxe/edit/reflect.h rxe/scene/reflect.h
 include rxe/edit/scene_io.h rxe/scene/scene_io.h
 include rxe/edit/hierarchy.h rxe/scene/hierarchy.h
-symbol  app::Application host::HostClient
-symbol  app::AppConfig host::HostConfig
-symbol  app:: host::
 symbol  authoring:: devtools::
 symbol  edit::AddComponentByDesc scene::AddComponentByDesc
 symbol  edit::AllComponents scene::AllComponents

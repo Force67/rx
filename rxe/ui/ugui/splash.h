@@ -17,7 +17,7 @@ namespace rx::ui {
 
 // The engine plate every rx application shows over its first frames: the rx
 // wordmark on a light field, held for a few seconds and then faded out.
-// host::Host owns one and drives it; an application never sees it.
+// app::Host owns one and drives it; an application never sees it.
 //
 // It draws through FrameView::hud_draw, the same slot an application's own
 // ultragui HUD uses, and the host installs it *after* OnBuildView. So while the
