@@ -3,7 +3,7 @@
 #include "base/strings/xstring.h"
 #include "rxe/net/rpc/rpc_registry.h"
 
-namespace rx::rpc {
+namespace rx::net {
 
 void RpcRegistry::On(base::String name, RpcHandler handler) {
   handlers_[name] = base::move(handler);
@@ -28,4 +28,4 @@ size_t RpcRegistry::size() const {
   return handlers_.size();
 }
 
-}  // namespace rx::rpc
+}  // namespace rx::net

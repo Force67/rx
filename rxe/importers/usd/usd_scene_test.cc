@@ -193,11 +193,11 @@ bool Near(f32 value, f32 expected) { return ::fabsf(value - expected) < 1e-4f; }
 } // namespace
 
 int main() {
-  Check(asset::IsUsdPath("scene.usd") && asset::IsUsdPath("scene.USDA") &&
-            asset::IsUsdPath("a/b.usdc") && asset::IsUsdPath("packed.usdz"),
+  Check(importers::IsUsdPath("scene.usd") && importers::IsUsdPath("scene.USDA") &&
+            importers::IsUsdPath("a/b.usdc") && importers::IsUsdPath("packed.usdz"),
         "every usd extension is recognized");
-  Check(!asset::IsUsdPath("scene.gltf") && !asset::IsUsdPath("usd") &&
-            !asset::IsUsdPath("no_extension"),
+  Check(!importers::IsUsdPath("scene.gltf") && !importers::IsUsdPath("usd") &&
+            !importers::IsUsdPath("no_extension"),
         "non-usd paths are not claimed");
 
   const base::String dir = rx::fs::TempDirectory();
@@ -210,7 +210,7 @@ int main() {
   }
 
   asset::ImportedScene scene;
-  const bool loaded = asset::LoadUsdScene(stage, &scene);
+  const bool loaded = importers::LoadUsdScene(stage, &scene);
   rx::fs::Remove(prop);
   rx::fs::Remove(stage);
   Check(loaded, "referenced usda stage loads");
@@ -267,7 +267,7 @@ int main() {
   }
   asset::ImportedScene openpbr_scene;
   const bool openpbr_loaded =
-      asset::LoadUsdScene(openpbr_stage, &openpbr_scene);
+      importers::LoadUsdScene(openpbr_stage, &openpbr_scene);
   rx::fs::Remove(openpbr_stage);
   Check(openpbr_loaded, "an OpenPBR stage loads");
 
@@ -311,7 +311,7 @@ int main() {
   }
   asset::ImportedScene textured_scene;
   const bool textured_loaded =
-      asset::LoadUsdScene(textured_stage, &textured_scene);
+      importers::LoadUsdScene(textured_stage, &textured_scene);
   rx::fs::Remove(textured_stage);
   rx::fs::Remove(grey);
   Check(textured_loaded, "a textured UsdPreviewSurface stage loads");

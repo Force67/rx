@@ -12,7 +12,7 @@
 #include "rxe/net/transport/protocol.h"
 #include "rxe/scene/components.h"
 
-namespace rx::net {
+namespace rx::replication {
 
 // Stable identity across machines. Local Entity values differ per peer, the
 // NetworkId is what snapshots address.
@@ -85,11 +85,11 @@ class RX_REPLICATION_EXPORT WorldCapture {
  public:
   void Capture(ecs::World& world, u64 server_tick, const ReplicationHooks& hooks);
 
-  const base::Vector<EntityState>& entities() const { return entities_; }
+  const base::Vector<net::EntityState>& entities() const { return entities_; }
   u64 tick() const { return tick_; }
 
  private:
-  base::Vector<EntityState> entities_;
+  base::Vector<net::EntityState> entities_;
   u64 tick_ = 0;
 };
 
@@ -106,11 +106,11 @@ class RX_REPLICATION_EXPORT PeerStream {
   // the number of entity records written. `out` is reused by the caller
   // across ticks so the vectors keep their capacity.
   u32 Build(const WorldCapture& capture, const InterestSet* interest, bool full,
-            Snapshot* out);
+            net::Snapshot* out);
 
  private:
   struct Cached {
-    EntityState state;
+    net::EntityState state;
     u64 seen_tick = 0;
   };
 
@@ -130,7 +130,7 @@ class RX_REPLICATION_EXPORT SnapshotApplier {
   // snapshots. Returns false when the snapshot is stale (out-of-order
   // delivery). `hooks.on_replica_spawned` fires for new replicas carrying a
   // user tag.
-  bool Apply(ecs::World& world, const Snapshot& snapshot, f32 lerp_duration,
+  bool Apply(ecs::World& world, const net::Snapshot& snapshot, f32 lerp_duration,
              const ReplicationHooks& hooks);
 
   // Destroys every entity this applier spawned. Used on disconnect.
@@ -151,6 +151,6 @@ class RX_REPLICATION_EXPORT SnapshotApplier {
   u64 latest_tick_ = 0;
 };
 
-}  // namespace rx::net
+}  // namespace rx::replication
 
 #endif  // RX_NET_REPLICATION_H_

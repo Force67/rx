@@ -22,7 +22,7 @@ enum class MessageType : u16 {
   kJoinRefuse = 103,   // server -> client: turned away
   kSnapshot = 104,     // server -> client: that client's entity stream
   kPlayerInput = 105,  // client -> server: input for its player entity
-  kRpcCall = 106,      // either direction: an encoded scripting RPC (rpc::EncodeCall)
+  kRpcCall = 106,      // either direction: an encoded scripting RPC (net::EncodeCall)
   kBubbleSync = 107,   // server -> clients: every player's interest bubble (debug/HUD)
 };
 

@@ -24,9 +24,11 @@
 #include "rxe/net/transport/protocol.h"
 
 namespace rx::net {
-
 class RpcServerChannel;
 class RpcClientChannel;
+}  // namespace rx::net
+
+namespace rx::replication {
 
 struct SessionConfig {
   u16 port = 29700;
@@ -99,7 +101,7 @@ class RX_REPLICATION_EXPORT ServerSession : public Session {
   // Integrates one player's newest input each fixed step. Unset runs a plain
   // fly-move (demo default); a game replaces it with its actual locomotion.
   void SetPlayerSimulator(
-      base::Function<void(ecs::World&, ecs::Entity, const PlayerInput&, f32 dt)> sim) {
+      base::Function<void(ecs::World&, ecs::Entity, const net::PlayerInput&, f32 dt)> sim) {
     player_simulator_ = base::move(sim);
   }
 
@@ -125,7 +127,7 @@ class RX_REPLICATION_EXPORT ServerSession : public Session {
                  tx::network::PacketPriority priority = tx::network::PacketPriority::Medium);
 
   // The server's scripting RPC channel. Always present once Start succeeds.
-  RpcServerChannel* rpc() { return rpc_.Get_UseOnlyIfYouKnowWhatYouareDoing(); }
+  net::RpcServerChannel* rpc() { return rpc_.Get_UseOnlyIfYouKnowWhatYouareDoing(); }
 
   // Escape hatch for game layers that ride zetanet features directly (file
   // transfer, manifests): the raw transport. Everything sent through it must
@@ -155,13 +157,13 @@ class RX_REPLICATION_EXPORT ServerSession : public Session {
     base::NameString name;
     ecs::Entity player = ecs::kInvalidEntity;
     u64 player_net_id = 0;
-    PlayerInput input;
+    net::PlayerInput input;
     f32 since_last_packet = 0;
     PeerStream stream;
   };
 
   void PollMessages(ecs::World& world);
-  void HandleJoin(ecs::World& world, u32 peer, const ClientJoin& join);
+  void HandleJoin(ecs::World& world, u32 peer, const net::ClientJoin& join);
   void DropClient(ecs::World& world, u32 peer);
   void SimulatePlayers(ecs::World& world, f32 dt);
   void TimeoutClients(ecs::World& world, f32 dt);
@@ -171,16 +173,16 @@ class RX_REPLICATION_EXPORT ServerSession : public Session {
   tx::network::ZServer server_;
   WorldCapture capture_;
   InterestMap interest_;
-  Snapshot snapshot_;  // reused so the vectors keep their capacity
+  net::Snapshot snapshot_;  // reused so the vectors keep their capacity
   base::UnorderedMap<u32, RemoteClient> clients_;
   base::Vector<u32> scratch_dropped_;
   ReplicationHooks hooks_;
   base::Function<void(u32, u16, const u8*, size_t)> game_message_sink_;
   base::Function<void(ecs::World&, ecs::Entity, u32)> player_spawn_sink_;
-  base::Function<void(ecs::World&, ecs::Entity, const PlayerInput&, f32)> player_simulator_;
+  base::Function<void(ecs::World&, ecs::Entity, const net::PlayerInput&, f32)> player_simulator_;
   base::Function<void(u32)> client_joined_sink_;
   base::Function<void(u32)> client_left_sink_;
-  base::UniquePointer<RpcServerChannel> rpc_;
+  base::UniquePointer<net::RpcServerChannel> rpc_;
   NetStats stats_;
   u64 tick_ = 0;
   bool force_keyframe_ = false;
@@ -196,7 +198,7 @@ class RX_REPLICATION_EXPORT ClientSession : public Session {
   void Tick(ecs::World& world, f32 dt) override;
 
   // Local input forwarded to the server every tick once joined.
-  void SetInput(const PlayerInput& input) { input_ = input; }
+  void SetInput(const net::PlayerInput& input) { input_ = input; }
 
   // Every data-channel message with id >= kFirstGameMessage lands here,
   // undecoded. Unset drops them.
@@ -215,7 +217,7 @@ class RX_REPLICATION_EXPORT ClientSession : public Session {
   }
 
   // Fired once when the server accepts the join.
-  void SetJoinedSink(base::Function<void(const JoinAccept&)> sink) {
+  void SetJoinedSink(base::Function<void(const net::JoinAccept&)> sink) {
     joined_sink_ = base::move(sink);
   }
 
@@ -224,7 +226,7 @@ class RX_REPLICATION_EXPORT ClientSession : public Session {
                     tx::network::PacketPriority priority = tx::network::PacketPriority::Medium);
 
   // The client's scripting RPC channel. Always present once Start succeeds.
-  RpcClientChannel* rpc() { return rpc_.Get_UseOnlyIfYouKnowWhatYouareDoing(); }
+  net::RpcClientChannel* rpc() { return rpc_.Get_UseOnlyIfYouKnowWhatYouareDoing(); }
 
   // Escape hatch: the raw transport (see ServerSession::raw).
   tx::network::ZClient& raw() { return client_; }
@@ -232,7 +234,7 @@ class RX_REPLICATION_EXPORT ClientSession : public Session {
   // The whole session's bubbles as last replicated by the server
   // (kBubbleSync). Feed them to a BubbleVisualizer or a HUD. Empty when the
   // server runs without bubbles.
-  const base::Vector<BubbleState>& bubbles() const { return bubbles_; }
+  const base::Vector<net::BubbleState>& bubbles() const { return bubbles_; }
 
   bool joined() const { return joined_; }
   u64 player_net_id() const { return player_net_id_; }
@@ -249,12 +251,12 @@ class RX_REPLICATION_EXPORT ClientSession : public Session {
   tx::network::ZClient client_;
   SnapshotApplier applier_;
   ReplicationHooks hooks_;
-  base::UniquePointer<RpcClientChannel> rpc_;
+  base::UniquePointer<net::RpcClientChannel> rpc_;
   base::Function<void(u16, const u8*, size_t)> game_message_sink_;
   base::Function<void(const tx::network::IncomingPacket&)> file_packet_sink_;
-  base::Function<void(const JoinAccept&)> joined_sink_;
-  base::Vector<BubbleState> bubbles_;
-  PlayerInput input_;
+  base::Function<void(const net::JoinAccept&)> joined_sink_;
+  base::Vector<net::BubbleState> bubbles_;
+  net::PlayerInput input_;
   u64 player_net_id_ = 0;
   u64 tick_ = 0;
   f32 snapshot_dt_ = 1.0f / 20.0f;
@@ -263,6 +265,6 @@ class RX_REPLICATION_EXPORT ClientSession : public Session {
   bool failure_logged_ = false;
 };
 
-}  // namespace rx::net
+}  // namespace rx::replication
 
 #endif  // RX_NET_SESSION_H_

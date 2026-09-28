@@ -29,7 +29,7 @@
 #include "rxe/net/rpc/rpc_message.h"
 #include "rxe/net/rpc/rpc_value.h"
 
-namespace rpc = rx::rpc;
+namespace net = rx::net;
 using rx::u8;
 using rx::u32;
 
@@ -40,29 +40,29 @@ int Fail(const base::String& message) {
   return 1;
 }
 
-rpc::RpcValue ParseArg(const char* text) {
-  if (::strcmp(text, "true") == 0) return rpc::RpcValue(true);
-  if (::strcmp(text, "false") == 0) return rpc::RpcValue(false);
+net::RpcValue ParseArg(const char* text) {
+  if (::strcmp(text, "true") == 0) return net::RpcValue(true);
+  if (::strcmp(text, "false") == 0) return net::RpcValue(false);
   char* end = nullptr;
   const long long as_int = ::strtoll(text, &end, 10);
-  if (end != text && *end == '\0') return rpc::RpcValue(static_cast<rx::i64>(as_int));
+  if (end != text && *end == '\0') return net::RpcValue(static_cast<rx::i64>(as_int));
   const double as_float = ::strtod(text, &end);
-  if (end != text && *end == '\0') return rpc::RpcValue(as_float);
-  return rpc::RpcValue(base::String(text));
+  if (end != text && *end == '\0') return net::RpcValue(as_float);
+  return net::RpcValue(base::String(text));
 }
 
-base::String Format(const rpc::RpcValue& value) {
+base::String Format(const net::RpcValue& value) {
   switch (value.type()) {
-    case rpc::RpcValue::Type::kNull: return "null";
-    case rpc::RpcValue::Type::kBool: return value.as_bool() ? "true" : "false";
-    case rpc::RpcValue::Type::kInt: return rx::ToString(value.as_int());
-    case rpc::RpcValue::Type::kFloat: {
+    case net::RpcValue::Type::kNull: return "null";
+    case net::RpcValue::Type::kBool: return value.as_bool() ? "true" : "false";
+    case net::RpcValue::Type::kInt: return rx::ToString(value.as_int());
+    case net::RpcValue::Type::kFloat: {
       char buffer[64];
       ::snprintf(buffer, sizeof(buffer), "%g", value.as_float());
       return buffer;
     }
-    case rpc::RpcValue::Type::kString: return value.as_string();
-    case rpc::RpcValue::Type::kBlob: return "<blob>";
+    case net::RpcValue::Type::kString: return value.as_string();
+    case net::RpcValue::Type::kBlob: return "<blob>";
   }
   return "?";
 }
@@ -91,7 +91,7 @@ int main(int argc, char** argv) {
   }
   const base::String socket_path = argv[1];
 
-  rpc::RpcCall call;
+  net::RpcCall call;
   call.name = argv[2];
   for (int i = 3; i < argc; ++i) call.args.push_back(ParseArg(argv[i]));
 
@@ -110,7 +110,7 @@ int main(int argc, char** argv) {
   }
 
   base::Vector<u8> frame;
-  const base::Vector<u8> payload = rpc::EncodeCall(call);
+  const base::Vector<u8> payload = net::EncodeCall(call);
   for (int i = 0; i < 4; ++i)
     frame.push_back(static_cast<u8>(static_cast<u32>(payload.size()) >> (8 * i)));
   frame.insert(frame.end(), payload.begin(), payload.end());
@@ -133,14 +133,14 @@ int main(int argc, char** argv) {
   }
   ::close(fd);
 
-  base::Optional<rpc::RpcCall> reply = rpc::DecodeCall(reply_bytes.data(), reply_bytes.size());
+  base::Optional<net::RpcCall> reply = net::DecodeCall(reply_bytes.data(), reply_bytes.size());
   if (!reply) return Fail("malformed reply");
   if (reply->name != "ok") {
     return Fail(reply->args.empty() ? "refused" : Format(reply->args[0]));
   }
 
   base::String out;
-  for (const rpc::RpcValue& value : reply->args) {
+  for (const net::RpcValue& value : reply->args) {
     if (!out.empty()) out += ' ';
     out += Format(value);
   }

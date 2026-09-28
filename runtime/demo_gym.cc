@@ -540,8 +540,8 @@ void GymDemo::BuildPlayer() {
   world.Add(player_, character::JetpackInput{});
   world.Add(player_, character::JetpackState{});
   if (ctx_.audio)
-    jetpack_audio_ = base::MakeUnique<audio::VehicleAudio>(ctx_.audio->mixer(),
-                                                           audio::LightJetPreset());
+    jetpack_audio_ = base::MakeUnique<vehicles::VehicleAudio>(ctx_.audio->mixer(),
+                                                           vehicles::LightJetPreset());
 
   // Inventory with a handful of crates to drop.
   inventory::Inventory inv;
@@ -827,7 +827,7 @@ void GymDemo::Update(f32 dt, const InputState& input, const ActionState& actions
   if (jetpack_audio_) {
     auto* jst = world.Get<character::JetpackState>(player_);
     auto* jin = world.Get<character::JetpackInput>(player_);
-    audio::VehicleAudioState st;
+    vehicles::VehicleAudioState st;
     if (jst) {
       st.rpm = jst->thrust * 100.0f;  // N1 %
       st.load = jst->thrust;

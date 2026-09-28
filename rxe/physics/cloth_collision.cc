@@ -9,7 +9,7 @@
 #include <math.h>
 #include <stdlib.h>
 
-namespace rx::physics::detail {
+namespace rx::physics::internal {
 namespace {
 
 constexpr f32 kMinAreaTwice = 1.0e-8f;
@@ -988,4 +988,4 @@ u32 SolveClothSelfCollision(const ClothTopology& topology,
   return total_contacts;
 }
 
-}  // namespace rx::physics::detail
+}  // namespace rx::physics::internal

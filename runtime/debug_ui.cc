@@ -746,9 +746,9 @@ void DebugUi::DrawDiagnosticsTab(render::Renderer& renderer, scene::FlyCamera& c
 
   if (ImGui::CollapsingHeader("CPU memory")) {
     const f64 mb = 1.0 / (1024.0 * 1024.0);
-    if (rx::mem::TrackingActive()) {
-      rx::mem::CategoryStats stats[rx::mem::kMaxCategories];
-      const u32 count = rx::mem::SnapshotCategories(stats, rx::mem::kMaxCategories);
+    if (rx::TrackingActive()) {
+      rx::MemoryCategoryStats stats[rx::kMaxMemoryCategories];
+      const u32 count = rx::SnapshotMemoryCategories(stats, rx::kMaxMemoryCategories);
       if (ImGui::BeginTable("mem_categories", 4,
                             ImGuiTableFlags_RowBg | ImGuiTableFlags_SizingStretchProp)) {
         ImGui::TableSetupColumn("Category", ImGuiTableColumnFlags_WidthStretch);
@@ -757,7 +757,7 @@ void DebugUi::DrawDiagnosticsTab(render::Renderer& renderer, scene::FlyCamera& c
         ImGui::TableSetupColumn("Budget", ImGuiTableColumnFlags_WidthFixed, 110);
         ImGui::TableHeadersRow();
         for (u32 i = 0; i < count; ++i) {
-          const rx::mem::CategoryStats& c = stats[i];
+          const rx::MemoryCategoryStats& c = stats[i];
           const f64 now = c.current_bytes > 0 ? c.current_bytes * mb : 0.0;
           ImGui::TableNextRow();
           ImGui::TableNextColumn();
@@ -785,11 +785,11 @@ void DebugUi::DrawDiagnosticsTab(render::Renderer& renderer, scene::FlyCamera& c
     } else {
       ImGui::TextDisabled("build with RX_MIMALLOC=ON for category tracking");
     }
-    const rx::mem::ChunkPool::Stats pool = rx::mem::GlobalChunkPool().stats();
+    const rx::ChunkPool::Stats pool = rx::GlobalChunkPool().stats();
     ImGui::Text("chunk pool: %zu / %zu chunks in use (%.1f MB reserved)",
                 pool.total_chunks - pool.free_chunks, pool.total_chunks,
-                pool.total_chunks * rx::mem::ChunkPool::kChunkSize * mb);
-    const rx::mem::FrameArena::Stats arena = rx::mem::MainFrameArena().stats();
+                pool.total_chunks * rx::ChunkPool::kChunkSize * mb);
+    const rx::FrameArena::Stats arena = rx::MainFrameArena().stats();
     ImGui::Text("frame arena: %.2f / %.2f MB high water", arena.high_water_bytes * mb,
                 arena.capacity_bytes * mb);
     if (arena.overflow_allocs) {

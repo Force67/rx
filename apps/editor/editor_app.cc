@@ -295,7 +295,7 @@ void Editor::ScanAssets() {
         kind = "terrain";
       else if (ext == ".gltf" || ext == ".glb")
         kind = "mesh";
-      else if (asset::IsUsdPath(ext))
+      else if (importers::IsUsdPath(ext))
         kind = "stage";
       else if (ext == ".blend")
         kind = "model";
@@ -418,11 +418,11 @@ bool Editor::LoadModelDocument(const base::String &path) {
   base::String load_path = path;
   bool reused_cache = false;
   if (fs::Extension(path) == ".blend") {
-    asset::BlendImportOptions options;
+    importers::BlendImportOptions options;
     options.converter_script = RX_BLEND_CONVERTER_SCRIPT;
-    asset::BlendImportResult converted;
+    importers::BlendImportResult converted;
     base::String error;
-    if (!asset::ConvertBlendScene(path, options, &converted, &error)) {
+    if (!importers::ConvertBlendScene(path, options, &converted, &error)) {
       status_message_ = "Blend import failed: " + error;
       RX_WARN("editor: {}", status_message_);
       MarkDirty();
@@ -433,9 +433,9 @@ bool Editor::LoadModelDocument(const base::String &path) {
   }
 
   asset::ImportedScene imported_scene;
-  const bool imported = asset::IsUsdPath(load_path)
-                            ? asset::LoadUsdScene(load_path, &imported_scene)
-                            : asset::LoadGltfScene(load_path, &imported_scene);
+  const bool imported = importers::IsUsdPath(load_path)
+                            ? importers::LoadUsdScene(load_path, &imported_scene)
+                            : importers::LoadGltfScene(load_path, &imported_scene);
   if (!imported) {
     status_message_ = "Model load failed: " + path;
     MarkDirty();
@@ -1176,7 +1176,7 @@ void Editor::OpenDocument(const base::String &path) {
   if (extension == ".rxscene") {
     DoLoad(path);
   } else if (extension == ".gltf" || extension == ".glb" ||
-             extension == ".blend" || asset::IsUsdPath(path)) {
+             extension == ".blend" || importers::IsUsdPath(path)) {
     LoadModelDocument(path);
   } else {
     status_message_ = "Unsupported document: " + path;
@@ -1494,7 +1494,7 @@ void Editor::OpenFileDialog() {
     const base::String extension = LowerExtension(path);
     return extension == ".rxscene" || extension == ".gltf" ||
            extension == ".glb" || extension == ".blend" ||
-           asset::IsUsdPath(path);
+           importers::IsUsdPath(path);
   };
   base::Vector<fs::DirEntry> entries;
   if (fs::Exists(asset_root_) && fs::ListDirectory(asset_root_, &entries, /*recursive=*/true)) {

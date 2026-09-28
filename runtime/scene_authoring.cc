@@ -250,7 +250,7 @@ bool ApplySurfaceMaps(const SceneSurface& surface, asset::AssetDatabase& db,
 // Empty on success, else the clause naming the file inside the document that
 // did not resolve; the caller puts it behind the Surface.materialx assignment,
 // since that is the line the author actually wrote.
-base::String ApplyMaterialXMaps(const asset::MaterialXMaps& maps, asset::AssetDatabase& db,
+base::String ApplyMaterialXMaps(const importers::MaterialXMaps& maps, asset::AssetDatabase& db,
                                render::Renderer* renderer, asset::Material* material) {
   const struct {
     const base::String& file;
@@ -500,7 +500,7 @@ base::String SelectionProblem(i32 index, size_t meshes, size_t instances) {
 base::String ImportModel(const base::String& path, asset::ImportedScene* scene, i32* index) {
   base::String file;
   if (base::String problem = SplitModelPath(path, &file, index); !problem.empty()) return problem;
-  if (!asset::LoadGltfScene(file, scene)) {
+  if (!importers::LoadGltfScene(file, scene)) {
     return "does not import (the path is relative to the working directory)";
   }
   return SelectionProblem(*index, scene->meshes.size(), scene->instances.size());
@@ -967,10 +967,10 @@ bool BuildSceneShapes(ecs::World& world, asset::AssetDatabase& db, render::Rende
     if (!built.insert(mesh_id.hash)) return;
 
     asset::Material material;
-    asset::MaterialXMaps document_maps;
+    importers::MaterialXMaps document_maps;
     if (surface.materialx.empty()) {
       ApplySurface(surface, &material);
-    } else if (!asset::LoadMaterialX(surface.materialx, &material, &document_maps)) {
+    } else if (!importers::LoadMaterialX(surface.materialx, &material, &document_maps)) {
       if (error) *error = "Surface.materialx '" + surface.materialx + "' did not load";
       ok = false;
       return;

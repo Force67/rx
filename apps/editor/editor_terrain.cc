@@ -564,7 +564,7 @@ asset::AssetId Editor::ResolvePlacementMesh(const AssetEntry& entry) {
   const base::String extension(fs::Extension(entry.path));
   if (extension == ".gltf" || extension == ".glb") {
     asset::ImportedScene scene;
-    if (!asset::LoadGltfScene(entry.path, &scene) || scene.meshes.empty()) return {};
+    if (!importers::LoadGltfScene(entry.path, &scene) || scene.meshes.empty()) return {};
     const base::String source_path = asset::NormalizePath(entry.path);
     scene.meshes[0].id = asset::MakeAssetId(source_path);
     asset::RecordAssetPath(scene.meshes[0].id, source_path);

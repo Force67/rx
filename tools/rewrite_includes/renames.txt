@@ -6,7 +6,8 @@
 #   include <old> <new>   an #include "<old>" becomes #include "<new>"
 #   prefix  <old> <new>   an include starting with <old> gets <new> instead, if
 #                         the result exists in this rx checkout
-#   symbol  <old> <new>   a qualified name, matched as a whole word
+#   symbol  <old> <new>   a qualified name, matched as a whole word; with no
+#                         <new>, the qualifier is dropped (`symbol mem::`)
 #
 # Includes are resolved through the whole table, so a header renamed twice
 # lands on its latest path.
@@ -139,3 +140,85 @@ symbol  edit::SaveScene scene::SaveScene
 symbol  edit::SetProp scene::SetProp
 symbol  edit::WorldMatrix scene::WorldMatrix
 symbol  edit::WorldTransform scene::WorldTransform
+
+# Phase 4d-2: namespace consolidation (docs/STRUCTURE.md, Namespaces)
+symbol  detail:: internal::
+symbol  format_detail:: internal::
+symbol  mem::Category MemoryCategory
+symbol  mem::CategoryScope MemoryCategoryScope
+symbol  mem::CategoryStats MemoryCategoryStats
+symbol  mem::RegisterCategory RegisterMemoryCategory
+symbol  mem::CurrentCategory CurrentMemoryCategory
+symbol  mem::SetCurrentCategory SetCurrentMemoryCategory
+symbol  mem::SetCategoryBudget SetMemoryCategoryBudget
+symbol  mem::SnapshotCategories SnapshotMemoryCategories
+symbol  mem::kGeneralCategory kGeneralMemoryCategory
+symbol  mem::kMaxCategories kMaxMemoryCategories
+symbol  mem::kMaxCategoryNameLength kMaxMemoryCategoryNameLength
+symbol  mem::
+symbol  rpc:: net::
+symbol  asset::BlendImportOptions importers::BlendImportOptions
+symbol  asset::BlendImportResult importers::BlendImportResult
+symbol  asset::ConvertBlendScene importers::ConvertBlendScene
+symbol  asset::IsUsdPath importers::IsUsdPath
+symbol  asset::LoadGltfScene importers::LoadGltfScene
+symbol  asset::LoadMaterialX importers::LoadMaterialX
+symbol  asset::LoadUsdScene importers::LoadUsdScene
+symbol  asset::MaterialXMaps importers::MaterialXMaps
+symbol  asset::UsdLoadOptions importers::UsdLoadOptions
+symbol  physics::Aircraft vehicles::Aircraft
+symbol  physics::AircraftDesc vehicles::AircraftDesc
+symbol  physics::AircraftInput vehicles::AircraftInput
+symbol  physics::AircraftState vehicles::AircraftState
+symbol  physics::Boat vehicles::Boat
+symbol  physics::BoatDesc vehicles::BoatDesc
+symbol  physics::BoatInput vehicles::BoatInput
+symbol  physics::BoatState vehicles::BoatState
+symbol  physics::DinghyProfile vehicles::DinghyProfile
+symbol  physics::FishingBoatProfile vehicles::FishingBoatProfile
+symbol  physics::HatchbackProfile vehicles::HatchbackProfile
+symbol  physics::JetskiProfile vehicles::JetskiProfile
+symbol  physics::Kite vehicles::Kite
+symbol  physics::KiteDesc vehicles::KiteDesc
+symbol  physics::KiteInput vehicles::KiteInput
+symbol  physics::KiteState vehicles::KiteState
+symbol  physics::MuscleCarProfile vehicles::MuscleCarProfile
+symbol  physics::SemiTruckProfile vehicles::SemiTruckProfile
+symbol  physics::SpeedboatProfile vehicles::SpeedboatProfile
+symbol  physics::SportsCarProfile vehicles::SportsCarProfile
+symbol  physics::SuvProfile vehicles::SuvProfile
+symbol  physics::VanProfile vehicles::VanProfile
+symbol  physics::WorkBargeProfile vehicles::WorkBargeProfile
+symbol  audio::EnginePreset vehicles::EnginePreset
+symbol  audio::EngineSynth vehicles::EngineSynth
+symbol  audio::InboardBoatPreset vehicles::InboardBoatPreset
+symbol  audio::InlineFourCarPreset vehicles::InlineFourCarPreset
+symbol  audio::LightJetPreset vehicles::LightJetPreset
+symbol  audio::MotorcycleTwinPreset vehicles::MotorcycleTwinPreset
+symbol  audio::SinglePropPlanePreset vehicles::SinglePropPlanePreset
+symbol  audio::SkidSynth vehicles::SkidSynth
+symbol  audio::V8Preset vehicles::V8Preset
+symbol  audio::VehicleAudio vehicles::VehicleAudio
+symbol  audio::VehicleAudioState vehicles::VehicleAudioState
+symbol  audio::WindSynth vehicles::WindSynth
+symbol  audio::MakeThunder weather::MakeThunder
+symbol  net::AllocateNetworkId replication::AllocateNetworkId
+symbol  net::BubbleVisualizer replication::BubbleVisualizer
+symbol  net::ClientSession replication::ClientSession
+symbol  net::InterestBubble replication::InterestBubble
+symbol  net::InterestConfig replication::InterestConfig
+symbol  net::InterestMap replication::InterestMap
+symbol  net::InterestSet replication::InterestSet
+symbol  net::InterpolatedTransform replication::InterpolatedTransform
+symbol  net::NetStats replication::NetStats
+symbol  net::NetworkId replication::NetworkId
+symbol  net::PeerColor replication::PeerColor
+symbol  net::PeerStream replication::PeerStream
+symbol  net::ReplicatedGait replication::ReplicatedGait
+symbol  net::ReplicationHooks replication::ReplicationHooks
+symbol  net::ServerSession replication::ServerSession
+symbol  net::Session replication::Session
+symbol  net::SessionConfig replication::SessionConfig
+symbol  net::SnapshotApplier replication::SnapshotApplier
+symbol  net::TickInterpolation replication::TickInterpolation
+symbol  net::WorldCapture replication::WorldCapture

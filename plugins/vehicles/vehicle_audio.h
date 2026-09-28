@@ -10,8 +10,11 @@
 #include "rxe/audio/synth_voice.h"
 
 namespace rx::audio {
-
 class Mixer;
+}  // namespace rx::audio
+
+namespace rx::vehicles {
+
 
 // Everything the game layer feeds one vehicle's audio each frame. Plain data,
 // no rxe/physics types: the physics or demo layer fills it from drivetrain
@@ -57,7 +60,7 @@ class RX_VEHICLES_EXPORT VehicleAudio {
   // Starts the three voices on `mixer` at the mixer's output rate. Voices begin
   // near-silent and rise as Update feeds them; safe on a mixer with no device
   // (the commands simply queue until something drains them).
-  VehicleAudio(Mixer& mixer, const EnginePreset& preset);
+  VehicleAudio(audio::Mixer& mixer, const EnginePreset& preset);
   ~VehicleAudio();
 
   VehicleAudio(const VehicleAudio&) = delete;
@@ -78,13 +81,13 @@ class RX_VEHICLES_EXPORT VehicleAudio {
     // than a raw voice pointer so publishing survives the mixer retiring and
     // deleting the voice: a late Update lands in a still-live mailbox, not freed
     // memory.
-    Shared<ParamMailbox> params;
+    Shared<audio::ParamMailbox> params;
     f32 sent_gain = -1.0f;  // last gain pushed, to suppress no-op commands
   };
 
   void SetLayerGain(Layer& layer, f32 gain);
 
-  Mixer* mixer_ = nullptr;
+  audio::Mixer* mixer_ = nullptr;
   Layer engine_;
   Layer skid_;
   Layer wind_;
@@ -99,6 +102,6 @@ class RX_VEHICLES_EXPORT VehicleAudio {
   bool prev_shifting_ = false;
 };
 
-}  // namespace rx::audio
+}  // namespace rx::vehicles
 
 #endif  // RX_VEHICLES_VEHICLE_AUDIO_H_

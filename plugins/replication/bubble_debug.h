@@ -20,7 +20,7 @@
 #include "rxe/net/transport/protocol.h"
 #include "rxe/render/core/renderer.h"
 
-namespace rx::net {
+namespace rx::replication {
 
 class RX_NET_VIZ_EXPORT BubbleVisualizer {
  public:
@@ -36,7 +36,7 @@ class RX_NET_VIZ_EXPORT BubbleVisualizer {
   // draw and RX_NET_BUBBLES is not 0. Chains an already-installed
   // scene_transparent hook, so it composes with an app's own passes. The
   // bubble list is copied (the frame records after this call returns).
-  void Emit(render::FrameView& view, const base::Vector<BubbleState>& bubbles);
+  void Emit(render::FrameView& view, const base::Vector<net::BubbleState>& bubbles);
 
   bool ready() const { return ready_; }
 
@@ -49,11 +49,11 @@ class RX_NET_VIZ_EXPORT BubbleVisualizer {
   VkDevice vk_ = VK_NULL_HANDLE;
   VkPipelineLayout layout_ = VK_NULL_HANDLE;
   VkPipeline pipeline_ = VK_NULL_HANDLE;
-  base::Vector<BubbleState> bubbles_;
+  base::Vector<net::BubbleState> bubbles_;
   bool pipeline_failed_ = false;
   bool ready_ = false;
 };
 
-}  // namespace rx::net
+}  // namespace rx::replication
 
 #endif  // RX_NET_BUBBLE_DEBUG_H_

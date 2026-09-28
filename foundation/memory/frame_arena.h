@@ -9,7 +9,7 @@
 #include "foundation/build_config/export.h"
 #include "foundation/build_config/types.h"
 
-namespace rx::mem {
+namespace rx {
 
 // Linear (bump) allocator for allocations that live exactly one frame:
 // gather lists, scratch buffers, pass-closure captures. Alloc is a pointer
@@ -67,6 +67,6 @@ class RX_FOUNDATION_EXPORT FrameArena {
 // The main-thread frame arena, reset by app::Host at the top of each frame.
 RX_FOUNDATION_EXPORT FrameArena& MainFrameArena();
 
-}  // namespace rx::mem
+}  // namespace rx
 
 #endif  // RX_FOUNDATION_MEMORY_FRAME_ARENA_H_

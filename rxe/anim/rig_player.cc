@@ -8,7 +8,7 @@
 
 namespace rx::anim {
 
-using detail::GraphState;
+using internal::GraphState;
 
 struct RigPlayer::Impl {
   const GraphState* graph = nullptr;
@@ -78,7 +78,7 @@ Vec3 RigPlayer::Update(f32 dt, SkeletonPose* out, const EventSink& on_event) {
   // Evaluate the graph (one inertialized program) straight into the caller's
   // SoA pose - the kinema view aliases it, no copy.
   kinema::PoseParams pp{d.params.data(), static_cast<u32>(d.params.size())};
-  kinema::PoseView pv = detail::AsKinema(*out);
+  kinema::PoseView pv = internal::AsKinema(*out);
   d.sm.Update(dt, pp, d.arena, pv, nullptr);
 
   // Root motion + notifies come from the active locomotion clip swept over the
@@ -89,7 +89,7 @@ Vec3 RigPlayer::Update(f32 dt, SkeletonPose* out, const EventSink& on_event) {
     const f32 dur = c->duration();
     f32 dphase = phase - d.prev_phase;
     if (dphase < 0) dphase += 1.0f;  // wrapped this frame
-    root = detail::ToRx(c->RootDeltaLooped(d.prev_phase * dur, dphase * dur));
+    root = internal::ToRx(c->RootDeltaLooped(d.prev_phase * dur, dphase * dur));
     if (on_event) {
       const f32 t0 = d.prev_phase * dur;
       const f32 t1 = phase * dur;

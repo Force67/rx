@@ -30,7 +30,7 @@ Archetype::Archetype(Signature signature) : signature_(base::move(signature)) {
   // SoA layout within a chunk: find the largest row count whose column arrays
   // (each aligned to its component) fit the pool chunk. Padding is at most a
   // few cachelines, so the guess converges in a couple of iterations.
-  const u32 pool_bytes = static_cast<u32>(mem::ChunkPool::kChunkSize);
+  const u32 pool_bytes = static_cast<u32>(ChunkPool::kChunkSize);
   auto layout_bytes = [&](u32 rows) {
     u32 offset = 0;
     for (auto& column : columns_) {
@@ -45,12 +45,12 @@ Archetype::Archetype(Signature signature) : signature_(base::move(signature)) {
   while (rows > 1 && layout_bytes(rows) > pool_bytes) --rows;
   if (rows == 0) rows = 1;
 
-  pooled_ = max_align <= mem::ChunkPool::kChunkAlign && layout_bytes(rows) <= pool_bytes;
+  pooled_ = max_align <= ChunkPool::kChunkAlign && layout_bytes(rows) <= pool_bytes;
   rows_per_chunk_ = pooled_ ? rows : 1;
   chunk_bytes_ = pooled_ ? pool_bytes : layout_bytes(1);
-  chunk_align_ = max_align > mem::ChunkPool::kChunkAlign
+  chunk_align_ = max_align > ChunkPool::kChunkAlign
                      ? max_align
-                     : static_cast<u32>(mem::ChunkPool::kChunkAlign);
+                     : static_cast<u32>(ChunkPool::kChunkAlign);
   layout_bytes(rows_per_chunk_);  // bake the final chunk_offsets
 }
 
@@ -65,13 +65,13 @@ Archetype::~Archetype() {
 }
 
 void* Archetype::AcquireChunk() {
-  if (pooled_) return mem::GlobalChunkPool().Acquire();
+  if (pooled_) return GlobalChunkPool().Acquire();
   return ::operator new(chunk_bytes_, std::align_val_t{chunk_align_});
 }
 
 void Archetype::ReleaseChunk(void* chunk) {
   if (pooled_) {
-    mem::GlobalChunkPool().Release(chunk);
+    GlobalChunkPool().Release(chunk);
   } else {
     ::operator delete(chunk, std::align_val_t{chunk_align_});
   }

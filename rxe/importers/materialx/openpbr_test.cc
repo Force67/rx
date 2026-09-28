@@ -114,7 +114,7 @@ bool LoadDoc(const char *name, const char *text, size_t size, asset::Material *o
     ::fprintf(stderr, "openpbr_test: cannot create fixture %s\n", name);
     return false;
   }
-  const bool loaded = asset::LoadMaterialX(path, out);
+  const bool loaded = importers::LoadMaterialX(path, out);
   rx::fs::Remove(path);
   return loaded;
 }
@@ -260,7 +260,7 @@ void CheckExampleCorpus() {
       continue;
     const base::String name(rx::fs::Filename(entry.path));
     asset::Material m;
-    if (!asset::LoadMaterialX(entry.path, &m)) {
+    if (!importers::LoadMaterialX(entry.path, &m)) {
       ::fprintf(stderr, "openpbr_test: rejected %s\n", name.c_str());
       ++rejected;
       continue;
@@ -303,7 +303,7 @@ void CheckExampleCorpus() {
   // Two spot checks against values read straight out of the source documents,
   // so the sweep cannot pass by importing everything as defaults.
   asset::Material brass;
-  if (asset::LoadMaterialX(rx::fs::Join(dir, "open_pbr_brass.mtlx"), &brass)) {
+  if (importers::LoadMaterialX(rx::fs::Join(dir, "open_pbr_brass.mtlx"), &brass)) {
     Check(Near3(brass.base_color_factor, 0.844f, 0.782f, 0.473f) &&
               Near(brass.metallic_factor, 1.0f) &&
               Near(brass.roughness_factor, 0.02f),
@@ -314,7 +314,7 @@ void CheckExampleCorpus() {
           "brass keeps its greater-than-one specular edge tint");
   }
   asset::Material carpaint;
-  if (asset::LoadMaterialX(rx::fs::Join(dir, "open_pbr_carpaint.mtlx"), &carpaint)) {
+  if (importers::LoadMaterialX(rx::fs::Join(dir, "open_pbr_carpaint.mtlx"), &carpaint)) {
     Check(Near(carpaint.clearcoat, 1.0f) && Near(carpaint.clearcoat_roughness, 0.02f) &&
               Near(carpaint.coat_ior, 1.6f),
           "car paint imports its coat");

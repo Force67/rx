@@ -3,7 +3,7 @@
 
 #include <math.h>
 
-namespace rx::physics {
+namespace rx::vehicles {
 
 namespace {
 
@@ -24,7 +24,7 @@ bool Finite(const Vec3& v) {
 
 }  // namespace
 
-Kite::Kite(PhysicsWorld& world, const KiteDesc& desc, const Vec3& anchor, const Vec3& position,
+Kite::Kite(physics::PhysicsWorld& world, const KiteDesc& desc, const Vec3& anchor, const Vec3& position,
            f32 yaw_radians)
     : world_(world), desc_(desc), anchor_(anchor) {
   // Sail collision/visual plate: span x height x a thin thickness. Mass comes
@@ -233,4 +233,4 @@ void Kite::Update(const KiteInput& input, f32 dt) {
   state_.line_length_m = line_length_;
 }
 
-}  // namespace rx::physics
+}  // namespace rx::vehicles

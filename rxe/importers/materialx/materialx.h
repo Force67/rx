@@ -6,7 +6,7 @@
 #include "foundation/build_config/export.h"
 #include "rxe/asset/material.h"
 
-namespace rx::asset {
+namespace rx::importers {
 
 // The image files a document's surface shader takes its maps from, already
 // resolved against the DOCUMENT's own directory: a MaterialX <input
@@ -45,9 +45,9 @@ struct MaterialXMaps {
 //
 // False on a read/parse error or a document with no surface shader; `out` keeps
 // its defaults for whatever the document omits.
-RX_MATERIALX_EXPORT bool LoadMaterialX(const base::String& path, Material* out,
+RX_MATERIALX_EXPORT bool LoadMaterialX(const base::String& path, asset::Material* out,
                                    MaterialXMaps* maps = nullptr);
 
-}  // namespace rx::asset
+}  // namespace rx::importers
 
 #endif  // RX_IMPORTERS_MATERIALX_MATERIALX_H_

@@ -7,7 +7,7 @@
 #include "foundation/build_config/types.h"
 #include "foundation/math/math.h"
 
-namespace rx::physics::detail {
+namespace rx::physics::internal {
 
 struct ClothTopology {
   base::Vector<u32> indices;
@@ -64,6 +64,6 @@ RX_PHYSICS_EXPORT u32 SolveClothSelfCollision(const ClothTopology& topology,
                                               const base::Vector<f32>& inverse_masses, f32 dt,
                                               ClothSelfCollisionScratch* scratch);
 
-}  // namespace rx::physics::detail
+}  // namespace rx::physics::internal
 
 #endif  // RX_PHYSICS_CLOTH_COLLISION_H_

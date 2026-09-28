@@ -195,7 +195,7 @@ void AppendShortestImpl(base::String& out, T value) {
 void AppendShortest(base::String& out, f32 value) { AppendShortestImpl(out, value); }
 void AppendShortest(base::String& out, f64 value) { AppendShortestImpl(out, value); }
 
-namespace format_detail {
+namespace internal {
 
 void FormatImpl(base::String& out, const char* fmt, const Appender* appenders,
                 const void* const* values, mem_size count) {
@@ -240,5 +240,5 @@ void FormatImpl(base::String& out, const char* fmt, const Appender* appenders,
   flush(p);
 }
 
-}  // namespace format_detail
+}  // namespace internal
 }  // namespace rx

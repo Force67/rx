@@ -6,7 +6,7 @@
 #include "foundation/math/math.h"
 #include "rxe/physics/physics_world.h"
 
-namespace rx::physics {
+namespace rx::vehicles {
 
 // Force-based motorboat simulator on the PhysicsWorld rigid-body primitives.
 // One Boat owns one dynamic hull body; the game drives it with an input each
@@ -165,7 +165,7 @@ class RX_VEHICLES_EXPORT Boat {
   // +Y by `yaw_radians`. The body is exempted from the world's generic
   // buoyancy so only this model's hull forces act on it. `world` must outlive
   // the Boat. Check valid() for spawn success (false when physics is a stub).
-  Boat(PhysicsWorld& world, const BoatDesc& desc, const Vec3& position, f32 yaw_radians);
+  Boat(physics::PhysicsWorld& world, const BoatDesc& desc, const Vec3& position, f32 yaw_radians);
   // Clears the hull's buoyancy exemption and removes its body from the world.
   ~Boat();
 
@@ -194,14 +194,14 @@ class RX_VEHICLES_EXPORT Boat {
   }
 
   const BoatState& state() const { return state_; }
-  BodyId body() const { return body_; }
+  physics::BodyId body() const { return body_; }
   const BoatDesc& desc() const { return desc_; }
   bool valid() const { return body_ != 0; }
 
  private:
-  PhysicsWorld& world_;
+  physics::PhysicsWorld& world_;
   BoatDesc desc_;
-  BodyId body_ = 0;
+  physics::BodyId body_ = 0;
   f32 rpm_ = 0.0f;         // engine speed, spooled toward the throttle target
   f32 base_mass_ = 0.0f;   // hull mass at spawn (desc_.mass), kg
   f32 cargo_kg_ = 0.0f;    // current cargo, kg
@@ -210,6 +210,6 @@ class RX_VEHICLES_EXPORT Boat {
   BoatState state_;
 };
 
-}  // namespace rx::physics
+}  // namespace rx::vehicles
 
 #endif  // RX_VEHICLES_BOAT_H_

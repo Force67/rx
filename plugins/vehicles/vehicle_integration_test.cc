@@ -27,15 +27,15 @@
 #include "rxe/physics/water_waves.h"
 
 using namespace rx;
-using audio::EnginePreset;
-using audio::EngineSynth;
+using vehicles::EnginePreset;
+using vehicles::EngineSynth;
 using audio::SynthParams;
-using physics::Aircraft;
-using physics::AircraftDesc;
-using physics::AircraftInput;
-using physics::Boat;
-using physics::BoatDesc;
-using physics::BoatInput;
+using vehicles::Aircraft;
+using vehicles::AircraftDesc;
+using vehicles::AircraftInput;
+using vehicles::Boat;
+using vehicles::BoatDesc;
+using vehicles::BoatInput;
 using physics::PhysicsWorld;
 using physics::SurfaceType;
 using physics::VehicleId;
@@ -148,9 +148,9 @@ int main() {
   }
 
   // Three engines rendered straight from telemetry (no device, no mixer).
-  EngineSynth car_synth(audio::InlineFourCarPreset(), kRate);
-  EngineSynth boat_synth(audio::InboardBoatPreset(), kRate);
-  EngineSynth plane_synth(audio::SinglePropPlanePreset(), kRate);
+  EngineSynth car_synth(vehicles::InlineFourCarPreset(), kRate);
+  EngineSynth boat_synth(vehicles::InboardBoatPreset(), kRate);
+  EngineSynth plane_synth(vehicles::SinglePropPlanePreset(), kRate);
   base::Vector<f32> car_audio(static_cast<size_t>(kSteps) * kBlock, 0.0f);
   base::Vector<f32> boat_audio(static_cast<size_t>(kSteps) * kBlock, 0.0f);
   base::Vector<f32> plane_audio(static_cast<size_t>(kSteps) * kBlock, 0.0f);
@@ -193,7 +193,7 @@ int main() {
     // fly a classic speed-hold climb: elevator trims to a target airspeed and
     // the excess power at full throttle turns into a steady climb. Holding
     // airspeed this way damps the phugoid a fixed elevator would porpoise on.
-    const physics::AircraftState& pre = plane.state();
+    const vehicles::AircraftState& pre = plane.state();
     AircraftInput plane_in;
     plane_in.throttle = 1.0f;
     plane_in.pitch = pre.airspeed_mps > 26.0f ? 0.7f : 0.0f;  // rotate at Vr, hold up
@@ -213,11 +213,11 @@ int main() {
     for (u32 w = 0; w < cst.wheel_count; ++w)
       car_slip = rx::Max(car_slip, cst.wheels[w].longitudinal_slip);
 
-    const physics::BoatState& bst = boat.state();
+    const vehicles::BoatState& bst = boat.state();
     boat_max_fwd = rx::Max(boat_max_fwd, bst.forward_speed);
     boat_max_wetted = rx::Max(boat_max_wetted, bst.wetted);
 
-    const physics::AircraftState& ast = plane.state();
+    const vehicles::AircraftState& ast = plane.state();
     plane_max_alt = rx::Max(plane_max_alt, ast.position.y - plane_ground_y);
     if (!ast.on_ground) plane_peak_climb = rx::Max(plane_peak_climb, ast.vertical_speed_mps);
 
@@ -269,7 +269,7 @@ int main() {
   }
 
   // (b) The boat throttled forward and is still afloat.
-  const physics::BoatState& bfin = boat.state();
+  const vehicles::BoatState& bfin = boat.state();
   ::fprintf(stderr,
                "(b) boat: max_fwd=%.1f m/s pos=(%.0f,%.2f,%.1f) wetted=%.2f max_wetted=%.2f "
                "up=%.2f\n",
@@ -281,7 +281,7 @@ int main() {
   if (bfin.position.y < -1.0f) return Fail("(b) boat dropped below the surface");
 
   // (c) The aircraft climbed away from the runway.
-  const physics::AircraftState& afin = plane.state();
+  const vehicles::AircraftState& afin = plane.state();
   ::fprintf(stderr,
                "(c) aircraft: max_alt_gain=%.1f m peak_climb=%.2f m/s airspeed=%.1f m/s "
                "on_ground=%d\n",

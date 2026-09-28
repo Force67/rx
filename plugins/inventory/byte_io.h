@@ -10,7 +10,7 @@
 // Minimal explicit-little-endian byte writer/reader shared by the serializers.
 // Header-only, internal to the module (no export macros).
 
-namespace rx::inventory::detail {
+namespace rx::inventory::internal {
 
 inline void PutU8(base::Vector<u8>& b, u8 v) { b.push_back(v); }
 
@@ -90,6 +90,6 @@ struct Reader {
   }
 };
 
-}  // namespace rx::inventory::detail
+}  // namespace rx::inventory::internal
 
 #endif  // RX_INVENTORY_BYTE_IO_H_

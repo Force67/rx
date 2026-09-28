@@ -5,15 +5,15 @@
 #include "base/threading/lock_guard.h"
 #include "foundation/memory/memory_tracker.h"
 
-namespace rx::mem {
+namespace rx {
 
 ChunkPool::~ChunkPool() {
   for (void* slab : slabs_) ::operator delete(slab, std::align_val_t{kChunkAlign});
 }
 
 void ChunkPool::AddSlabLocked() {
-  static const Category kCategory = RegisterCategory("chunk-pool");
-  CategoryScope scope(kCategory);
+  static const MemoryCategory kCategory = RegisterMemoryCategory("chunk-pool");
+  MemoryCategoryScope scope(kCategory);
   void* slab = ::operator new(kChunksPerSlab * kChunkSize, std::align_val_t{kChunkAlign});
   slabs_.push_back(slab);
   for (size_t i = 0; i < kChunksPerSlab; ++i) {
@@ -51,4 +51,4 @@ ChunkPool& GlobalChunkPool() {
   return pool;
 }
 
-}  // namespace rx::mem
+}  // namespace rx

@@ -7,7 +7,7 @@
 
 namespace rx::anim {
 
-using detail::GraphState;
+using internal::GraphState;
 
 struct FootPlacement::Impl {
   const GraphState* graph = nullptr;
@@ -62,7 +62,7 @@ f32 FootPlacement::Apply(SkeletonPose* pose, const GroundProbe& probe) {
   if (!d.ok) return 0.0f;
   const kinema::Skeleton& sk = d.graph->skeleton;
   const Vec3 up{0, 1, 0};
-  kinema::PoseView local = detail::AsKinema(*pose);
+  kinema::PoseView local = internal::AsKinema(*pose);
 
   // Ankle model positions to cast from. Start the ray well above each foot so a
   // raised swing foot still probes the ground beneath it.

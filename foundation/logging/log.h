@@ -11,16 +11,16 @@ namespace rx {
 
 enum class LogLevel { kTrace, kDebug, kInfo, kWarn, kError };
 
-namespace detail {
+namespace internal {
 RX_FOUNDATION_EXPORT void LogMessage(LogLevel level, base::StringRef message);
 }
 
 RX_FOUNDATION_EXPORT void SetLogLevel(LogLevel level);
 
 template <typename... Args>
-void Log(LogLevel level, FormatString<typename format_detail::Identity<Args>::type...> fmt,
+void Log(LogLevel level, FormatString<typename internal::Identity<Args>::type...> fmt,
          const Args&... args) {
-  detail::LogMessage(level, StrFormat<Args...>(fmt, args...));
+  internal::LogMessage(level, StrFormat<Args...>(fmt, args...));
 }
 
 #define RX_TRACE(...) ::rx::Log(::rx::LogLevel::kTrace, __VA_ARGS__)

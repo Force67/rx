@@ -6,8 +6,8 @@ both USD stages and standalone MaterialX documents, and shades the lobes it can
 with the model the spec prescribes.
 
 - USD: any material carrying an `ND_open_pbr_surface_surfaceshader`, through
-  `asset::LoadUsdScene`
-- MaterialX: `asset::LoadMaterialX("thing.mtlx", &material)` on an
+  `importers::LoadUsdScene`
+- MaterialX: `importers::LoadMaterialX("thing.mtlx", &material)` on an
   `open_pbr_surface` node
 - Demo: `RX_MTLX=a.mtlx,b.mtlx ./build/linux/runtime/rx --demo mtlx`, one sphere
   per file. `tools/get_openpbr_samples.sh` fetches the upstream examples.

@@ -13,7 +13,7 @@
 namespace rx::inventory {
 namespace {
 
-using namespace detail;
+using namespace internal;
 
 // The one piece of process-stateful module state: monotonic persistent-id
 // minting. Kept off the functional path (systems still take no globals) and

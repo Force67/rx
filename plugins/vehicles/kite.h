@@ -6,7 +6,7 @@
 #include "foundation/math/math.h"
 #include "rxe/physics/physics_world.h"
 
-namespace rx::physics {
+namespace rx::vehicles {
 
 // Force-based tethered-kite simulator on the PhysicsWorld rigid-body
 // primitives. One Kite owns one light dynamic sail body; the game moves an
@@ -148,7 +148,7 @@ class RX_VEHICLES_EXPORT Kite {
   // of the anchor (near the ground for a launch, or already aloft) and let the
   // wind fill it. `world` must outlive the Kite. valid() is false when the body
   // could not be created (physics stub).
-  Kite(PhysicsWorld& world, const KiteDesc& desc, const Vec3& anchor, const Vec3& position,
+  Kite(physics::PhysicsWorld& world, const KiteDesc& desc, const Vec3& anchor, const Vec3& position,
        f32 yaw_radians);
   // Removes the sail body from the world.
   ~Kite();
@@ -171,13 +171,13 @@ class RX_VEHICLES_EXPORT Kite {
 
   const KiteState& state() const { return state_; }
   const KiteDesc& desc() const { return desc_; }
-  BodyId body() const { return body_; }
+  physics::BodyId body() const { return body_; }
   bool valid() const { return body_ != 0; }
 
  private:
-  PhysicsWorld& world_;
+  physics::PhysicsWorld& world_;
   KiteDesc desc_;
-  BodyId body_ = 0;
+  physics::BodyId body_ = 0;
   Vec3 anchor_{};
   f32 line_length_ = 0.0f;  // current tether rest length, m (reeled in [min,max])
   f32 gust_time_ = 0.0f;    // internal gust phase clock, s
@@ -190,6 +190,6 @@ class RX_VEHICLES_EXPORT Kite {
   KiteState state_;
 };
 
-}  // namespace rx::physics
+}  // namespace rx::vehicles
 
 #endif  // RX_VEHICLES_KITE_H_

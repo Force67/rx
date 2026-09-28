@@ -9,7 +9,7 @@
 #include "foundation/build_config/export.h"
 #include "foundation/build_config/types.h"
 
-namespace rx::mem {
+namespace rx {
 
 // Declarative memory plan: initial reservations for the pools and soft
 // per-category budgets for the tracker/HUD (the modern shape of the classic
@@ -41,6 +41,6 @@ RX_FOUNDATION_EXPORT void ParseMemoryConfigText(base::StringRef text, MemoryConf
 // into GlobalChunkPool, arena capacity into MainFrameArena.
 RX_FOUNDATION_EXPORT void ApplyMemoryConfig(const MemoryConfig& config);
 
-}  // namespace rx::mem
+}  // namespace rx
 
 #endif  // RX_FOUNDATION_MEMORY_MEMORY_CONFIG_H_

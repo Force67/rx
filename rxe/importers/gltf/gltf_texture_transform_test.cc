@@ -93,7 +93,7 @@ int main() {
   ::fclose(file);
 
   asset::ImportedScene scene;
-  const bool loaded = asset::LoadGltfScene(path, &scene);
+  const bool loaded = importers::LoadGltfScene(path, &scene);
   rx::fs::Remove(path);
   Check(loaded, "generated glTF loads");
   if (!loaded)

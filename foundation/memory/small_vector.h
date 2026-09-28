@@ -13,7 +13,7 @@
 #include "base/meta/traits.h"
 #include "foundation/build_config/types.h"
 
-namespace rx::mem {
+namespace rx {
 
 // Vector with N elements of inline storage: no heap traffic until the size
 // exceeds N. For the hot-path scratch lists that are almost always tiny
@@ -183,6 +183,6 @@ class SmallVector {
   size_t capacity_ = N;
 };
 
-}  // namespace rx::mem
+}  // namespace rx
 
 #endif  // RX_FOUNDATION_MEMORY_SMALL_VECTOR_H_

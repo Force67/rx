@@ -63,7 +63,7 @@ struct SignatureEqual {
 
 // Columnar storage. One column per component type, rows are entities.
 //
-// Rows live in fixed-size chunks drawn from mem::GlobalChunkPool (16 KiB),
+// Rows live in fixed-size chunks drawn from GlobalChunkPool (16 KiB),
 // laid out SoA within each chunk: column c of chunk k is the array at
 // chunk[k] + column_offset[c], rows_per_chunk elements long. Growing an
 // archetype appends a chunk; existing rows never relocate, so components are

@@ -5,16 +5,16 @@
 #include "foundation/build_config/types.h"
 #include "rxe/audio/synth_voice.h"
 
-namespace rx::audio {
+namespace rx::vehicles {
 
 // Tyre skid: band-passed noise that the slip ratio gates and ground speed
 // scales. Silent below a slip threshold (no squeal from a rolling tyre), it
 // swells in as the tyre breaks traction, with the band centre drifting up a
 // little with speed so a fast slide reads brighter than a parking-lot scrub.
-class RX_VEHICLES_EXPORT SkidSynth final : public Synth {
+class RX_VEHICLES_EXPORT SkidSynth final : public audio::Synth {
  public:
   explicit SkidSynth(u32 output_rate);
-  void Render(f32* out, u32 frames, const SynthParams& p) override;
+  void Render(f32* out, u32 frames, const audio::SynthParams& p) override;
 
  private:
   f32 rate_ = 48000.0f;
@@ -28,10 +28,10 @@ class RX_VEHICLES_EXPORT SkidSynth final : public Synth {
 // Wind rush: speed-driven filtered noise that stays out of the way at walking
 // pace and becomes a prominent roar at speed. The cutoff rises with speed, so
 // the rush brightens as well as loudens the faster the vehicle goes.
-class RX_VEHICLES_EXPORT WindSynth final : public Synth {
+class RX_VEHICLES_EXPORT WindSynth final : public audio::Synth {
  public:
   explicit WindSynth(u32 output_rate);
-  void Render(f32* out, u32 frames, const SynthParams& p) override;
+  void Render(f32* out, u32 frames, const audio::SynthParams& p) override;
 
  private:
   f32 rate_ = 48000.0f;
@@ -41,6 +41,6 @@ class RX_VEHICLES_EXPORT WindSynth final : public Synth {
   f32 Noise();
 };
 
-}  // namespace rx::audio
+}  // namespace rx::vehicles
 
 #endif  // RX_VEHICLES_AUX_SYNTH_H_

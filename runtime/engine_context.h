@@ -32,7 +32,7 @@ struct EngineConfig {
   // stage. Scenes ship alternative configurations (day/night lighting rigs,
   // set dressing variants) toggled by visibility, and picking one is a
   // viewing decision, not an edit to the stage.
-  asset::UsdLoadOptions usd_visibility;
+  importers::UsdLoadOptions usd_visibility;
   render::RendererDesc renderer;
   // Hardware quality tier. kAuto picks one from the gpu at startup; the rest
   // force a tier (steam deck, android, low/medium/high/ultra, console).

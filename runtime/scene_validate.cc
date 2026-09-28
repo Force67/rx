@@ -462,8 +462,8 @@ void CheckSurface(ecs::World& world, ecs::Entity entity, bool fragment, Report& 
   // is one that loads there. Paths are relative to the working directory, which
   // makes this the one check whose answer depends on where it is run from.
   asset::Material discarded;
-  asset::MaterialXMaps document_maps;
-  if (!asset::LoadMaterialX(surface->materialx, &discarded, &document_maps)) {
+  importers::MaterialXMaps document_maps;
+  if (!importers::LoadMaterialX(surface->materialx, &discarded, &document_maps)) {
     report.Error(entity, "materialx_not_loaded",
                  "Surface.materialx '" + surface->materialx +
                      "' does not load (path is relative to the working directory)");

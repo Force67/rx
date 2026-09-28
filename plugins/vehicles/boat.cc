@@ -3,7 +3,7 @@
 
 #include <math.h>
 
-namespace rx::physics {
+namespace rx::vehicles {
 
 namespace {
 
@@ -36,7 +36,7 @@ bool Finite(const Vec3& v) {
 
 }  // namespace
 
-Boat::Boat(PhysicsWorld& world, const BoatDesc& desc, const Vec3& position, f32 yaw_radians)
+Boat::Boat(physics::PhysicsWorld& world, const BoatDesc& desc, const Vec3& position, f32 yaw_radians)
     : world_(world), desc_(desc) {
   // Mass comes from the box density: density = mass / box volume, so Jolt
   // derives exactly desc.mass. Buoyancy and drag are our model's job, not the
@@ -313,4 +313,4 @@ void Boat::Update(const BoatInput& input, f32 dt) {
   state_.rotation = q;
 }
 
-}  // namespace rx::physics
+}  // namespace rx::vehicles

@@ -11,7 +11,7 @@
 #include "rxe/net/transport/znet_util.h"
 #include "rxe/scene/components.h"
 
-namespace rx::net {
+namespace rx::replication {
 namespace {
 
 constexpr f32 kDefaultPlayerSpeed = 4.0f;  // units per second
@@ -21,7 +21,7 @@ f32 ClampAxis(f32 v) { return v < -1.0f ? -1.0f : (v > 1.0f ? 1.0f : v); }
 // The stand-in player integration used when the game installs no simulator:
 // axis-clamped fly movement plus yaw. Enough for demos and tests.
 void DefaultSimulatePlayer(ecs::World& world, ecs::Entity player,
-                           const PlayerInput& input, f32 dt) {
+                           const net::PlayerInput& input, f32 dt) {
   scene::Transform* t = world.Get<scene::Transform>(player);
   if (!t) return;
   t->position[0] += ClampAxis(input.move_x) * kDefaultPlayerSpeed * dt;
@@ -59,7 +59,7 @@ bool ServerSession::Start() {
     return false;
   }
   started_ = true;
-  rpc_ = base::MakeUnique<RpcServerChannel>(server_);
+  rpc_ = base::MakeUnique<net::RpcServerChannel>(server_);
   RX_INFO("net: server listening on {} (bubbles {})", config_.port,
           config_.bubble_radius > 0 ? "on" : "off");
   return true;
@@ -102,23 +102,23 @@ void ServerSession::PollMessages(ecs::World& world) {
       client->since_last_packet = 0;
     }
     const u16 type = static_cast<u16>(packet.type);
-    if (type >= kFirstGameMessage) {
+    if (type >= net::kFirstGameMessage) {
       if (game_message_sink_) {
-        game_message_sink_(peer, type, PacketData(packet), packet.data.size());
+        game_message_sink_(peer, type, net::PacketData(packet), packet.data.size());
       }
       continue;
     }
-    switch (static_cast<MessageType>(type)) {
-      case MessageType::kClientJoin: {
-        if (auto join = ClientJoin::Decode(PacketData(packet), packet.data.size())) {
+    switch (static_cast<net::MessageType>(type)) {
+      case net::MessageType::kClientJoin: {
+        if (auto join = net::ClientJoin::Decode(net::PacketData(packet), packet.data.size())) {
           HandleJoin(world, peer, *join);
         }
         break;
       }
-      case MessageType::kPlayerInput: {
+      case net::MessageType::kPlayerInput: {
         RemoteClient* client = clients_.find(peer);
         if (!client) break;
-        if (auto input = PlayerInput::Decode(PacketData(packet), packet.data.size())) {
+        if (auto input = net::PlayerInput::Decode(net::PacketData(packet), packet.data.size())) {
           // Inputs are unreliable and unordered, keep only the newest.
           if (input->client_tick >= client->input.client_tick) {
             client->input = *input;
@@ -126,8 +126,8 @@ void ServerSession::PollMessages(ecs::World& world) {
         }
         break;
       }
-      case MessageType::kRpcCall: {
-        rpc_->OnPacket(peer, PacketData(packet), packet.data.size());
+      case net::MessageType::kRpcCall: {
+        rpc_->OnPacket(peer, net::PacketData(packet), packet.data.size());
         break;
       }
       default:
@@ -137,12 +137,12 @@ void ServerSession::PollMessages(ecs::World& world) {
   }
 }
 
-void ServerSession::HandleJoin(ecs::World& world, u32 peer, const ClientJoin& join) {
+void ServerSession::HandleJoin(ecs::World& world, u32 peer, const net::ClientJoin& join) {
   if (join.protocol != config_.protocol) {
-    JoinRefuse refuse;
-    refuse.reason = DisconnectReason::kProtocolMismatch;
+    net::JoinRefuse refuse;
+    refuse.reason = net::DisconnectReason::kProtocolMismatch;
     refuse.detail = "protocol version mismatch";
-    server_.Push(MakePacket(peer, MessageType::kJoinRefuse, refuse.Encode(),
+    server_.Push(net::MakePacket(peer, net::MessageType::kJoinRefuse, refuse.Encode(),
                             /*reliable=*/true, tx::network::PacketPriority::High));
     return;
   }
@@ -151,10 +151,10 @@ void ServerSession::HandleJoin(ecs::World& world, u32 peer, const ClientJoin& jo
   const bool is_new_client = client == nullptr;
   if (!client) {
     if (clients_.size() >= config_.max_clients) {
-      JoinRefuse refuse;
-      refuse.reason = DisconnectReason::kServerFull;
+      net::JoinRefuse refuse;
+      refuse.reason = net::DisconnectReason::kServerFull;
       refuse.detail = "server full";
-      server_.Push(MakePacket(peer, MessageType::kJoinRefuse, refuse.Encode(),
+      server_.Push(net::MakePacket(peer, net::MessageType::kJoinRefuse, refuse.Encode(),
                               /*reliable=*/true, tx::network::PacketPriority::High));
       return;
     }
@@ -188,7 +188,7 @@ void ServerSession::HandleJoin(ecs::World& world, u32 peer, const ClientJoin& jo
 
   // Reply (again, on duplicate joins from retransmits): the accept itself
   // can get lost even on the reliable path if the ack raced a timeout.
-  JoinAccept accept;
+  net::JoinAccept accept;
   accept.player_entity = client->player_net_id;
   accept.server_tick = tick_;
   accept.protocol = config_.protocol;
@@ -196,7 +196,7 @@ void ServerSession::HandleJoin(ecs::World& world, u32 peer, const ClientJoin& jo
   accept.tick_rate = static_cast<u16>(config_.tick_rate);
   accept.snapshot_rate =
       static_cast<u16>(config_.tick_rate / config_.snapshot_interval_ticks);
-  server_.Push(MakePacket(peer, MessageType::kJoinAccept, accept.Encode(),
+  server_.Push(net::MakePacket(peer, net::MessageType::kJoinAccept, accept.Encode(),
                           /*reliable=*/true, tx::network::PacketPriority::High));
 
   // Fire the join hook once, for every new peer.
@@ -262,7 +262,7 @@ void ServerSession::SendSnapshots(ecs::World& world) {
     stats_.snapshots_sent += 1;
     stats_.snapshot_records_sent += written;
     stats_.snapshot_bytes_sent += blob.size();
-    server_.Push(MakePacket(entry.key, MessageType::kSnapshot, blob,
+    server_.Push(net::MakePacket(entry.key, net::MessageType::kSnapshot, blob,
                             /*reliable=*/false,
                             full ? tx::network::PacketPriority::High
                                  : tx::network::PacketPriority::Medium));
@@ -271,21 +271,21 @@ void ServerSession::SendSnapshots(ecs::World& world) {
   // Everyone learns where every bubble is (tiny, and it drives remote
   // visualizers/HUDs). Unreliable: the next sync supersedes a lost one.
   if (bubbles_on && interest_.bubbles().size() > 0) {
-    server_.Push(MakePacket(tx::network::ZPeerId::to_all, MessageType::kBubbleSync,
-                            EncodeBubbleSync(interest_.bubbles()),
+    server_.Push(net::MakePacket(tx::network::ZPeerId::to_all, net::MessageType::kBubbleSync,
+                            net::EncodeBubbleSync(interest_.bubbles()),
                             /*reliable=*/false, tx::network::PacketPriority::Low));
   }
 }
 
 void ServerSession::SendTo(u32 peer, u16 type, const base::Vector<u8>& payload,
                            bool reliable, tx::network::PacketPriority priority) {
-  server_.Push(MakePacket(peer, type, payload, reliable, priority));
+  server_.Push(net::MakePacket(peer, type, payload, reliable, priority));
 }
 
 void ServerSession::Broadcast(u16 type, const base::Vector<u8>& payload, bool reliable,
                               tx::network::PacketPriority priority) {
   if (clients_.size() == 0) return;
-  server_.Push(MakePacket(tx::network::ZPeerId::to_all, type, payload, reliable, priority));
+  server_.Push(net::MakePacket(tx::network::ZPeerId::to_all, type, payload, reliable, priority));
 }
 
 ecs::Entity ServerSession::PlayerOf(u32 peer) const {
@@ -323,7 +323,7 @@ bool ClientSession::Start() {
              config_.port);
     return false;
   }
-  rpc_ = base::MakeUnique<RpcClientChannel>(client_);
+  rpc_ = base::MakeUnique<net::RpcClientChannel>(client_);
   RX_INFO("net: connecting to {}:{}", config_.address.c_str(), config_.port);
   return true;
 }
@@ -357,10 +357,10 @@ void ClientSession::Tick(ecs::World& world, f32 dt) {
     return;
   }
   if (phase == Phase::kConnected && !join_sent_) {
-    ClientJoin join;
+    net::ClientJoin join;
     join.protocol = config_.protocol;
     join.player_name.assign(config_.player_name.data(), config_.player_name.size());
-    client_.Push(MakePacket(tx::network::ZPeerId::to_server, MessageType::kClientJoin,
+    client_.Push(net::MakePacket(tx::network::ZPeerId::to_server, net::MessageType::kClientJoin,
                             join.Encode(), /*reliable=*/true,
                             tx::network::PacketPriority::High));
     join_sent_ = true;
@@ -370,7 +370,7 @@ void ClientSession::Tick(ecs::World& world, f32 dt) {
 
   if (joined_) {
     input_.client_tick = tick_;
-    client_.Push(MakePacket(tx::network::ZPeerId::to_server, MessageType::kPlayerInput,
+    client_.Push(net::MakePacket(tx::network::ZPeerId::to_server, net::MessageType::kPlayerInput,
                             input_.Encode(), /*reliable=*/false));
 
     // Heartbeat for headless clients.
@@ -391,7 +391,7 @@ void ClientSession::Tick(ecs::World& world, f32 dt) {
 
 void ClientSession::SendToServer(u16 type, const base::Vector<u8>& payload, bool reliable,
                                  tx::network::PacketPriority priority) {
-  client_.Push(MakePacket(tx::network::ZPeerId::to_server, type, payload, reliable, priority));
+  client_.Push(net::MakePacket(tx::network::ZPeerId::to_server, type, payload, reliable, priority));
 }
 
 void ClientSession::PollMessages(ecs::World& world) {
@@ -399,15 +399,15 @@ void ClientSession::PollMessages(ecs::World& world) {
   while (client_.Poll(tx::network::PacketChannelType::Data, packet)) {
     if (tx::network::IsSystemMessage(packet.type)) continue;
     const u16 type = static_cast<u16>(packet.type);
-    if (type >= kFirstGameMessage) {
+    if (type >= net::kFirstGameMessage) {
       if (game_message_sink_) {
-        game_message_sink_(type, PacketData(packet), packet.data.size());
+        game_message_sink_(type, net::PacketData(packet), packet.data.size());
       }
       continue;
     }
-    switch (static_cast<MessageType>(type)) {
-      case MessageType::kJoinAccept: {
-        auto accept = JoinAccept::Decode(PacketData(packet), packet.data.size());
+    switch (static_cast<net::MessageType>(type)) {
+      case net::MessageType::kJoinAccept: {
+        auto accept = net::JoinAccept::Decode(net::PacketData(packet), packet.data.size());
         if (!accept) break;
         joined_ = true;
         player_net_id_ = accept->player_entity;
@@ -419,8 +419,8 @@ void ClientSession::PollMessages(ecs::World& world) {
         if (joined_sink_) joined_sink_(*accept);
         break;
       }
-      case MessageType::kJoinRefuse: {
-        if (auto refuse = JoinRefuse::Decode(PacketData(packet), packet.data.size())) {
+      case net::MessageType::kJoinRefuse: {
+        if (auto refuse = net::JoinRefuse::Decode(net::PacketData(packet), packet.data.size())) {
           RX_ERROR("net: server refused join: {}", refuse->detail.c_str());
         }
         joined_ = false;
@@ -428,20 +428,20 @@ void ClientSession::PollMessages(ecs::World& world) {
         client_.Disconnect();
         return;
       }
-      case MessageType::kSnapshot: {
-        if (auto snapshot = Snapshot::Decode(PacketData(packet), packet.data.size())) {
+      case net::MessageType::kSnapshot: {
+        if (auto snapshot = net::Snapshot::Decode(net::PacketData(packet), packet.data.size())) {
           applier_.Apply(world, *snapshot, snapshot_dt_, hooks_);
         }
         break;
       }
-      case MessageType::kBubbleSync: {
-        if (auto bubbles = DecodeBubbleSync(PacketData(packet), packet.data.size())) {
+      case net::MessageType::kBubbleSync: {
+        if (auto bubbles = net::DecodeBubbleSync(net::PacketData(packet), packet.data.size())) {
           bubbles_ = base::move(*bubbles);
         }
         break;
       }
-      case MessageType::kRpcCall: {
-        rpc_->OnPacket(PacketData(packet), packet.data.size());
+      case net::MessageType::kRpcCall: {
+        rpc_->OnPacket(net::PacketData(packet), packet.data.size());
         break;
       }
       default:
@@ -451,4 +451,4 @@ void ClientSession::PollMessages(ecs::World& world) {
   }
 }
 
-}  // namespace rx::net
+}  // namespace rx::replication

@@ -4,7 +4,7 @@
 #include "foundation/build_config/export.h"
 #include "plugins/vehicles/boat.h"
 
-namespace rx::physics {
+namespace rx::vehicles {
 
 // Boat-type presets: fully tuned BoatDesc values (as vehicle_profiles does for
 // cars), one function per type whose doc comment states the handling signature;
@@ -37,6 +37,6 @@ RX_VEHICLES_EXPORT BoatDesc FishingBoatProfile();
 // wide turning; never planes. The cargo showcase.
 RX_VEHICLES_EXPORT BoatDesc WorkBargeProfile();
 
-}  // namespace rx::physics
+}  // namespace rx::vehicles
 
 #endif  // RX_VEHICLES_BOAT_PROFILES_H_

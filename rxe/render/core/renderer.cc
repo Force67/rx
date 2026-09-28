@@ -2771,8 +2771,8 @@ bool Renderer::UploadMaterial(const asset::Material &material, u64 id_salt) {
 }
 
 void Renderer::RenderFrame(const FrameView &view) {
-  static const mem::Category kRenderCategory = mem::RegisterCategory("render");
-  mem::CategoryScope mem_scope(kRenderCategory);
+  static const MemoryCategory kRenderCategory = RegisterMemoryCategory("render");
+  MemoryCategoryScope mem_scope(kRenderCategory);
   if (!device_ || device_->is_stub() || !swapchain_)
     return;
 

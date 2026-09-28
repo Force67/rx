@@ -37,7 +37,7 @@
 #include <stb_image.h>
 #endif
 
-namespace rx::asset {
+namespace rx::importers {
 
 bool IsUsdPath(base::StringRef path) {
   const size_t dot = path.find_last_of('.');
@@ -51,7 +51,7 @@ bool IsUsdPath(base::StringRef path) {
 
 #if !defined(RX_HAVE_USD)
 
-bool LoadUsdScene(const base::String &path, ImportedScene *,
+bool LoadUsdScene(const base::String &path, asset::ImportedScene *,
                   const UsdLoadOptions &) {
   RX_ERROR("usd {}: this build has no USD support, reconfigure with RX_USD=ON",
            path);
@@ -63,15 +63,15 @@ bool LoadUsdScene(const base::String &path, ImportedScene *,
 namespace {
 namespace tt = tinyusdz::tydra;
 
-AssetId ScopedId(const base::String &path, const char *kind, size_t index) {
-  return MakeAssetId(path + "#" + kind + rx::ToString(index));
+asset::AssetId ScopedId(const base::String &path, const char *kind, size_t index) {
+  return asset::MakeAssetId(path + "#" + kind + rx::ToString(index));
 }
 
 // Tydra decodes images into RenderScene::buffers keeping the source channel
 // count; the engine uploads rgba8. A single-channel source replicates into rgb
 // so a greyscale roughness map reads the same through .g as a packed one.
 bool ConvertImage(const tt::RenderScene &scene, const tt::TextureImage &image,
-                  Texture *out) {
+                  asset::Texture *out) {
   if (!image.decoded || image.buffer_id < 0 ||
       static_cast<size_t>(image.buffer_id) >= scene.buffers.size())
     return false;
@@ -89,7 +89,7 @@ bool ConvertImage(const tt::RenderScene &scene, const tt::TextureImage &image,
   if (buffer.data.size() < texels * channels)
     return false;
 
-  out->format = TextureFormat::kRgba8;
+  out->format = asset::TextureFormat::kRgba8;
   out->width = static_cast<u32>(image.width);
   out->height = static_cast<u32>(image.height);
   out->is_srgb = image.colorSpace == tt::ColorSpace::sRGB ||
@@ -133,10 +133,10 @@ i64 ImageIndexOf(const tt::RenderScene &scene, i32 texture_id) {
   return image;
 }
 
-AssetId TextureAssetOf(const tt::RenderScene &scene,
-                       const base::Vector<AssetId> &image_ids, i32 texture_id) {
+asset::AssetId TextureAssetOf(const tt::RenderScene &scene,
+                       const base::Vector<asset::AssetId> &image_ids, i32 texture_id) {
   const i64 image = ImageIndexOf(scene, texture_id);
-  return image >= 0 ? image_ids[static_cast<u32>(image)] : AssetId{};
+  return image >= 0 ? image_ids[static_cast<u32>(image)] : asset::AssetId{};
 }
 
 // A connected input keeps tydra's class default as its value (UsdPreviewSurface
@@ -154,9 +154,9 @@ f32 FactorOf(const tt::ShaderParam<T> &param, f32 value) {
 // map goes in the combined slot (read through .g, which the greyscale expansion
 // above keeps valid) and metallic gets its own.
 void ConvertRoughnessMetallicMaps(const tt::RenderScene &scene,
-                                  const base::Vector<AssetId> &image_ids,
+                                  const base::Vector<asset::AssetId> &image_ids,
                                   i32 roughness_texture, i32 metallic_texture,
-                                  Material *out) {
+                                  asset::Material *out) {
   const i64 roughness_image = ImageIndexOf(scene, roughness_texture);
   const i64 metallic_image = ImageIndexOf(scene, metallic_texture);
   if (roughness_image >= 0)
@@ -182,7 +182,7 @@ void ConvertRoughnessMetallicMaps(const tt::RenderScene &scene,
 
 void ConvertPreviewSurface(const tt::RenderScene &scene,
                            const tt::PreviewSurfaceShader &s,
-                           const base::Vector<AssetId> &image_ids, Material *out) {
+                           const base::Vector<asset::AssetId> &image_ids, asset::Material *out) {
   const auto texture = [&](i32 texture_id) {
     return TextureAssetOf(scene, image_ids, texture_id);
   };
@@ -231,7 +231,7 @@ void ConvertPreviewSurface(const tt::RenderScene &scene,
 //     nanometers. The conversion has to happen somewhere, so it happens here.
 void ConvertOpenPbrSurface(const tt::RenderScene &scene,
                            const tt::OpenPBRSurfaceShader &s,
-                           const base::Vector<AssetId> &image_ids, Material *out) {
+                           const base::Vector<asset::AssetId> &image_ids, asset::Material *out) {
   const auto texture = [&](i32 texture_id) {
     return TextureAssetOf(scene, image_ids, texture_id);
   };
@@ -262,7 +262,7 @@ void ConvertOpenPbrSurface(const tt::RenderScene &scene,
   out->openpbr_specular_color[1] = s.specular_color.value[1];
   out->openpbr_specular_color[2] = s.specular_color.value[2];
 
-  out->anisotropy = OpenPbrAnisotropyToEngine(s.specular_roughness_anisotropy.value);
+  out->anisotropy = asset::OpenPbrAnisotropyToEngine(s.specular_roughness_anisotropy.value);
 
   out->transmission = s.transmission_weight.value;
   out->subsurface = s.subsurface_weight.value;
@@ -316,7 +316,7 @@ void ConvertOpenPbrSurface(const tt::RenderScene &scene,
 }
 
 void ConvertMaterial(const tt::RenderScene &scene, const tt::RenderMaterial &src,
-                     const base::Vector<AssetId> &image_ids, Material *out) {
+                     const base::Vector<asset::AssetId> &image_ids, asset::Material *out) {
   out->name = src.name;
   // A material can carry both shaders. OpenPBR is the richer model, so it wins.
   if (src.openPBRShader) {
@@ -329,17 +329,17 @@ void ConvertMaterial(const tt::RenderScene &scene, const tt::RenderMaterial &src
 
   switch (src.materialTag) {
   case tt::MaterialTag::Masked:
-    out->alpha_mode = AlphaMode::kMask;
+    out->alpha_mode = asset::AlphaMode::kMask;
     // OpenPBR has no opacity-threshold input; its cutout is geometry_opacity
     // driven by a mask texture, so the engine's own default cutoff stands.
     if (src.surfaceShader && !src.openPBRShader)
       out->alpha_cutoff = src.surfaceShader->opacityThreshold.value;
     break;
   case tt::MaterialTag::Translucent:
-    out->alpha_mode = AlphaMode::kBlend;
+    out->alpha_mode = asset::AlphaMode::kBlend;
     break;
   case tt::MaterialTag::Opaque:
-    out->alpha_mode = AlphaMode::kOpaque;
+    out->alpha_mode = asset::AlphaMode::kOpaque;
     break;
   }
 }
@@ -358,7 +358,7 @@ const f32 *AttributeFloats(const tt::VertexAttribute &attribute,
 }
 
 bool ConvertMesh(const tt::RenderMesh &src,
-                 const base::Vector<AssetId> &material_ids, Mesh *out) {
+                 const base::Vector<asset::AssetId> &material_ids, asset::Mesh *out) {
   const size_t vertex_count = src.points.size();
   const std::vector<u32> &indices = src.faceVertexIndices();
   if (vertex_count == 0 || indices.empty())
@@ -394,12 +394,12 @@ bool ConvertMesh(const tt::RenderMesh &src,
   if (const auto it = src.texcoords.find(0); it != src.texcoords.end())
     uvs = AttributeFloats(it->second, vertex_count, 2);
 
-  MeshLod lod;
+  asset::MeshLod lod;
   lod.vertices.resize(static_cast<u32>(vertex_count));
   Vec3 lo{src.points[0][0], src.points[0][1], src.points[0][2]};
   Vec3 hi = lo;
   for (size_t v = 0; v < vertex_count; ++v) {
-    Vertex &vertex = lod.vertices[static_cast<u32>(v)];
+    asset::Vertex &vertex = lod.vertices[static_cast<u32>(v)];
     vertex.position[0] = src.points[v][0];
     vertex.position[1] = src.points[v][1];
     vertex.position[2] = src.points[v][2];
@@ -457,10 +457,10 @@ bool ConvertMesh(const tt::RenderMesh &src,
       0.5f * ::sqrtf(extent.x * extent.x + extent.y * extent.y +
                        extent.z * extent.z);
 
-  const auto material_of = [&](int id) -> AssetId {
+  const auto material_of = [&](int id) -> asset::AssetId {
     return id >= 0 && static_cast<u32>(id) < material_ids.size()
                ? material_ids[static_cast<u32>(id)]
-               : AssetId{};
+               : asset::AssetId{};
   };
   // USD `orientation = "leftHanded"` reverses the face winding the engine
   // expects; flipping here keeps the raster backface test correct.
@@ -477,7 +477,7 @@ bool ConvertMesh(const tt::RenderMesh &src,
   if (src.material_subsetMap.empty()) {
     for (size_t t = 0; t < triangles; ++t)
       emit(t);
-    lod.submeshes.push_back(Submesh{0, static_cast<u32>(lod.indices.size()),
+    lod.submeshes.push_back(asset::Submesh{0, static_cast<u32>(lod.indices.size()),
                                     material_of(src.material_id)});
   } else {
     // A materialBind GeomSubset selects faces, not index ranges, so gather each
@@ -486,7 +486,7 @@ bool ConvertMesh(const tt::RenderMesh &src,
     base::Vector<bool> claimed;
     claimed.resize(triangles, false);
     for (const auto &[name, subset] : src.material_subsetMap) {
-      Submesh submesh;
+      asset::Submesh submesh;
       submesh.index_offset = static_cast<u32>(lod.indices.size());
       for (const int face : subset.indices()) {
         if (face < 0 || static_cast<size_t>(face) >= triangles)
@@ -501,7 +501,7 @@ bool ConvertMesh(const tt::RenderMesh &src,
       submesh.material = material_of(subset.material_id);
       lod.submeshes.push_back(submesh);
     }
-    Submesh rest;
+    asset::Submesh rest;
     rest.index_offset = static_cast<u32>(lod.indices.size());
     for (size_t t = 0; t < triangles; ++t) {
       if (!claimed[t])
@@ -533,8 +533,8 @@ Mat4 ToMat4(const tinyusdz::value::matrix4d &m) {
   return out;
 }
 
-ImportedScene::Instance MakeInstance(u32 mesh_index, const Mat4 &world) {
-  ImportedScene::Instance instance;
+asset::ImportedScene::Instance MakeInstance(u32 mesh_index, const Mat4 &world) {
+  asset::ImportedScene::Instance instance;
   instance.mesh_index = mesh_index;
   instance.position = {world.m[12], world.m[13], world.m[14]};
   const auto axis_length = [&](int col) {
@@ -553,7 +553,7 @@ ImportedScene::Instance MakeInstance(u32 mesh_index, const Mat4 &world) {
 struct NodeWalk {
   const tt::RenderScene &scene;
   Mat4 stage_to_engine;
-  ImportedScene *out;
+  asset::ImportedScene *out;
   u32 mirrored = 0;
 
   void Visit(const tt::Node &node) {
@@ -843,15 +843,15 @@ void ConvertLights(const tt::RenderScene &scene, const Mat4 &stage_to_engine,
                    f32 meters_per_unit,
                    const base::Vector<base::String> &hidden_paths,
                    const UsdLoadOptions &options, base::StringRef base_dir,
-                   ImportedScene *out) {
-  using Kind = ImportedScene::Light::Kind;
+                   asset::ImportedScene *out) {
+  using Kind = asset::ImportedScene::Light::Kind;
   u32 skipped = 0;
   for (const tt::RenderLight &src : scene.lights) {
     if (IsHidden(src.abs_path, hidden_paths, options)) {
       ++skipped;
       continue;
     }
-    ImportedScene::Light light;
+    asset::ImportedScene::Light light;
     switch (src.type) {
     case tt::RenderLight::Type::Distant: light.kind = Kind::kDistant; break;
     case tt::RenderLight::Type::Dome: light.kind = Kind::kDome; break;
@@ -918,7 +918,7 @@ void ConvertLights(const tt::RenderScene &scene, const Mat4 &stage_to_engine,
 
 void ConvertCameras(const tt::RenderScene &scene, const Mat4 &stage_to_engine,
                     const base::Vector<base::String> &hidden_paths,
-                    const UsdLoadOptions &options, ImportedScene *out) {
+                    const UsdLoadOptions &options, asset::ImportedScene *out) {
   // RenderCamera carries no transform of its own - Tydra keeps it on the node -
   // so pair each camera with the node that addresses it.
   base::Vector<Mat4> node_matrices;
@@ -947,7 +947,7 @@ void ConvertCameras(const tt::RenderScene &scene, const Mat4 &stage_to_engine,
     // A hidden camera must not become the viewpoint the scene opens on.
     if (IsHidden(src.abs_path, hidden_paths, options))
       continue;
-    ImportedScene::Camera camera;
+    asset::ImportedScene::Camera camera;
     // USD cameras look down -Z with +Y up, which is the engine's convention too.
     const Mat4 world = stage_to_engine * (found[i] ? node_matrices[i] : Mat4{});
     camera.position = {world.m[12], world.m[13], world.m[14]};
@@ -972,7 +972,7 @@ void ConvertCameras(const tt::RenderScene &scene, const Mat4 &stage_to_engine,
 // `fog_start` comes out in stage units; LoadUsdScene converts it once
 // metersPerUnit is known.
 void ParseRenderSettings(const tinyusdz::Layer &layer,
-                         ImportedScene::RenderSettings *out) {
+                         asset::ImportedScene::RenderSettings *out) {
   const auto &custom = layer.metas().customLayerData;
   const auto it = custom.find("renderSettings");
   if (it == custom.end())
@@ -1044,7 +1044,7 @@ void ParseRenderSettings(const tinyusdz::Layer &layer,
 bool ComposeStage(const std::string &path, const std::string &base_dir,
                   tinyusdz::Stage *stage,
                   base::Vector<base::String> *hidden_paths,
-                  ImportedScene::RenderSettings *render_settings) {
+                  asset::ImportedScene::RenderSettings *render_settings) {
   std::string warn, err;
   tinyusdz::Layer layer;
   if (!tinyusdz::LoadLayerFromFile(path, &layer, &warn, &err)) {
@@ -1186,7 +1186,7 @@ bool ComposeStage(const std::string &path, const std::string &base_dir,
 
 } // namespace
 
-bool LoadUsdScene(const base::String &path, ImportedScene *out,
+bool LoadUsdScene(const base::String &path, asset::ImportedScene *out,
                   const UsdLoadOptions &options) {
   std::string warn, err;
   tinyusdz::Stage stage;
@@ -1249,11 +1249,11 @@ bool LoadUsdScene(const base::String &path, ImportedScene *out,
   if (const std::string convert_warn = converter.GetWarning(); !convert_warn.empty())
     RX_WARN("usd {}: {}", path, convert_warn.c_str());
 
-  base::Vector<AssetId> image_ids;
+  base::Vector<asset::AssetId> image_ids;
   image_ids.resize(static_cast<u32>(render_scene.images.size()));
   u32 undecoded = 0;
   for (size_t i = 0; i < render_scene.images.size(); ++i) {
-    Texture texture;
+    asset::Texture texture;
     texture.id = ScopedId(path, "tex", i);
     if (!ConvertImage(render_scene, render_scene.images[i], &texture)) {
       ++undecoded;
@@ -1263,12 +1263,12 @@ bool LoadUsdScene(const base::String &path, ImportedScene *out,
     out->textures.push_back(base::move(texture));
   }
 
-  base::Vector<AssetId> material_ids;
+  base::Vector<asset::AssetId> material_ids;
   material_ids.resize(static_cast<u32>(render_scene.materials.size()));
   u32 unsupported_shaders = 0;
   u32 openpbr_shaders = 0;
   for (size_t i = 0; i < render_scene.materials.size(); ++i) {
-    Material material;
+    asset::Material material;
     material.id = ScopedId(path, "mat", i);
     if (render_scene.materials[i].openPBRShader)
       ++openpbr_shaders;
@@ -1284,7 +1284,7 @@ bool LoadUsdScene(const base::String &path, ImportedScene *out,
   // address meshes by index, so a mesh that fails conversion keeps its slot.
   u32 skipped_meshes = 0;
   for (size_t i = 0; i < render_scene.meshes.size(); ++i) {
-    Mesh mesh;
+    asset::Mesh mesh;
     mesh.id = ScopedId(path, "mesh", i);
     if (!ConvertMesh(render_scene.meshes[i], material_ids, &mesh)) {
       ++skipped_meshes;
@@ -1342,4 +1342,4 @@ bool LoadUsdScene(const base::String &path, ImportedScene *out,
 
 #endif // RX_HAVE_USD
 
-} // namespace rx::asset
+} // namespace rx::importers

@@ -4,13 +4,13 @@
 
 #include <math.h>
 
-namespace rx::audio {
+namespace rx::weather {
 namespace {
 
 // A strike renders as crack + rumble with a handful of echo bumps. All state
 // advances sample-by-sample inside Read, so the decoder streams at any block
 // size the mixer asks for and never allocates after construction.
-class ThunderDecoder final : public Decoder {
+class ThunderDecoder final : public audio::Decoder {
 public:
   ThunderDecoder(u32 rate, u32 seed, f32 energy, f32 distance_m)
       : rate_(rate), rate_f_(static_cast<f32>(rate)),
@@ -154,7 +154,7 @@ private:
 
 } // namespace
 
-base::UniquePointer<Decoder> MakeThunder(u32 output_rate, u32 seed, f32 energy,
+base::UniquePointer<audio::Decoder> MakeThunder(u32 output_rate, u32 seed, f32 energy,
                                      f32 distance_m) {
   if (output_rate == 0 || output_rate > 768000u || !isfinite(energy) ||
       !isfinite(distance_m))
@@ -163,4 +163,4 @@ base::UniquePointer<Decoder> MakeThunder(u32 output_rate, u32 seed, f32 energy,
                                           distance_m);
 }
 
-} // namespace rx::audio
+} // namespace rx::weather

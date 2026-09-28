@@ -7,7 +7,7 @@
 #include "plugins/weather/export.h"
 #include "rxe/audio/audio_clip.h"
 
-namespace rx::audio {
+namespace rx::weather {
 
 // One-shot procedural thunder: a close strike opens with a band-passed crack
 // transient, then hands over to a long brown-noise rumble whose envelope rolls
@@ -21,9 +21,9 @@ namespace rx::audio {
 // or null for a zero rate, a rate above 768 kHz, or non-finite input;
 // the mixer retires the voice at end of stream. `seed` varies the echo timing
 // and roll character per strike, `energy` (0..1) scales length and weight.
-RX_WEATHER_EXPORT base::UniquePointer<Decoder>
+RX_WEATHER_EXPORT base::UniquePointer<audio::Decoder>
 MakeThunder(u32 output_rate, u32 seed, f32 energy, f32 distance_m);
 
-} // namespace rx::audio
+} // namespace rx::weather
 
 #endif // RX_WEATHER_THUNDER_SYNTH_H_

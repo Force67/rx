@@ -160,7 +160,7 @@ void TestComponentAlignment() {
 }
 
 void TestChunkReclamation() {
-  const size_t free_before = rx::mem::GlobalChunkPool().stats().free_chunks;
+  const size_t free_before = rx::GlobalChunkPool().stats().free_chunks;
   {
     rx::ecs::World world;
     base::Vector<rx::ecs::Entity> entities;
@@ -170,14 +170,14 @@ void TestChunkReclamation() {
       entities.push_back(entity);
     }
     // The world holds chunks now...
-    CHECK(rx::mem::GlobalChunkPool().stats().free_chunks <
-          rx::mem::GlobalChunkPool().stats().total_chunks);
+    CHECK(rx::GlobalChunkPool().stats().free_chunks <
+          rx::GlobalChunkPool().stats().total_chunks);
     for (rx::ecs::Entity entity : entities) world.Destroy(entity);
   }
   // ...and returns every one of them after destruction.
-  CHECK(rx::mem::GlobalChunkPool().stats().free_chunks >= free_before);
-  CHECK(rx::mem::GlobalChunkPool().stats().free_chunks ==
-        rx::mem::GlobalChunkPool().stats().total_chunks);
+  CHECK(rx::GlobalChunkPool().stats().free_chunks >= free_before);
+  CHECK(rx::GlobalChunkPool().stats().free_chunks ==
+        rx::GlobalChunkPool().stats().total_chunks);
 }
 
 void TestAddRemoveOverwrite() {

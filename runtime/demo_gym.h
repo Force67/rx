@@ -96,7 +96,7 @@ class GymDemo {
 
   // Jetpack: a LightJetPreset voice at the player, N1 tracking the spooled thrust
   // and the roar the burn demand; ducked/muffled when the tank runs dry.
-  base::UniquePointer<audio::VehicleAudio> jetpack_audio_;
+  base::UniquePointer<vehicles::VehicleAudio> jetpack_audio_;
 
   Vec3 spawn_feet_{0, 0, 8};
   f32 spawn_yaw_ = 0;

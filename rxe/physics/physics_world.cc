@@ -423,9 +423,9 @@ struct PhysicsWorld::Impl {
     base::Vector<Vec3> target_scratch;
     base::Vector<Mat4> last_joint_transforms;
     base::Vector<JPH::Mat44> skin_pose;
-    detail::ClothTopology topology;
-    detail::ClothSelfCollisionConfig self_collision;
-    detail::ClothSelfCollisionScratch self_collision_scratch;
+    internal::ClothTopology topology;
+    internal::ClothSelfCollisionConfig self_collision;
+    internal::ClothSelfCollisionScratch self_collision_scratch;
     base::Vector<Vec3> collision_positions;
     base::Vector<Vec3> collision_velocities;
     base::Vector<f32> collision_inverse_masses;
@@ -811,7 +811,7 @@ void PhysicsWorld::Update(f32 dt) {
                 Vec3{gravity_delta.GetX(), gravity_delta.GetY(), gravity_delta.GetZ()};
           }
         }
-        detail::SolveClothSelfCollision(
+        internal::SolveClothSelfCollision(
             entry.topology, entry.self_collision, entry.collision_positions,
             &entry.collision_velocities, entry.collision_inverse_masses, dt,
             &entry.self_collision_scratch);
@@ -2605,8 +2605,8 @@ ClothId PhysicsWorld::CreateCloth(const ClothDesc& desc, const Mat4& transform) 
     positions.push_back(world - origin);
   }
 
-  detail::ClothTopology topology;
-  if (!detail::BuildClothTopology(positions.data(), desc.vertex_count, desc.indices,
+  internal::ClothTopology topology;
+  if (!internal::BuildClothTopology(positions.data(), desc.vertex_count, desc.indices,
                                   desc.index_count, &topology)) {
     RX_WARN(
         "cloth rejected: topology is degenerate, duplicated, non-manifold "

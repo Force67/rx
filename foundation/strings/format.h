@@ -27,7 +27,7 @@ namespace rx {
 RX_FOUNDATION_EXPORT void AppendShortest(base::String& out, f32 value);
 RX_FOUNDATION_EXPORT void AppendShortest(base::String& out, f64 value);
 
-namespace format_detail {
+namespace internal {
 
 // Compile-time: calling this from a consteval context fails the build with
 // the message in the call site.
@@ -104,31 +104,31 @@ void Append(base::String& out, base::StringRef spec, const void* value) {
 RX_FOUNDATION_EXPORT void FormatImpl(base::String& out, const char* fmt, const Appender* appenders,
                                const void* const* values, mem_size count);
 
-}  // namespace format_detail
+}  // namespace internal
 
 template <typename... Args>
 struct FormatString {
   template <mem_size N>
   consteval FormatString(const char (&s)[N]) : str(s) {  // NOLINT(runtime/explicit)
-    format_detail::Check(s, sizeof...(Args));
+    internal::Check(s, sizeof...(Args));
   }
   const char* str;
 };
 
 template <typename... Args>
-void StrFormatTo(base::String& out, FormatString<typename format_detail::Identity<Args>::type...> fmt,
+void StrFormatTo(base::String& out, FormatString<typename internal::Identity<Args>::type...> fmt,
               const Args&... args) {
   if constexpr (sizeof...(Args) == 0) {
-    format_detail::FormatImpl(out, fmt.str, nullptr, nullptr, 0);
+    internal::FormatImpl(out, fmt.str, nullptr, nullptr, 0);
   } else {
-    const format_detail::Appender appenders[] = {&format_detail::Append<Args>...};
+    const internal::Appender appenders[] = {&internal::Append<Args>...};
     const void* const values[] = {static_cast<const void*>(&args)...};
-    format_detail::FormatImpl(out, fmt.str, appenders, values, sizeof...(Args));
+    internal::FormatImpl(out, fmt.str, appenders, values, sizeof...(Args));
   }
 }
 
 template <typename... Args>
-base::String StrFormat(FormatString<typename format_detail::Identity<Args>::type...> fmt, const Args&... args) {
+base::String StrFormat(FormatString<typename internal::Identity<Args>::type...> fmt, const Args&... args) {
   base::String out;
   StrFormatTo<Args...>(out, fmt, args...);
   return out;

@@ -102,7 +102,7 @@ struct ComponentDesc {
   u32 prop_count;
 };
 
-namespace detail {
+namespace internal {
 
 // Opaque per-component registration record; the reflector appends fields to it.
 struct RegEntry;
@@ -162,7 +162,7 @@ constexpr PropType DeducePropType() {
   }
 }
 
-}  // namespace detail
+}  // namespace internal
 
 // Fluent per-component registration. PropType is deduced from the member type;
 // the (name, member, PropType) overload forces a type where the C++ layout is
@@ -170,23 +170,23 @@ constexpr PropType DeducePropType() {
 template <typename T>
 class ComponentReflector {
  public:
-  explicit ComponentReflector(detail::RegEntry* entry) : entry_(entry) {}
+  explicit ComponentReflector(internal::RegEntry* entry) : entry_(entry) {}
 
   template <typename M>
   ComponentReflector& Prop(const char* name, M T::* member) {
-    detail::AddProp(entry_, name, detail::DeducePropType<M>(), detail::MemberOffset(member));
+    internal::AddProp(entry_, name, internal::DeducePropType<M>(), internal::MemberOffset(member));
     return *this;
   }
 
   template <typename M>
   ComponentReflector& Prop(const char* name, M T::* member, PropType type) {
-    detail::AddProp(entry_, name, type, detail::MemberOffset(member));
+    internal::AddProp(entry_, name, type, internal::MemberOffset(member));
     return *this;
   }
 
   // Applies to the most recently added prop.
   ComponentReflector& Range(f32 min, f32 max) {
-    detail::SetRange(entry_, min, max);
+    internal::SetRange(entry_, min, max);
     return *this;
   }
 
@@ -194,12 +194,12 @@ class ComponentReflector {
   // string prop, the unit of a number. Documentation only (the schema dump and
   // the inspector show it); nothing parses it.
   ComponentReflector& Hint(const char* hint) {
-    detail::SetHint(entry_, hint);
+    internal::SetHint(entry_, hint);
     return *this;
   }
 
  private:
-  detail::RegEntry* entry_;
+  internal::RegEntry* entry_;
 };
 
 // Registers reflection for component T under `name`. Idempotent per T: repeated
@@ -217,7 +217,7 @@ ComponentReflector<T>& ReflectComponent(const char* name) {
       return static_cast<void (*)(void*)>(nullptr);
   }();
   static ComponentReflector<T> reflector(
-      detail::CreateEntry(name, ecs::GetComponentId<T>(), default_ctor));
+      internal::CreateEntry(name, ecs::GetComponentId<T>(), default_ctor));
   return reflector;
 }
 

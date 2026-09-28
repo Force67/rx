@@ -5,7 +5,7 @@
 #include "base/strings/xstring.h"
 #include "foundation/build_config/export.h"
 
-namespace rx::asset {
+namespace rx::importers {
 
 struct BlendImportOptions {
   base::String blender_executable = "blender";
@@ -33,6 +33,6 @@ RX_BLEND_EXPORT bool ConvertBlendScene(const base::String &blend_path,
                                        BlendImportResult *out,
                                        base::String *error = nullptr);
 
-} // namespace rx::asset
+} // namespace rx::importers
 
 #endif // RX_IMPORTERS_BLEND_BLEND_IMPORT_H_

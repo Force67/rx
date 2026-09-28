@@ -6,42 +6,42 @@
 #include "foundation/build_config/export.h"
 #include "foundation/build_config/types.h"
 
-namespace rx::mem {
+namespace rx {
 
 // Category tokens label heap allocations by subsystem ("ecs", "assets", ...).
-// A thread-local current category is set with CategoryScope around a
+// A thread-local current category is set with MemoryCategoryScope around a
 // subsystem's entry points; the operator new/delete override (new_override.cc,
 // active when RX_MIMALLOC is on) stores that category with each allocation so
 // a later free is charged back to the category that owns the block.
-using Category = u8;
+using MemoryCategory = u8;
 
-constexpr Category kGeneralCategory = 0;
-constexpr u32 kMaxCategories = 64;
-constexpr u32 kMaxCategoryNameLength = 32;
+constexpr MemoryCategory kGeneralMemoryCategory = 0;
+constexpr u32 kMaxMemoryCategories = 64;
+constexpr u32 kMaxMemoryCategoryNameLength = 32;
 
 // Registers a category, or returns the existing token when `name` was already
 // registered (lookup is by string content; the name is copied, truncated to
-// kMaxCategoryNameLength-1). Returns kGeneralCategory when the table is full.
-RX_FOUNDATION_EXPORT Category RegisterCategory(const char* name);
+// kMaxMemoryCategoryNameLength-1). Returns kGeneralMemoryCategory when the table is full.
+RX_FOUNDATION_EXPORT MemoryCategory RegisterMemoryCategory(const char* name);
 
-RX_FOUNDATION_EXPORT Category CurrentCategory();
+RX_FOUNDATION_EXPORT MemoryCategory CurrentMemoryCategory();
 
-// Prefer CategoryScope; exposed for the scope and for job systems that need
+// Prefer MemoryCategoryScope; exposed for the scope and for job systems that need
 // to carry a category onto a worker thread manually.
-RX_FOUNDATION_EXPORT void SetCurrentCategory(Category category);
+RX_FOUNDATION_EXPORT void SetCurrentMemoryCategory(MemoryCategory category);
 
-class CategoryScope {
+class MemoryCategoryScope {
  public:
-  explicit CategoryScope(Category category) : previous_(CurrentCategory()) {
-    SetCurrentCategory(category);
+  explicit MemoryCategoryScope(MemoryCategory category) : previous_(CurrentMemoryCategory()) {
+    SetCurrentMemoryCategory(category);
   }
-  ~CategoryScope() { SetCurrentCategory(previous_); }
+  ~MemoryCategoryScope() { SetCurrentMemoryCategory(previous_); }
 
-  CategoryScope(const CategoryScope&) = delete;
-  CategoryScope& operator=(const CategoryScope&) = delete;
+  MemoryCategoryScope(const MemoryCategoryScope&) = delete;
+  MemoryCategoryScope& operator=(const MemoryCategoryScope&) = delete;
 
  private:
-  Category previous_;
+  MemoryCategory previous_;
 };
 
 // Hot path, called by the new/delete override with the usable block size.
@@ -49,19 +49,19 @@ class CategoryScope {
 RX_FOUNDATION_EXPORT void TrackAlloc(size_t bytes);
 RX_FOUNDATION_EXPORT void TrackFree(size_t bytes);
 
-namespace detail {
+namespace internal {
 // Explicit-category variants used by the allocation override, which remembers
 // the allocation category in its per-block footer.
-RX_FOUNDATION_EXPORT void TrackAlloc(Category category, size_t bytes);
-RX_FOUNDATION_EXPORT void TrackFree(Category category, size_t bytes);
+RX_FOUNDATION_EXPORT void TrackAlloc(MemoryCategory category, size_t bytes);
+RX_FOUNDATION_EXPORT void TrackFree(MemoryCategory category, size_t bytes);
 }
 
 // Soft budget for the category registered under `name` (registering it if
 // new); 0 means no budget. Budgets only drive the debug HUD, nothing is
 // enforced.
-RX_FOUNDATION_EXPORT void SetCategoryBudget(const char* name, u64 bytes);
+RX_FOUNDATION_EXPORT void SetMemoryCategoryBudget(const char* name, u64 bytes);
 
-struct CategoryStats {
+struct MemoryCategoryStats {
   const char* name = nullptr;
   i64 current_bytes = 0;
   u64 peak_bytes = 0;
@@ -71,16 +71,16 @@ struct CategoryStats {
 
 // Fills `out` with up to `max` registered categories, returns the count.
 // Allocation-free; safe to call every frame from the debug HUD.
-RX_FOUNDATION_EXPORT u32 SnapshotCategories(CategoryStats* out, u32 max);
+RX_FOUNDATION_EXPORT u32 SnapshotMemoryCategories(MemoryCategoryStats* out, u32 max);
 
 // True when the new/delete override is compiled into this process
 // (RX_MIMALLOC=ON), i.e. the counters above actually move.
 RX_FOUNDATION_EXPORT bool TrackingActive();
 
-namespace detail {
+namespace internal {
 RX_FOUNDATION_EXPORT void MarkTrackingActive();
 }
 
-}  // namespace rx::mem
+}  // namespace rx
 
 #endif  // RX_FOUNDATION_MEMORY_MEMORY_TRACKER_H_

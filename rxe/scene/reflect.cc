@@ -16,7 +16,7 @@
 
 namespace rx::scene {
 
-namespace detail {
+namespace internal {
 
 // A component's registration record. Names live in their own heap blocks so
 // their c_str() pointers (handed out as PropDesc::name / ComponentDesc::name)
@@ -32,11 +32,11 @@ struct RegEntry {
   ComponentDesc desc{};  // rebuilt (props pointer) in Finalize
 };
 
-}  // namespace detail
+}  // namespace internal
 
 namespace {
 
-using detail::RegEntry;
+using internal::RegEntry;
 
 void RegisterBuiltins();
 
@@ -89,7 +89,7 @@ RegEntry* FindEntry(ecs::ComponentId id) {
 
 }  // namespace
 
-namespace detail {
+namespace internal {
 
 RegEntry* CreateEntry(const char* name, ecs::ComponentId id, void (*default_construct)(void*)) {
   Registry& reg = TheRegistry();
@@ -134,7 +134,7 @@ void SetHint(RegEntry* entry, const char* hint) {
   entry->props.back().hint = entry->prop_names.back()->c_str();
 }
 
-}  // namespace detail
+}  // namespace internal
 
 namespace {
 

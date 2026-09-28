@@ -9,7 +9,7 @@
 #include "foundation/build_config/types.h"
 #include "rxe/net/rpc/rpc_value.h"
 
-namespace rx::rpc {
+namespace rx::net {
 
 // A single remote procedure call: the name of the handler to invoke and the
 // argument list. This is the in-memory form; EncodeCall/DecodeCall translate it
@@ -29,6 +29,6 @@ RX_RPC_EXPORT base::Vector<u8> EncodeCall(const RpcCall& call);
 // input yields base::nullopt rather than a partial or out-of-range result.
 RX_RPC_EXPORT base::Optional<RpcCall> DecodeCall(const u8* data, size_t size);
 
-}  // namespace rx::rpc
+}  // namespace rx::net
 
 #endif  // RX_RPC_RPC_MESSAGE_H_

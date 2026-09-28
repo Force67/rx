@@ -22,6 +22,7 @@
 
 using namespace rx;
 using namespace rx::audio;
+using namespace rx::vehicles;
 
 namespace {
 

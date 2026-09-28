@@ -66,9 +66,9 @@ base::Option<bool> ShowSplash{"splash", true, "RX_SPLASH"};
 base::Option<float> SplashSeconds{"splash.seconds", ui::Splash::kDefaultSeconds,
                                   "RX_SPLASH_SECONDS"};
 void ApplyMemoryPlan(const base::String& text) {
-  mem::MemoryConfig plan;
-  mem::ParseMemoryConfigText(text, plan);
-  mem::ApplyMemoryConfig(plan);
+  MemoryConfig plan;
+  ParseMemoryConfigText(text, plan);
+  ApplyMemoryConfig(plan);
 }
 
 }  // namespace
@@ -347,7 +347,7 @@ void Host::ConfigureClock(f32 base_timescale) {
 
 bool Host::RunFrame() {
   if (quit_.load(base::memory_order_relaxed)) return false;
-  mem::MainFrameArena().Reset();
+  MainFrameArena().Reset();
   if (FixedDt.get() > 0.0f) timer_.set_fixed_delta(static_cast<f64>(FixedDt.get()));
   if (window_ && !window_->PumpEvents()) return false;
   // Resolve this pump's raw keyboard/mouse + gamepad state into semantic

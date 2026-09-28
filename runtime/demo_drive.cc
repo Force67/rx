@@ -61,12 +61,12 @@ const char* ProfileName(u32 i) {
 }
 physics::PhysicsWorld::VehicleDesc ProfileDesc(u32 i) {
   switch (i % kProfileCount) {
-    case 0: return physics::SportsCarProfile();
-    case 1: return physics::MuscleCarProfile();
-    case 2: return physics::HatchbackProfile();
-    case 3: return physics::SuvProfile();
-    case 4: return physics::VanProfile(1.0f);  // fully laden
-    default: return physics::SemiTruckProfile();
+    case 0: return vehicles::SportsCarProfile();
+    case 1: return vehicles::MuscleCarProfile();
+    case 2: return vehicles::HatchbackProfile();
+    case 3: return vehicles::SuvProfile();
+    case 4: return vehicles::VanProfile(1.0f);  // fully laden
+    default: return vehicles::SemiTruckProfile();
   }
 }
 // The box-shaped van/semi wear the milk-truck glTF; the sportier profiles get a
@@ -93,22 +93,22 @@ const char* BoatProfileName(u32 i) {
                                                   "WORK BARGE"};
   return kNames[i % kBoatProfileCount];
 }
-physics::BoatDesc BoatProfileDesc(u32 i) {
+vehicles::BoatDesc BoatProfileDesc(u32 i) {
   switch (i % kBoatProfileCount) {
-    case 0: return physics::DinghyProfile();
-    case 1: return physics::SpeedboatProfile();
-    case 2: return physics::JetskiProfile();
-    case 3: return physics::FishingBoatProfile();
-    default: return physics::WorkBargeProfile();
+    case 0: return vehicles::DinghyProfile();
+    case 1: return vehicles::SpeedboatProfile();
+    case 2: return vehicles::JetskiProfile();
+    case 3: return vehicles::FishingBoatProfile();
+    default: return vehicles::WorkBargeProfile();
   }
 }
 // Audio voice per profile: the big displacement hulls run a low inboard diesel;
 // the light outboard dinghy a buzzier four; the jetski a high-revving twin.
-audio::EnginePreset BoatEnginePreset(u32 i) {
+vehicles::EnginePreset BoatEnginePreset(u32 i) {
   switch (i % kBoatProfileCount) {
-    case 0: return audio::InlineFourCarPreset();   // dinghy outboard
-    case 2: return audio::MotorcycleTwinPreset();  // jetski
-    default: return audio::InboardBoatPreset();    // speedboat / fishing / barge
+    case 0: return vehicles::InlineFourCarPreset();   // dinghy outboard
+    case 2: return vehicles::MotorcycleTwinPreset();  // jetski
+    default: return vehicles::InboardBoatPreset();    // speedboat / fishing / barge
   }
 }
 u32 BoatProfileFromName(const char* s, u32 fallback) {
@@ -670,8 +670,8 @@ void DriveDemo::BuildKite() {
   const f32 gy = HeightAt(kite_anchor_.x, kite_anchor_.z);
   kite_anchor_.y = gy + 1.6f;  // top of the post
   kite_spawn_.y = gy + 0.6f;   // on the sand, downwind of the post
-  physics::KiteDesc kd;
-  kite_ = base::MakeUnique<physics::Kite>(*ctx_.physics, kd, kite_anchor_, kite_spawn_, 0.0f);
+  vehicles::KiteDesc kd;
+  kite_ = base::MakeUnique<vehicles::Kite>(*ctx_.physics, kd, kite_anchor_, kite_spawn_, 0.0f);
 
   // A steady breeze so the kite auto-launches (and a gentle push on the boat's
   // topsides / the plane's airmass; the J key still cycles rain wetness, which is
@@ -681,7 +681,7 @@ void DriveDemo::BuildKite() {
 
 bool DriveDemo::LoadModel(const base::String& path, i32 skip_mesh_index, Model* out) {
   asset::ImportedScene scene;
-  if (!asset::LoadGltfScene(path, &scene)) {
+  if (!importers::LoadGltfScene(path, &scene)) {
     RX_WARN("drive: vendor model '{}' unavailable, using graybox fallback", path.c_str());
     return false;
   }
@@ -760,7 +760,7 @@ void DriveDemo::SpawnVehicles() {
   // optionally overridden + pre-loaded with cargo for headless captures.
   boat_profile_ = BoatProfileFromName(StartBoat.get(), boat_profile_);  // RX_DRIVE_BOAT
   boat_desc_ = BoatProfileDesc(boat_profile_);
-  boat_ = base::MakeUnique<physics::Boat>(phys, boat_desc_, boat_spawn_, boat_yaw_);
+  boat_ = base::MakeUnique<vehicles::Boat>(phys, boat_desc_, boat_spawn_, boat_yaw_);
   {
     const f32 frac = rx::Clamp(StartCargo.get(), 0.0f, boat_desc_.cargo_overload_fraction);
     // Snap the cargo cycle step to the nearest preset step for key-L cycling.
@@ -774,20 +774,20 @@ void DriveDemo::SpawnVehicles() {
   // barely climbs and porpoises), so lighten it for a clean demo climb, and give
   // it a C182-class engine: the default 180 hp needs ~340 m of ground roll even
   // with flaps, more than the runway leaves past the spawn point.
-  physics::AircraftDesc ad;
+  vehicles::AircraftDesc ad;
   ad.payload_kg = 120.0f;
   ad.prop_max_power_w = 175000.0f;
   ad.prop_static_thrust_cap_n = 3400.0f;
   plane_spawn_.y = HeightAt(plane_spawn_.x, plane_spawn_.z) + 1.4f;
-  aircraft_ = base::MakeUnique<physics::Aircraft>(phys, ad, plane_spawn_, plane_yaw_);
+  aircraft_ = base::MakeUnique<vehicles::Aircraft>(phys, ad, plane_spawn_, plane_yaw_);
 }
 
 void DriveDemo::SetupAudio() {
   if (!ctx_.audio) return;
   audio::Mixer& mix = ctx_.audio->mixer();
-  car_audio_ = base::MakeUnique<audio::VehicleAudio>(mix, audio::V8Preset());
-  boat_audio_ = base::MakeUnique<audio::VehicleAudio>(mix, BoatEnginePreset(boat_profile_));
-  plane_audio_ = base::MakeUnique<audio::VehicleAudio>(mix, audio::SinglePropPlanePreset());
+  car_audio_ = base::MakeUnique<vehicles::VehicleAudio>(mix, vehicles::V8Preset());
+  boat_audio_ = base::MakeUnique<vehicles::VehicleAudio>(mix, BoatEnginePreset(boat_profile_));
+  plane_audio_ = base::MakeUnique<vehicles::VehicleAudio>(mix, vehicles::SinglePropPlanePreset());
 }
 
 f32 DriveDemo::CarMaxSlip() const {
@@ -825,7 +825,7 @@ void DriveDemo::StepVehicles(f32 dt) {
   }
 
   if (boat_ && boat_->valid()) {
-    physics::BoatInput bi;
+    vehicles::BoatInput bi;
     if (boat_on) {
       bi.throttle = boat_throttle_;
       bi.steer = boat_steer_;
@@ -834,7 +834,7 @@ void DriveDemo::StepVehicles(f32 dt) {
   }
 
   if (aircraft_ && aircraft_->valid()) {
-    physics::AircraftInput ai;
+    vehicles::AircraftInput ai;
     if (plane_on) {
       ai.throttle = plane_throttle_;
       ai.pitch = plane_pitch_;
@@ -849,7 +849,7 @@ void DriveDemo::StepVehicles(f32 dt) {
   // The kite keeps flying in the wind whether or not it is the active vehicle
   // (like the idle boat keeps floating); only its control input is gated.
   if (kite_ && kite_->valid()) {
-    physics::KiteInput ki;
+    vehicles::KiteInput ki;
     if (kite_on) {
       ki.steer = kite_steer_;
       ki.reel = kite_reel_;
@@ -875,8 +875,8 @@ void DriveDemo::ResetActive() {
   } else if (active_ == Vehicle::kKite) {
     // The Kite has no in-place reset; respawn it near-taut and low to re-launch.
     if (kite_ && kite_->valid()) ctx_.physics->RemoveBody(kite_->body());
-    physics::KiteDesc kd;
-    kite_ = base::MakeUnique<physics::Kite>(*ctx_.physics, kd, kite_anchor_, kite_spawn_, 0.0f);
+    vehicles::KiteDesc kd;
+    kite_ = base::MakeUnique<vehicles::Kite>(*ctx_.physics, kd, kite_anchor_, kite_spawn_, 0.0f);
   }
   cam_init_ = false;
 }
@@ -923,19 +923,19 @@ void DriveDemo::SetBoatProfile(u32 index) {
   Vec3 pos = boat_spawn_;
   f32 yaw = boat_yaw_;
   if (boat_ && boat_->valid()) {
-    const physics::BoatState& s = boat_->state();
+    const vehicles::BoatState& s = boat_->state();
     const Vec3 fwd = Rotate(s.rotation, Vec3{0, 0, 1});
     pos = {s.position.x, boat_spawn_.y, s.position.z};
     yaw = ::atan2f(fwd.x, fwd.z);
     ctx_.physics->RemoveBody(boat_->body());  // Boat has no dtor cleanup
   }
-  boat_ = base::MakeUnique<physics::Boat>(*ctx_.physics, boat_desc_, pos, yaw);
+  boat_ = base::MakeUnique<vehicles::Boat>(*ctx_.physics, boat_desc_, pos, yaw);
   boat_->SetCargo(boat_cargo_frac_ * boat_desc_.max_cargo_kg);
 
   // Swap the audio voice to this profile's engine (dinghy outboard / inboard /
   // jetski twin).
   if (ctx_.audio)
-    boat_audio_ = base::MakeUnique<audio::VehicleAudio>(ctx_.audio->mixer(), BoatEnginePreset(index));
+    boat_audio_ = base::MakeUnique<vehicles::VehicleAudio>(ctx_.audio->mixer(), BoatEnginePreset(index));
 
   cam_init_ = false;
   RX_INFO("drive: boat profile -> {} ({} kg, cargo cap {} kg)", BoatProfileName(index),
@@ -1048,7 +1048,7 @@ void DriveDemo::Update(f32 dt, const InputState& input, const ActionState& actio
       if (aircraft_ && aircraft_->valid()) {
         // Rotate firmly, then ease to light back pressure once airborne so the
         // capture climbs out shallow instead of pulling into a stall.
-        const physics::AircraftState& st = aircraft_->state();
+        const vehicles::AircraftState& st = aircraft_->state();
         if (st.on_ground) {
           if (st.airspeed_mps > 28.0f) plane_pitch_ = 0.5f;
         } else {
@@ -1066,7 +1066,7 @@ void DriveDemo::Update(f32 dt, const InputState& input, const ActionState& actio
     Vec3 p{};
     f32 r[4];
     ctx_.physics->GetVehicleTransform(car_, &p, r);
-    audio::VehicleAudioState st;
+    vehicles::VehicleAudioState st;
     if (ctx_.physics->GetVehicleState(car_, &vs)) {
       st.rpm = vs.rpm;
       st.load = vs.engine_load;
@@ -1083,8 +1083,8 @@ void DriveDemo::Update(f32 dt, const InputState& input, const ActionState& actio
     car_audio_->Update(st);
   }
   if (boat_audio_ && boat_ && boat_->valid()) {
-    const physics::BoatState& bs = boat_->state();
-    audio::VehicleAudioState st;
+    const vehicles::BoatState& bs = boat_->state();
+    vehicles::VehicleAudioState st;
     st.rpm = bs.rpm;
     st.load = bs.engine_load;
     st.throttle = bs.throttle;  // signed; VehicleAudio revs on |throttle| astern too
@@ -1094,8 +1094,8 @@ void DriveDemo::Update(f32 dt, const InputState& input, const ActionState& actio
     boat_audio_->Update(st);
   }
   if (plane_audio_ && aircraft_ && aircraft_->valid()) {
-    const physics::AircraftState& as = aircraft_->state();
-    audio::VehicleAudioState st;
+    const vehicles::AircraftState& as = aircraft_->state();
+    vehicles::VehicleAudioState st;
     st.rpm = as.rpm;
     st.load = as.engine_load;
     st.throttle = as.throttle;
@@ -1272,7 +1272,7 @@ void DriveDemo::Emit(f32 dt, render::FrameView& view) {
       view.draws.push_back(it);
     };
 
-    const physics::KiteState& ks = kite_->state();
+    const vehicles::KiteState& ks = kite_->state();
     const Mat4 sail = MakeTransform(ks.position, ks.rotation, 1.0f);
     render::DrawItem d{};
     d.mesh = kite_sail_mesh_;
@@ -1329,7 +1329,7 @@ void DriveDemo::DrawPanel() {
       }
       ImGui::TextDisabled("W throttle  S brake/reverse  A/D steer  Space handbrake  1-6 profile");
     } else if (active_ == Vehicle::kBoat && boat_ && boat_->valid()) {
-      const physics::BoatState& bs = boat_->state();
+      const vehicles::BoatState& bs = boat_->state();
       ImGui::Text("profile: %s  %d kg  (1-5)", BoatProfileName(boat_profile_),
                   static_cast<int>(boat_desc_.mass));
       const bool overload = bs.cargo_kg > boat_desc_.max_cargo_kg + 1.0f;
@@ -1342,7 +1342,7 @@ void DriveDemo::DrawPanel() {
                   bs.planing * 100.0f, bs.prop_submerged ? "wet" : "ventilated");
       ImGui::TextDisabled("W/S throttle  A/D steer  1-5 profile  L cargo");
     } else if (active_ == Vehicle::kPlane && aircraft_ && aircraft_->valid()) {
-      const physics::AircraftState& as = aircraft_->state();
+      const vehicles::AircraftState& as = aircraft_->state();
       ImGui::Text("IAS %.0f km/h   alt %.0f m   VS %+.1f m/s", as.airspeed_mps * 3.6f,
                   as.position.y, as.vertical_speed_mps);
       ImGui::Text("throttle %.0f%%   flaps %.0f%%   rpm %.0f", plane_throttle_ * 100.0f,
@@ -1355,7 +1355,7 @@ void DriveDemo::DrawPanel() {
       if (as.over_mtom) ImGui::TextColored(ImVec4(1, 0.7f, 0.2f, 1), "OVERWEIGHT");
       ImGui::TextDisabled("W/S throttle  arrows pitch/roll  A/D rudder  F flaps  Space brakes");
     } else if (active_ == Vehicle::kKite && kite_ && kite_->valid()) {
-      const physics::KiteState& ks = kite_->state();
+      const vehicles::KiteState& ks = kite_->state();
       const Vec3 w = ctx_.physics->wind();
       ImGui::Text("altitude %.1f m   line %.1f m", ks.altitude_m, ks.line_length_m);
       ImGui::Text("tension %.0f N   %s", ks.tension_n, ks.taut ? "taut" : "slack");

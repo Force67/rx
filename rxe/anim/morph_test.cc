@@ -88,7 +88,7 @@ int TestNamedTargets() {
   ::fclose(file);
 
   asset::ImportedScene scene;
-  bool loaded = asset::LoadGltfScene(path, &scene);
+  bool loaded = importers::LoadGltfScene(path, &scene);
   rx::fs::Remove(path);
   if (!loaded || scene.meshes.size() != 1) return Fail("generated gltf did not load");
 
@@ -124,7 +124,7 @@ int TestNamedTargets() {
 
 int TestAnimatedMorphCube(const char* path) {
   asset::ImportedScene scene;
-  if (!asset::LoadGltfScene(path, &scene)) return Fail("AnimatedMorphCube did not load");
+  if (!importers::LoadGltfScene(path, &scene)) return Fail("AnimatedMorphCube did not load");
 
   const asset::Mesh* cube = nullptr;
   for (const asset::Mesh& mesh : scene.meshes) {
@@ -184,7 +184,7 @@ int TestGpuEvaluation(const char* path) {
   }
 
   asset::ImportedScene scene;
-  if (!asset::LoadGltfScene(path, &scene)) return Fail("AnimatedMorphCube did not load");
+  if (!importers::LoadGltfScene(path, &scene)) return Fail("AnimatedMorphCube did not load");
   const asset::Mesh& mesh = scene.meshes[0];
   const asset::MeshLod& lod = mesh.lods[0];
   const u32 verts = static_cast<u32>(lod.vertices.size());

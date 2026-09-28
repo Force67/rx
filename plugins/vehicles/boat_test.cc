@@ -14,10 +14,10 @@
 #include "rxe/physics/water_waves.h"
 
 using namespace rx;
-using physics::Boat;
-using physics::BoatDesc;
-using physics::BoatInput;
-using physics::BoatState;
+using vehicles::Boat;
+using vehicles::BoatDesc;
+using vehicles::BoatInput;
+using vehicles::BoatState;
 using physics::PhysicsWorld;
 
 namespace {

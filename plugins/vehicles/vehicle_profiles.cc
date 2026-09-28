@@ -1,10 +1,10 @@
 #include "plugins/vehicles/vehicle_profiles.h"
 
-namespace rx::physics {
+namespace rx::vehicles {
 
 namespace {
 
-using Desc = PhysicsWorld::VehicleDesc;
+using Desc = physics::PhysicsWorld::VehicleDesc;
 
 // A punchy petrol torque curve (peak in the mid range), reused by the road
 // cars. `low` sets the off-idle fraction so a muscle car can be given more
@@ -35,7 +35,7 @@ void DieselCurve(Desc& d) {
 
 }  // namespace
 
-PhysicsWorld::VehicleDesc SportsCarProfile() {
+physics::PhysicsWorld::VehicleDesc SportsCarProfile() {
   Desc d;
   d.half_extent = {0.95f, 0.42f, 2.05f};  // low, wide, ~4.1 m long
   d.mass = 1300.0f;
@@ -47,7 +47,7 @@ PhysicsWorld::VehicleDesc SportsCarProfile() {
   d.suspension_min = 0.10f;
   d.suspension_max = 0.28f;
   d.com_drop = 0.42f;  // low CG
-  d.drivetrain = PhysicsWorld::Drivetrain::kRWD;
+  d.drivetrain = physics::PhysicsWorld::Drivetrain::kRWD;
   d.limited_slip_ratio = 1.25f;  // tight LSD hooks the rears up out of a corner
   d.max_engine_torque = 1060.0f;
   PetrolCurve(d, 0.55f);
@@ -81,7 +81,7 @@ PhysicsWorld::VehicleDesc SportsCarProfile() {
   return d;
 }
 
-PhysicsWorld::VehicleDesc MuscleCarProfile() {
+physics::PhysicsWorld::VehicleDesc MuscleCarProfile() {
   Desc d;
   d.half_extent = {0.98f, 0.55f, 2.38f};  // long bonnet, ~4.75 m
   d.mass = 1650.0f;
@@ -93,7 +93,7 @@ PhysicsWorld::VehicleDesc MuscleCarProfile() {
   d.suspension_min = 0.14f;
   d.suspension_max = 0.36f;
   d.com_drop = 0.36f;
-  d.drivetrain = PhysicsWorld::Drivetrain::kRWD;
+  d.drivetrain = physics::PhysicsWorld::Drivetrain::kRWD;
   d.limited_slip_ratio = 1.6f;
   d.max_engine_torque = 660.0f;  // big low-end shove
   PetrolCurve(d, 0.72f);
@@ -126,7 +126,7 @@ PhysicsWorld::VehicleDesc MuscleCarProfile() {
   return d;
 }
 
-PhysicsWorld::VehicleDesc HatchbackProfile() {
+physics::PhysicsWorld::VehicleDesc HatchbackProfile() {
   Desc d;
   d.half_extent = {0.86f, 0.60f, 1.92f};  // small, tallish, ~3.85 m
   d.mass = 1150.0f;
@@ -138,7 +138,7 @@ PhysicsWorld::VehicleDesc HatchbackProfile() {
   d.suspension_min = 0.13f;
   d.suspension_max = 0.34f;
   d.com_drop = 0.34f;
-  d.drivetrain = PhysicsWorld::Drivetrain::kFWD;
+  d.drivetrain = physics::PhysicsWorld::Drivetrain::kFWD;
   d.limited_slip_ratio = 0;  // open diff, economy car
   d.max_engine_torque = 200.0f;  // economical
   // FWD-specific hard top-end taper: the front wheels unload and spin under
@@ -182,7 +182,7 @@ PhysicsWorld::VehicleDesc HatchbackProfile() {
   return d;
 }
 
-PhysicsWorld::VehicleDesc SuvProfile() {
+physics::PhysicsWorld::VehicleDesc SuvProfile() {
   Desc d;
   d.half_extent = {0.98f, 0.78f, 2.30f};  // tall, ~4.6 m
   d.mass = 2100.0f;
@@ -194,7 +194,7 @@ PhysicsWorld::VehicleDesc SuvProfile() {
   d.suspension_min = 0.20f;
   d.suspension_max = 0.55f;  // long travel
   d.com_drop = 0.50f;        // ballasted so it leans but stays on its wheels
-  d.drivetrain = PhysicsWorld::Drivetrain::kAWD;
+  d.drivetrain = physics::PhysicsWorld::Drivetrain::kAWD;
   d.awd_front_split = 0.3f;  // 30/70 front/rear: less front spin, still sure-footed
   d.limited_slip_ratio = 1.5f;
   d.max_engine_torque = 350.0f;
@@ -243,7 +243,7 @@ PhysicsWorld::VehicleDesc SuvProfile() {
   return d;
 }
 
-PhysicsWorld::VehicleDesc VanProfile(f32 cargo_load) {
+physics::PhysicsWorld::VehicleDesc VanProfile(f32 cargo_load) {
   const f32 load = cargo_load < 0 ? 0 : (cargo_load > 1 ? 1 : cargo_load);
   Desc d;
   d.half_extent = {0.95f, 0.98f, 2.60f};  // tall box, ~5.2 m, narrow-ish track
@@ -257,7 +257,7 @@ PhysicsWorld::VehicleDesc VanProfile(f32 cargo_load) {
   d.suspension_max = 0.50f;
   d.com_drop = 0.55f - 0.16f * load;   // ballasted low; roof load raises the CG
   d.com_fore = -0.35f * load;          // cargo sits over/behind the rear axle
-  d.drivetrain = PhysicsWorld::Drivetrain::kRWD;
+  d.drivetrain = physics::PhysicsWorld::Drivetrain::kRWD;
   d.limited_slip_ratio = 2.0f;
   d.max_engine_torque = 430.0f;
   DieselCurve(d);
@@ -291,7 +291,7 @@ PhysicsWorld::VehicleDesc VanProfile(f32 cargo_load) {
   return d;
 }
 
-PhysicsWorld::VehicleDesc SemiTruckProfile() {
+physics::PhysicsWorld::VehicleDesc SemiTruckProfile() {
   Desc d;
   d.half_extent = {1.25f, 1.40f, 3.00f};  // huge, tall cab, ~6 m tractor
   d.mass = 8500.0f;
@@ -303,7 +303,7 @@ PhysicsWorld::VehicleDesc SemiTruckProfile() {
   d.suspension_min = 0.22f;
   d.suspension_max = 0.55f;
   d.com_drop = 0.65f;  // ballasted low so the tall body leans hard but stays up
-  d.drivetrain = PhysicsWorld::Drivetrain::kRWD;
+  d.drivetrain = physics::PhysicsWorld::Drivetrain::kRWD;
   d.limited_slip_ratio = 2.5f;
   d.max_engine_torque = 3400.0f;  // enormous diesel torque
   DieselCurve(d);
@@ -336,4 +336,4 @@ PhysicsWorld::VehicleDesc SemiTruckProfile() {
   return d;
 }
 
-}  // namespace rx::physics
+}  // namespace rx::vehicles

@@ -4,7 +4,7 @@
 
 #include <math.h>
 
-namespace rx::audio {
+namespace rx::vehicles {
 namespace {
 
 constexpr f32 kPi = 3.14159265359f;
@@ -35,7 +35,7 @@ f32 SkidSynth::Noise() {
   return static_cast<f32>(rng_) * (2.0f / 4294967295.0f) - 1.0f;
 }
 
-void SkidSynth::Render(f32* out, u32 frames, const SynthParams& p) {
+void SkidSynth::Render(f32* out, u32 frames, const audio::SynthParams& p) {
   const f32 slip = rx::Clamp(p.slip, 0.0f, 1.0f);
   const f32 speed = rx::Max(0.0f, p.speed_mps);
 
@@ -80,7 +80,7 @@ f32 WindSynth::Noise() {
   return static_cast<f32>(rng_) * (2.0f / 4294967295.0f) - 1.0f;
 }
 
-void WindSynth::Render(f32* out, u32 frames, const SynthParams& p) {
+void WindSynth::Render(f32* out, u32 frames, const audio::SynthParams& p) {
   const f32 speed = rx::Max(0.0f, p.speed_mps);
   // Presence grows faster than linearly so wind is a non-issue around town and
   // dominant on the motorway.
@@ -107,4 +107,4 @@ void WindSynth::Render(f32* out, u32 frames, const SynthParams& p) {
   }
 }
 
-}  // namespace rx::audio
+}  // namespace rx::vehicles

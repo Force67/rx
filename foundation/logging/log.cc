@@ -33,7 +33,7 @@ const char* LevelTag(LogLevel level) {
 
 void SetLogLevel(LogLevel level) { g_level.store(level); }
 
-namespace detail {
+namespace internal {
 
 void LogMessage(LogLevel level, base::StringRef message) {
   if (level < g_level.load()) return;
@@ -51,5 +51,5 @@ void LogMessage(LogLevel level, base::StringRef message) {
 #endif
 }
 
-}  // namespace detail
+}  // namespace internal
 }  // namespace rx
