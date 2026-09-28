@@ -1,6 +1,6 @@
 #include "debug_ui.h"
 
-#include "fly_camera.h"
+#include "scene/fly_camera.h"
 
 #if defined(RX_HAS_IMGUI)
 
@@ -208,7 +208,7 @@ bool DebugUi::wants_keyboard() const {
   return initialized_ && ImGui::GetCurrentContext() && ImGui::GetIO().WantCaptureKeyboard;
 }
 
-void DebugUi::Build(render::Renderer& renderer, FlyCamera& camera, const ecs::World& world,
+void DebugUi::Build(render::Renderer& renderer, scene::FlyCamera& camera, const ecs::World& world,
                     f32 frame_delta, render::FrameView* view) {
   if (!initialized_) return;
 
@@ -688,7 +688,7 @@ void DebugUi::DrawPostTab(render::RenderSettings& settings) {
                      8.0f, "%.2f", ImGuiSliderFlags_Logarithmic);
 }
 
-void DebugUi::DrawDiagnosticsTab(render::Renderer& renderer, FlyCamera& camera,
+void DebugUi::DrawDiagnosticsTab(render::Renderer& renderer, scene::FlyCamera& camera,
                                  render::RenderSettings& settings, const render::DeviceCaps* caps) {
   int debug_view = static_cast<int>(settings.debug_view);
   if (ImGui::Combo("Debug view", &debug_view, kDebugViews, IM_ARRAYSIZE(kDebugViews))) {
@@ -1149,7 +1149,7 @@ DebugUi::~DebugUi() = default;
 bool DebugUi::Initialize(Window&, render::Renderer&, asset::Vfs*) { return false; }
 void DebugUi::Shutdown() {}
 void DebugUi::BeginFrame() {}
-void DebugUi::Build(render::Renderer&, FlyCamera&, const ecs::World&, f32, render::FrameView*) {}
+void DebugUi::Build(render::Renderer&, scene::FlyCamera&, const ecs::World&, f32, render::FrameView*) {}
 bool DebugUi::wants_mouse() const { return false; }
 bool DebugUi::wants_keyboard() const { return false; }
 

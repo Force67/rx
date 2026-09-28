@@ -1,6 +1,6 @@
 # Procedural walk styles
 
-`rx::anim::Locomotion` can apply reusable walk profiles directly to a bind
+`rx::anim::ProceduralGait` can apply reusable walk profiles directly to a bind
 pose. Profiles describe motion rather than gender: choose them from character
 metadata, customization, mood, equipment, or gameplay state.
 
@@ -16,7 +16,7 @@ Every preset returns an ordinary `WalkStyle`, so games can tune individual
 values or blend between profiles without adding another enum value:
 
 ```cpp
-anim::Locomotion walk;
+anim::ProceduralGait walk;
 walk.style = anim::MakeWalkStylePreset(anim::WalkStyleKind::kHipSway);
 walk.phase = anim::AdvancePhase(walk.phase, speed, dt, walk.style);
 walk.Apply(skeleton, speed, &pose);
@@ -34,7 +34,7 @@ partial rig still receives the portions it supports.
 Apply the walk before secondary body dynamics:
 
 1. evaluate or reset the base pose;
-2. apply `Locomotion`;
+2. apply `ProceduralGait`;
 3. apply `BodyDynamics` and morph weights;
 4. build model matrices and the skin palette.
 

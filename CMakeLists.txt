@@ -279,6 +279,7 @@ if(NOT DEFINED RX_MODULES)
     ecs
     script
     asset
+    importers
     scene
     terrain
     edit
@@ -290,6 +291,7 @@ if(NOT DEFINED RX_MODULES)
     physics
     anim
     audio
+    vehicles
     rpc
     authoring
     net
@@ -658,15 +660,15 @@ endif()
 
 if(RX_BUILD_TESTS AND "asset" IN_LIST RX_MODULES)
   add_executable(gltf_skin_test test/gltf_skin_test.cc)
-  target_link_libraries(gltf_skin_test PRIVATE rx::asset rx::core)
+  target_link_libraries(gltf_skin_test PRIVATE rx::gltf rx::asset rx::core)
   add_test(NAME gltf_skin_test COMMAND gltf_skin_test)
 
   add_executable(gltf_texture_transform_test test/gltf_texture_transform_test.cc)
-  target_link_libraries(gltf_texture_transform_test PRIVATE rx::asset rx::core)
+  target_link_libraries(gltf_texture_transform_test PRIVATE rx::gltf rx::asset rx::core)
   add_test(NAME gltf_texture_transform_test COMMAND gltf_texture_transform_test)
 
   add_executable(materialx_test test/materialx_test.cc)
-  target_link_libraries(materialx_test PRIVATE rx::asset rx::core)
+  target_link_libraries(materialx_test PRIVATE rx::materialx rx::asset rx::core)
   add_test(NAME materialx_test COMMAND materialx_test)
 
   # BCn block encoders and the import-time compressor, against decoders written
@@ -682,7 +684,7 @@ endif()
 # that standard_surface documents keep the legacy path. No USD needed.
 if(RX_BUILD_TESTS AND "asset" IN_LIST RX_MODULES)
   add_executable(openpbr_test test/openpbr_test.cc)
-  target_link_libraries(openpbr_test PRIVATE rx::asset rx::core)
+  target_link_libraries(openpbr_test PRIVATE rx::materialx rx::asset rx::core)
   add_test(NAME openpbr_test COMMAND openpbr_test)
 endif()
 
@@ -691,21 +693,21 @@ endif()
 # usda fixture the test writes itself.
 if(RX_BUILD_TESTS AND RX_USD AND "asset" IN_LIST RX_MODULES)
   add_executable(usd_scene_test test/usd_scene_test.cc)
-  target_link_libraries(usd_scene_test PRIVATE rx::asset rx::core)
+  target_link_libraries(usd_scene_test PRIVATE rx::usd rx::asset rx::core)
   add_test(NAME usd_scene_test COMMAND usd_scene_test)
 endif()
 
 # Procedural vehicle audio: engine/skid/wind synthesis, the SynthVoice seam and
 # the VehicleAudio driver through the mixer. Pure CPU (no device), always runs.
-if(RX_BUILD_TESTS)
+if(RX_BUILD_TESTS AND "vehicles" IN_LIST RX_MODULES)
   add_executable(vehicle_audio_test test/vehicle_audio_test.cc)
-  target_link_libraries(vehicle_audio_test PRIVATE rx::audio rx::core)
+  target_link_libraries(vehicle_audio_test PRIVATE rx::vehicles rx::audio rx::core)
   add_test(NAME vehicle_audio_test COMMAND vehicle_audio_test)
 endif()
 
-if(RX_BUILD_TESTS AND "audio" IN_LIST RX_MODULES)
+if(RX_BUILD_TESTS AND "weather" IN_LIST RX_MODULES)
   add_executable(thunder_synth_test test/thunder_synth_test.cc)
-  target_link_libraries(thunder_synth_test PRIVATE rx::audio rx::core)
+  target_link_libraries(thunder_synth_test PRIVATE rx::weather rx::audio rx::core)
   add_test(NAME thunder_synth_test COMMAND thunder_synth_test)
 endif()
 
@@ -713,9 +715,9 @@ endif()
 # ground roll + rotation + climb, overloaded (over-MTOM) degradation, stall
 # sink, flap-shortened takeoff, braking, rudder yaw, and NaN-free tumbling.
 # Headless (no GPU), needs the Jolt-enabled physics build like vehicle_test.
-if(RX_BUILD_TESTS AND RX_JOLT)
+if(RX_BUILD_TESTS AND RX_JOLT AND "vehicles" IN_LIST RX_MODULES)
   add_executable(aircraft_test test/aircraft_test.cc)
-  target_link_libraries(aircraft_test PRIVATE rx::physics rx::core)
+  target_link_libraries(aircraft_test PRIVATE rx::vehicles rx::physics rx::core)
   add_test(NAME aircraft_test COMMAND aircraft_test)
 endif()
 
@@ -723,9 +725,9 @@ endif()
 # aircraft at once for 30 s over a shared heightfield + Gerstner lake, with every
 # vehicle's telemetry driving a real EngineSynth. Headless (no GPU/device), needs
 # Jolt for the physics path (like aircraft_test/vehicle_test/boat_test).
-if(RX_BUILD_TESTS AND RX_JOLT)
+if(RX_BUILD_TESTS AND RX_JOLT AND "vehicles" IN_LIST RX_MODULES)
   add_executable(vehicle_integration_test test/vehicle_integration_test.cc)
-  target_link_libraries(vehicle_integration_test PRIVATE rx::physics rx::audio rx::core)
+  target_link_libraries(vehicle_integration_test PRIVATE rx::vehicles rx::physics rx::audio rx::core)
   add_test(NAME vehicle_integration_test COMMAND vehicle_integration_test)
 endif()
 
@@ -769,18 +771,18 @@ if(RX_BUILD_TESTS)
   # Handling profiles: measured, ordered proof that the six presets
   # (engine/physics/vehicle_profiles.h) drive differently - 0-100, braking,
   # roll, grass launch, under/oversteer and downforce. Headless, needs Jolt.
-  if(RX_JOLT)
+  if(RX_JOLT AND "vehicles" IN_LIST RX_MODULES)
     add_executable(handling_test test/handling_test.cc)
-    target_link_libraries(handling_test PRIVATE rx::physics rx::core)
+    target_link_libraries(handling_test PRIVATE rx::vehicles rx::physics rx::core)
     add_test(NAME handling_test COMMAND handling_test)
   endif()
 
   # Physics-driven boat over the force-based hull model: floating draft,
   # acceleration, steering, drag decay, planing, river drift, self-righting,
   # buoyancy-exemption and NaN-free chop. Headless (no GPU), needs Jolt.
-  if(RX_JOLT)
+  if(RX_JOLT AND "vehicles" IN_LIST RX_MODULES)
     add_executable(boat_test test/boat_test.cc)
-    target_link_libraries(boat_test PRIVATE rx::physics rx::core)
+    target_link_libraries(boat_test PRIVATE rx::vehicles rx::physics rx::core)
     add_test(NAME boat_test COMMAND boat_test)
   endif()
 
@@ -789,9 +791,9 @@ if(RX_BUILD_TESTS)
   # sinks the hull deeper, slows accel/turning, delays planing and eats freeboard
   # - settle-draft/top-speed/turn-rate orderings, capsize vs self-right, an
   # overloaded barge near awash, and NaN-free chop. Headless, needs Jolt.
-  if(RX_JOLT)
+  if(RX_JOLT AND "vehicles" IN_LIST RX_MODULES)
     add_executable(boat_profiles_test test/boat_profiles_test.cc)
-    target_link_libraries(boat_profiles_test PRIVATE rx::physics rx::core)
+    target_link_libraries(boat_profiles_test PRIVATE rx::vehicles rx::physics rx::core)
     add_test(NAME boat_profiles_test COMMAND boat_profiles_test)
   endif()
 
@@ -799,9 +801,9 @@ if(RX_BUILD_TESTS)
   # launch + stable overhead equilibrium in steady wind, descent + settle in dead
   # air, left/right steering displacement, reel-in altitude change, tow-launch on
   # apparent wind and NaN-free / tension-capped gusting. Headless, needs Jolt.
-  if(RX_JOLT)
+  if(RX_JOLT AND "vehicles" IN_LIST RX_MODULES)
     add_executable(kite_test test/kite_test.cc)
-    target_link_libraries(kite_test PRIVATE rx::physics rx::core)
+    target_link_libraries(kite_test PRIVATE rx::vehicles rx::physics rx::core)
     add_test(NAME kite_test COMMAND kite_test)
   endif()
 
@@ -1129,7 +1131,7 @@ if(RX_BUILD_TESTS AND (RX_RHI_VULKAN OR RX_RHI_D3D12))
   # Vulkan-only (buffer-device-address reads, like the skinned path) and skips
   # without a driver.
   add_executable(morph_test test/morph_test.cc)
-  target_link_libraries(morph_test PRIVATE rx::render rx::anim rx::asset rx::core)
+  target_link_libraries(morph_test PRIVATE rx::gltf rx::render rx::anim rx::asset rx::core)
   set(RX_SHADER_INCLUDE_DIRS
     ${CMAKE_CURRENT_SOURCE_DIR}/engine/render/shaders
     ${CMAKE_CURRENT_SOURCE_DIR}/engine/render/shaders/pipeline)
@@ -1223,7 +1225,7 @@ if(RX_BUILD_TESTS AND "anim" IN_LIST RX_MODULES)
   # checks error handling without requiring Blender; pass a .blend path to the
   # executable to convert it and verify its real skin + jiggle response.
   add_executable(blend_jiggle_test test/blend_jiggle_test.cc)
-  target_link_libraries(blend_jiggle_test PRIVATE rx::anim rx::asset rx::core)
+  target_link_libraries(blend_jiggle_test PRIVATE rx::blend rx::gltf rx::anim rx::asset rx::core)
   target_compile_definitions(blend_jiggle_test PRIVATE
     RX_BLEND_CONVERTER_SCRIPT="${CMAKE_CURRENT_SOURCE_DIR}/tools/blend_to_glb.py")
   add_test(NAME blend_jiggle_api_test COMMAND blend_jiggle_test)

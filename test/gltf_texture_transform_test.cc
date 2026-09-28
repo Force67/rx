@@ -11,9 +11,9 @@
 #include <math.h>
 #include <stdio.h>
 
-#include "asset/gltf_loader.h"
 #include "base/strings/xstring.h"
 #include "core/file_system.h"
+#include "importers/gltf/gltf_loader.h"
 
 namespace {
 

@@ -26,7 +26,7 @@ ENTITY_WORLD = {"ecs", "scene", "script", "world", "edit", "authoring", "app"}
 # Optional modules a game opts into (plugins/ after the move).
 PLUGINS = {"character", "combat", "inventory", "inventory_world", "locomotion",
            "placement", "placement_gpu", "terrain", "nav", "nav_viz", "net_viz",
-           "replication", "weather"}
+           "replication", "vehicles", "weather"}
 # Headers only the editor and tools may use; a shipping game never links them.
 EDITOR_ONLY = {"engine/edit/hierarchy.h", "engine/edit/selection.h",
                "engine/edit/undo.h", "engine/world/world_bake.h"}

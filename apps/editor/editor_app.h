@@ -4,8 +4,8 @@
 #include <stdint.h>
 
 #include "anim/body_dynamics.h"
-#include "anim/locomotion.h"
 #include "anim/pose.h"
+#include "anim/procedural_gait.h"
 #include "app/application.h"
 #include "asset/asset_database.h"
 #include "asset/mesh.h"
@@ -15,21 +15,21 @@
 #include "base/containers/map.h"
 #include "base/containers/pair.h"
 #include "base/containers/span.h"
+#include "base/containers/unordered_map.h"
 #include "base/containers/vector.h"
 #include "base/memory/move.h"
 #include "base/optional.h"
-#include "base/containers/unordered_map.h"
 #include "base/strings/xstring.h"
 #include "edit/hierarchy.h"
 #include "edit/reflect.h"
-#include "world/world_bake.h"
 #include "edit/scene_io.h"
 #include "edit/selection.h"
 #include "edit/undo.h"
-#include "fly_camera.h"
+#include "scene/fly_camera.h"
 #include "terrain/terrain.h"
 #include "ui/ugui_backend.h"
 #include "ui/ugui_platform.h"
+#include "world/world_bake.h"
 
 // libultragui
 #include <ugui/ui_context.h>
@@ -261,7 +261,7 @@ private:
   base::String open_path_; // scene/gltf passed on argv
 
   // editor state
-  FlyCamera camera_;
+  scene::FlyCamera camera_;
   edit::Selection selection_;
   edit::UndoStack undo_;
   base::Optional<asset::AssetDatabase> assets_; // constructed once vfs is known

@@ -14,11 +14,12 @@
 #include "debug_ui.h"
 #include "ecs/scheduler.h"
 #include "ecs/world.h"
-#include "fly_camera.h"
+#include "importers/usd/usd_loader.h"
 #include "physics/physics_world.h"
 #include "render/core/presets.h"
 #include "render/core/renderer.h"
-#include "asset/usd_loader.h"
+#include "scene/fly_camera.h"
+#include "viewer_input.h"
 
 namespace rx {
 
@@ -90,7 +91,7 @@ struct EngineContext {
   ecs::World* world = nullptr;
   ecs::Scheduler* scheduler = nullptr;
   render::Renderer* renderer = nullptr;
-  FlyCamera* camera = nullptr;
+  scene::FlyCamera* camera = nullptr;
   physics::PhysicsWorld* physics = nullptr;
   asset::Vfs* vfs = nullptr;
   audio::AudioSystem* audio = nullptr;

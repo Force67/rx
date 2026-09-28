@@ -1,9 +1,9 @@
 #include <math.h>
 #include <stdio.h>
 
-#include "asset/usd_loader.h"
 #include "base/strings/xstring.h"
 #include "core/file_system.h"
+#include "importers/usd/usd_loader.h"
 
 namespace {
 

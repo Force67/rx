@@ -9,9 +9,9 @@
 #include <math.h>
 #include <stdio.h>
 
-#include "asset/materialx.h"
 #include "base/strings/xstring.h"
 #include "core/file_system.h"
+#include "importers/materialx/materialx.h"
 
 namespace {
 

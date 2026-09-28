@@ -1,6 +1,6 @@
 rx_add_module(anim
   pose.cc
-  locomotion.cc
+  procedural_gait.cc
   foot_ik.cc
   anim_graph.cc
   rig_player.cc

@@ -64,4 +64,16 @@ void RegisterViewerInput(InputMap& map) {
   });
 }
 
+scene::FlyCameraInput FlyCameraIntent(const ActionState& actions) {
+  scene::FlyCameraInput fly;
+  fly.move_x = actions.axis(Axis::kMoveX);
+  fly.move_y = actions.axis(Axis::kMoveY);
+  fly.look_x = actions.axis(Axis::kLookX);
+  fly.look_y = actions.axis(Axis::kLookY);
+  fly.rise = actions.down(Action::kCamUp) || actions.down(Action::kJump);
+  fly.sink = actions.down(Action::kCamDown) || actions.down(Action::kSneak);
+  fly.sprint = actions.down(Action::kSprint);
+  return fly;
+}
+
 }  // namespace rx

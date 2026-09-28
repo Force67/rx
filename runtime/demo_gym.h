@@ -2,19 +2,19 @@
 #define RX_RUNTIME_DEMO_GYM_H_
 
 
-#include "audio/vehicle_audio.h"
 #include "base/containers/vector.h"
 #include "base/memory/unique_pointer.h"
 #include "base/strings/xstring.h"
+#include "character/character.h"
+#include "character/jetpack.h"
 #include "core/input.h"
 #include "core/input_actions.h"
 #include "core/math.h"
 #include "engine_context.h"
-#include "character/character.h"
-#include "character/jetpack.h"
 #include "inventory/item_catalog.h"
 #include "inventory/world_item.h"
 #include "render/core/renderer.h"
+#include "vehicles/vehicle_audio.h"
 
 namespace rx {
 

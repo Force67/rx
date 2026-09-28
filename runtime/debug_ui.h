@@ -18,7 +18,9 @@
 
 namespace rx {
 
+namespace scene {
 class FlyCamera;
+}  // namespace scene
 namespace asset {
 class Vfs;
 }
@@ -48,7 +50,7 @@ class DebugUi {
   void BeginFrame();
   // Builds the panels and fills view->ui_draw. Always pairs with a
   // BeginFrame, even while hidden.
-  void Build(render::Renderer& renderer, FlyCamera& camera, const ecs::World& world,
+  void Build(render::Renderer& renderer, scene::FlyCamera& camera, const ecs::World& world,
              f32 frame_delta, render::FrameView* view);
 
   // One line of baked-world streaming state for the status bar, refreshed each
@@ -76,7 +78,7 @@ class DebugUi {
   void DrawLightingTab(render::RenderSettings& settings, const render::DeviceCaps* caps);
   void DrawGiTab(render::RenderSettings& settings, const render::DeviceCaps* caps);
   void DrawPostTab(render::RenderSettings& settings);
-  void DrawDiagnosticsTab(render::Renderer& renderer, FlyCamera& camera,
+  void DrawDiagnosticsTab(render::Renderer& renderer, scene::FlyCamera& camera,
                           render::RenderSettings& settings, const render::DeviceCaps* caps);
 
   // Refreshes preset_files_ from the .ini files in the presets directory.

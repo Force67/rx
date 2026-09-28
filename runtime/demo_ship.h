@@ -80,7 +80,7 @@ class ShipDemo {
   EngineContext& ctx_;
   ecs::World& world_;
   render::Renderer& renderer_;
-  FlyCamera& camera_;
+  scene::FlyCamera& camera_;
   physics::PhysicsWorld& physics_;
   const EngineConfig& config_;
 

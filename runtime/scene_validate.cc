@@ -7,7 +7,6 @@
 
 #include "asset/asset_database.h"
 #include "asset/asset_id.h"
-#include "asset/materialx.h"
 #include "asset/procedural_texture.h"
 #include "asset/vfs.h"
 #include "base/algorithm.h"
@@ -17,15 +16,16 @@
 #include "base/optional.h"
 #include "base/strings/string_ref.h"
 #include "base/strings/xstring.h"
+#include "core/file_system.h"
 #include "core/format.h"
 #include "core/log.h"
+#include "core/text_reader.h"
 #include "ecs/world.h"
 #include "edit/reflect.h"
 #include "edit/scene_io.h"
+#include "importers/materialx/materialx.h"
 #include "scene/components.h"
 #include "scene_authoring.h"
-#include "core/file_system.h"
-#include "core/text_reader.h"
 
 namespace rx {
 namespace {

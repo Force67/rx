@@ -7,7 +7,6 @@
 #include <base/option.h>
 
 #include "asset/asset_id.h"
-#include "asset/gltf_loader.h"
 #include "asset/material.h"
 #include "asset/mesh.h"
 #include "asset/primitives.h"
@@ -18,9 +17,10 @@
 #include "core/log.h"
 #include "core/scalar.h"
 #include "ecs/world.h"
-#include "physics/boat_profiles.h"
-#include "physics/vehicle_profiles.h"
+#include "importers/gltf/gltf_loader.h"
 #include "scene/components.h"
+#include "vehicles/boat_profiles.h"
+#include "vehicles/vehicle_profiles.h"
 
 #if defined(RX_HAS_IMGUI)
 #include <imgui.h>
@@ -1108,7 +1108,7 @@ void DriveDemo::Update(f32 dt, const InputState& input, const ActionState& actio
 void DriveDemo::UpdateChaseCamera(f32 dt, const InputState& input, const ActionState& actions,
                                   bool allow_keyboard, bool allow_mouse) {
   if (free_cam_) {
-    ctx_.camera->Update(input, actions, allow_mouse, allow_keyboard, dt);
+    ctx_.camera->Update(input, FlyCameraIntent(actions), allow_mouse, allow_keyboard, dt);
     cam_eye_ = ctx_.camera->position();
     cam_target_ = ctx_.camera->target();
     cam_init_ = false;  // re-seed the chase smoother when we return

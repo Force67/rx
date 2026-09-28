@@ -7,11 +7,8 @@
 #include <math.h>
 #include <stdio.h>
 
-#include "audio/aux_synth.h"
-#include "audio/engine_synth.h"
 #include "audio/mixer.h"
 #include "audio/synth_voice.h"
-#include "audio/vehicle_audio.h"
 #include "base/atomic.h"
 #include "base/containers/vector.h"
 #include "base/memory/unique_pointer.h"
@@ -19,6 +16,9 @@
 #include "core/math.h"
 #include "core/scalar.h"
 #include "core/types.h"
+#include "vehicles/aux_synth.h"
+#include "vehicles/engine_synth.h"
+#include "vehicles/vehicle_audio.h"
 
 using namespace rx;
 using namespace rx::audio;

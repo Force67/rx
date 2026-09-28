@@ -10,10 +10,10 @@
 
 #include "anim/morph.h"
 #include "asset/asset_database.h"
-#include "asset/gltf_loader.h"
 #include "asset/primitives.h"
 #include "core/log.h"
 #include "edit/scene_io.h"
+#include "importers/gltf/gltf_loader.h"
 #include "scene/scene_handlers.h"
 
 // Radiance .hdr decode for imported dome environment maps.

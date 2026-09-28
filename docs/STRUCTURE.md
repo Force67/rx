@@ -205,12 +205,10 @@ Paths on the right are under `rxe/` unless they start with `plugins/` or `apps/`
 | `render/util/exr_write` | `asset` (next to `image_file`) |
 | `ui` | `ui/ugui` |
 | `asset/vfs`, `pack`, `content_mounts` | `storage` |
-| `asset/gltf_loader`, `usd_loader`, `materialx`, `blend_import` | `importers/gltf`, `usd`, `materialx`, `blend`. tinyusdz and miniz stay private to the modules that use them. |
+| `importers/gltf`, `usd`, `materialx`, `blend` (split out of `asset` in 2b) | same. tinyusdz, cgltf and stb stay private to the modules that use them. |
 | rest of `asset` | `asset` |
 | `audio/*` minus the game synths | `audio` |
-| `audio/vehicle_audio`, `engine_synth`, `aux_synth` | `plugins/vehicles` |
-| `audio/thunder_synth` | `plugins/weather` |
-| `physics/aircraft`, `boat`, `boat_profiles`, `vehicle_profiles`, `kite` | `plugins/vehicles` |
+| `vehicles` (cars, boats, aircraft, kites and their audio, gathered from `physics` and `audio` in 2b) | `plugins/vehicles` |
 | rest of `physics` | `physics` |
 | `net/protocol`, `wire.h`, `rpc_channel`, `znet_util.h` (target `rx_net`) | `net/transport` |
 | `net/bubble`, `replication`, `session` (target `rx_replication`) | `plugins/replication/replication` |
@@ -353,16 +351,15 @@ once per process has to live in exactly one DSO:
 | `net/session`, `replication`, `bubble` | the net module knew the entity world | done (2a): split into `rx_net` and `rx_replication` |
 | `physics/shape_desc.h` | inventory, physics-free by design, used it without linking physics | done (2a): plain data, moved to `asset/shape_desc.h` |
 | `weather/weather.h` | used render's value headers without linking render | done (2a): links `rx::render`. Splitting render's value types into a light module waits for phase 7. |
-| `audio/*_synth`, `vehicle_audio` | game audio inside the audio module | move to plugins |
-| `physics/aircraft` etc. | vehicles inside the physics module | `plugins/vehicles` |
-| `asset/usd_loader` etc. | every asset user links tinyusdz | `importers/` |
-| `render/util` | grab-bag | dissolved |
-| `app/services.h` | `HairStrandBinding` puts one feature's physics/render glue in the composition root | move it to the module that owns hair |
-| `runtime/engine_context.h` | god object passed to every demo | explicit arguments |
-| `fly_camera` | duplicated in `runtime/` and `apps/editor/` | one copy in `rxe/scene` |
-| `core/features.def` | one file every feature edits | per-module declarations |
-| `CMakeLists.txt` | 1381 lines, registers every test centrally | `rx_module(... TESTS)` |
-| `anim/locomotion` vs `engine/locomotion` | two modules called locomotion | rename the anim one after what it does (procedural gait) |
+| `audio/*_synth`, `vehicle_audio` | game audio inside the audio module | done (2b): vehicle audio to `engine/vehicles`, the thunder synth to `weather` |
+| `physics/aircraft` etc. | vehicles inside the physics module | done (2b): `engine/vehicles` |
+| `asset/usd_loader` etc. | every asset user links tinyusdz | done (2b): `engine/importers/*` |
+| `render/util` | grab-bag | phase 4, when `gpu/` exists to receive shader loading and the profiler |
+| `runtime/engine_context.h` | god object passed to every demo | phase 6, with the rest of `runtime/` |
+| `fly_camera` | duplicated in `runtime/` and `apps/editor/` | done (2b): `scene::FlyCamera`, fed a resolved `FlyCameraInput` |
+| `core/features.def` | one file every feature edits | phase 5: per-module flags self-register, which needs the one-per-process registry |
+| `CMakeLists.txt` | 1381 lines, registers every test centrally | phase 4, with tests next to their code |
+| `anim/locomotion` vs `engine/locomotion` | two modules called locomotion | done (2b): `anim::ProceduralGait` |
 
 ## Phases
 
@@ -377,12 +374,16 @@ and after.
 2. **Fix the violations** in the table above, without moving directories.
    2a empties the lint baseline: the `net`/`replication` split, `ShapeDesc`
    into `asset`, weather linking render, and CPU tests linking the module they
-   test instead of compiling its sources in. 2b takes the rest of the table.
+   test instead of compiling its sources in. 2b moves what a mechanical
+   `git mv` cannot: `vehicles` and `importers` out of `physics`, `audio` and
+   `asset`, one `FlyCamera`, and the `ProceduralGait` rename. The rest of the
+   table lands in the phase named in its row.
 3. **Foundation.** Split `core` into `foundation/*`, `ui/window`, `ui/events`.
 4. **Move the tree** one top-level folder per commit: `git mv` plus a scripted
-   include rewrite. Tests move next to their code. The lint becomes an error.
+   include rewrite. Tests move next to their code. `render/util` dissolves
+   into `gpu/rhi`, `asset` and `ui/imgui`. The lint becomes an error.
 5. **Development shared build.** Add the single-instance fixes and the `-dev`
-   presets.
+   presets, then per-module feature flags on the single registry.
 6. **Plugins and apps.** Add `RX_PLUGIN`, `PluginRegistry` and `rx_add_app`.
    `runtime/` becomes `apps/shell/`, the tools move into `apps/`, and
    `EngineContext` goes away.

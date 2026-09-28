@@ -7,6 +7,7 @@
 #include "base/containers/vector.h"
 #include "base/memory/unique_pointer.h"
 #include "base/threading/mutex.h"
+#include "core/export.h"
 #include "core/math.h"
 #include "core/types.h"
 
@@ -29,7 +30,7 @@ struct PlayParams {
 // interleaved stereo float at the device sample rate. The command queue is the
 // only shared state, guarded by a mutex held for the few microseconds it takes to
 // splice vectors, never across decoding or mixing.
-class Mixer {
+class RX_AUDIO_EXPORT Mixer {
  public:
   // `output_rate` is the device's mix rate; every voice resamples to it.
   void Configure(u32 output_rate) { output_rate_ = output_rate; }

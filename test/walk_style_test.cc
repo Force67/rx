@@ -1,7 +1,7 @@
 #include <math.h>
 #include <stdio.h>
 
-#include "anim/locomotion.h"
+#include "anim/procedural_gait.h"
 #include "asset/asset_id.h"
 #include "base/strings/xstring.h"
 #include "core/scalar.h"
@@ -83,12 +83,12 @@ void TestGenesisAliases() {
   SkeletonPose sway_pose;
   SkeletonPose march_pose;
 
-  Locomotion sway;
+  ProceduralGait sway;
   sway.phase = 0.125f;
   sway.style = MakeWalkStylePreset(WalkStyleKind::kHipSway);
   sway.Apply(skeleton, 1.35f, &sway_pose);
 
-  Locomotion march;
+  ProceduralGait march;
   march.phase = sway.phase;
   march.style = MakeWalkStylePreset(WalkStyleKind::kMarch);
   march.Apply(skeleton, 1.35f, &march_pose);
