@@ -18,9 +18,9 @@
 #include "rxe/asset/asset_id.h"
 #include "rxe/asset/pack.h"
 #include "rxe/asset/vfs.h"
-#include "rxe/edit/reflect.h"
-#include "rxe/edit/scene_io.h"
 #include "rxe/scene/components.h"
+#include "rxe/scene/reflect.h"
+#include "rxe/scene/scene_io.h"
 #include "rxe/world/world_format.h"
 #include "rxe/world/world_stream.h"
 
@@ -42,7 +42,7 @@ struct Authored {
   u64 cell = 0;
   i64 cell_x = 0;
   i64 cell_z = 0;
-  base::Vector<const edit::ComponentDesc*> components;  // bakeable, sorted by name
+  base::Vector<const scene::ComponentDesc*> components;  // bakeable, sorted by name
   bool instance = false;
 };
 
@@ -50,7 +50,7 @@ struct Authored {
 // on every entity it writes, so without this nothing an editor produced would
 // ever classify as static decoration; the stable id replaces it, and carrying
 // both would mean the instance page's rows each needed an ECS row to hold one.
-bool IdentityOnly(const edit::ComponentDesc& desc) {
+bool IdentityOnly(const scene::ComponentDesc& desc) {
   return ::strcmp(desc.name, "Guid") == 0;
 }
 
@@ -97,10 +97,10 @@ bool InLattice(const scene::Transform& transform, f32 cell_size) {
 // reference fails the second test even though it passes the first - a handle is
 // reused with a new generation once its slot is freed - so it is refused here
 // as well as at load.
-bool Bakeable(const edit::ComponentDesc& desc) {
+bool Bakeable(const scene::ComponentDesc& desc) {
   if (!ecs::GetComponentInfo(desc.id).trivially_copyable) return false;
   for (u32 i = 0; i < desc.prop_count; ++i) {
-    if (desc.props[i].type == edit::PropType::kEntity) return false;
+    if (desc.props[i].type == scene::PropType::kEntity) return false;
   }
   return true;
 }
@@ -234,7 +234,7 @@ BakeVerdict ClassifyForBake(ecs::World& world, ecs::Entity entity,
   // its Name, not a static instance.
   u32 authored_count = 0;
   bool only_instance_components = true;
-  for (const edit::ComponentDesc* desc : edit::ComponentsOn(world, entity)) {
+  for (const scene::ComponentDesc* desc : scene::ComponentsOn(world, entity)) {
     if (!IdentityOnly(*desc)) {
       ++authored_count;
       bool named = false;
@@ -279,7 +279,7 @@ bool BakeWorld(const base::String& scene_path, const WorldBakeOptions& input_opt
   // Strict by default: a component this build does not register is dropped
   // silently otherwise, and the cell that needed it bakes without the thing it
   // was authored to place.
-  if (!edit::LoadScene(source, database, scene_path, &load_error, !options.skip_unknown)) {
+  if (!scene::LoadScene(source, database, scene_path, &load_error, !options.skip_unknown)) {
     if (!options.skip_unknown) {
       load_error +=
           "\n  (this build reflects only the components it registers; allow unknown components to "
@@ -309,7 +309,7 @@ bool BakeWorld(const base::String& scene_path, const WorldBakeOptions& input_opt
 
     u32 authored_count = 0;
     bool only_instance_components = true;
-    for (const edit::ComponentDesc* desc : edit::ComponentsOn(source, entity)) {
+    for (const scene::ComponentDesc* desc : scene::ComponentsOn(source, entity)) {
       // Identity-only components do not decide what a thing is, but they are
       // still baked onto anything that stays an entity.
       if (!IdentityOnly(*desc)) {
@@ -328,7 +328,7 @@ bool BakeWorld(const base::String& scene_path, const WorldBakeOptions& input_opt
     }
     // Stable: registration does not force unique names.
     rx::StableSort(record.components.data(), record.components.data() + record.components.size(),
-                   [](const edit::ComponentDesc* a, const edit::ComponentDesc* b) {
+                   [](const scene::ComponentDesc* a, const scene::ComponentDesc* b) {
                      return ::strcmp(a->name, b->name) < 0;
                    });
     record.instance =
@@ -379,21 +379,21 @@ bool BakeWorld(const base::String& scene_path, const WorldBakeOptions& input_opt
   // The schema this cook actually writes, sorted, with each component's
   // reflected layout: a build that disagrees about any of it produces different
   // bytes for the same scene and so has to be a different bake.
-  base::Vector<const edit::ComponentDesc*> written;
+  base::Vector<const scene::ComponentDesc*> written;
   for (const Authored& record : authored) {
-    for (const edit::ComponentDesc* desc : record.components) {
+    for (const scene::ComponentDesc* desc : record.components) {
       bool seen = false;
-      for (const edit::ComponentDesc* entry : written) seen |= entry == desc;
+      for (const scene::ComponentDesc* entry : written) seen |= entry == desc;
       if (!seen) written.push_back(desc);
     }
   }
   rx::StableSort(written.data(), written.data() + written.size(),
-                 [](const edit::ComponentDesc* a, const edit::ComponentDesc* b) {
+                 [](const scene::ComponentDesc* a, const scene::ComponentDesc* b) {
                    return ::strcmp(a->name, b->name) < 0;
                  });
   base::Vector<base::String> schema;
   schema.reserve(written.size());
-  for (const edit::ComponentDesc* desc : written) {
+  for (const scene::ComponentDesc* desc : written) {
     u32 stride = 0;
     u64 layout = 0;
     if (!RuntimeComponentLayout(desc->name, &stride, &layout)) {
@@ -512,7 +512,7 @@ bool BakeWorld(const base::String& scene_path, const WorldBakeOptions& input_opt
       }
       entities.SetStableIds(archetype, base::Span<const u64>(ids.data(), ids.size()));
 
-      for (const edit::ComponentDesc* desc : authored[group_begin].components) {
+      for (const scene::ComponentDesc* desc : authored[group_begin].components) {
         u32 stride = 0;
         u64 layout = 0;
         if (!RuntimeComponentLayout(desc->name, &stride, &layout)) {

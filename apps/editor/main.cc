@@ -1,4 +1,4 @@
-// rx editor entry point. Boots app::Host with the editor Application. An
+// rx editor entry point. Boots host::Host with the editor Application. An
 // optional .rxscene, .gltf/.glb, or .blend path may be passed to open on start;
 // otherwise a small built-in default scene keeps the editor from being empty.
 
@@ -6,7 +6,7 @@
 
 #include "base/strings/xstring.h"
 #include "editor_app.h"
-#include "rxe/app/host.h"
+#include "rxe/host/host.h"
 
 int main(int argc, char** argv) {
   base::String open_path;
@@ -19,7 +19,7 @@ int main(int argc, char** argv) {
   rx::base::InitOptionsFromEnv();
 #endif
 
-  rx::app::AppConfig config;
+  rx::host::HostConfig config;
   config.id = "xn5ec6v99hcwg9d8xzbqshr0";
   config.name = "rx-editor";
   config.title = "rx editor";
@@ -29,7 +29,7 @@ int main(int argc, char** argv) {
   config.gather_entity_draws = false;
 
   rx::editor::Editor editor(open_path);
-  rx::app::Host host;
+  rx::host::Host host;
   if (!host.Initialize(config, editor)) return 1;
   int rc = host.Run();
   host.Shutdown();

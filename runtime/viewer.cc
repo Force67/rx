@@ -12,9 +12,9 @@
 #include "rxe/anim/morph.h"
 #include "rxe/asset/asset_database.h"
 #include "rxe/asset/primitives.h"
-#include "rxe/edit/scene_io.h"
 #include "rxe/importers/gltf/gltf_loader.h"
 #include "rxe/scene/scene_handlers.h"
+#include "rxe/scene/scene_io.h"
 
 // Radiance .hdr decode for imported dome environment maps.
 #include <stb_image.h>
@@ -38,7 +38,7 @@
 // (glTF scene or builtin demo), the day/night sun, the debug overlay and the
 // capture hooks. The camera and its scripted drivers live in the sibling
 // camera_input.cc translation unit; the subsystems and the loop live in
-// app::Host.
+// host::Host.
 namespace rx {
 namespace {
 // Viewer options. Namespace scope, so they register before the host runs
@@ -111,7 +111,7 @@ Viewer::~Viewer() {
   }
 }
 
-bool Viewer::OnInitialize(app::Services& services) {
+bool Viewer::OnInitialize(host::Services& services) {
   host_ = services.host;
   window_ = services.window;
   renderer_ = services.renderer;
@@ -234,7 +234,7 @@ void Viewer::StartAuthoringEndpoint() {
   script_ctx_.log_sink = [](void*, script::ScriptStringView message) {
     RX_INFO("authoring: {}", message.view());
   };
-  bridge_ = base::MakeUnique<authoring::CommandBridge>(commands_, script_ctx_);
+  bridge_ = base::MakeUnique<devtools::CommandBridge>(commands_, script_ctx_);
 
   base::String error;
   if (!authoring_endpoint_.Start(config_.authoring_socket, &error)) {
@@ -287,7 +287,7 @@ bool Viewer::LoadRxScene() {
   // the textures BuildSceneShapes synthesizes for the scene's patterns.
   asset::AssetDatabase db(*ctx_.vfs);
   base::String error;
-  if (!edit::LoadScene(*world_, db, config_.scene_path, &error, /*strict=*/true)) {
+  if (!scene::LoadScene(*world_, db, config_.scene_path, &error, /*strict=*/true)) {
     RX_ERROR("rxscene: {}", error);
     return false;
   }

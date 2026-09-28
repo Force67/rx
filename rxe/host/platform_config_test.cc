@@ -1,7 +1,7 @@
 #include "base/containers/unordered_map.h"
 #include "base/strings/xstring.h"
-#include "rxe/app/platform_config.h"
 #include "rxe/asset/vfs.h"
+#include "rxe/host/platform_config.h"
 #include "rxe/render/core/presets.h"
 #include "rxe/render/core/settings.h"
 
@@ -61,8 +61,8 @@ void TestSections() {
   rx::asset::Vfs vfs;
   vfs.Mount("t://", base::move(files));
 
-  rx::app::PlatformConfig good;
-  Check(rx::app::ReadPlatformConfig(vfs, "t://game.ini", &good), "reads a file");
+  rx::host::PlatformConfig good;
+  Check(rx::host::ReadPlatformConfig(vfs, "t://game.ini", &good), "reads a file");
   Check(good.problems == 0, "a clean file has no problems");
   rx::render::RenderSettings s = rx::render::PresetSettings(good.render, {});
   Check(s.bloom, "the including file's keys override the included ones");
@@ -73,18 +73,18 @@ void TestSections() {
   Check(good.options.size() == 1 && good.options[0].name == "unfocused.fps",
         "options are collected by name");
 
-  rx::app::PlatformConfig bad;
-  rx::app::ReadPlatformConfig(vfs, "t://bad.ini", &bad);
+  rx::host::PlatformConfig bad;
+  rx::host::ReadPlatformConfig(vfs, "t://bad.ini", &bad);
   // unknown section, key in it, unknown render key, bad value, missing
   // include, line without '='.
   Check(bad.problems == 6, "every line that goes nowhere is a problem");
 
-  rx::app::PlatformConfig loop;
-  rx::app::ReadPlatformConfig(vfs, "t://loop.ini", &loop);
+  rx::host::PlatformConfig loop;
+  rx::host::ReadPlatformConfig(vfs, "t://loop.ini", &loop);
   Check(loop.problems == 1, "a cyclic include stops at the depth limit");
 
-  rx::app::PlatformConfig none;
-  Check(!rx::app::ReadPlatformConfig(vfs, "t://nope.ini", &none), "a missing file is false");
+  rx::host::PlatformConfig none;
+  Check(!rx::host::ReadPlatformConfig(vfs, "t://nope.ini", &none), "a missing file is false");
 }
 
 // Every shipped tier resolves through rxe://config with nothing left over.
@@ -94,9 +94,9 @@ void TestShippedTiers() {
   using QP = rx::render::QualityPreset;
   for (QP tier : {QP::kAndroidLow, QP::kAndroidMedium, QP::kAndroidHigh, QP::kSteamDeck,
                   QP::kLowEnd, QP::kConsole, QP::kMedium, QP::kHigh, QP::kUltra}) {
-    rx::app::PlatformConfig config;
+    rx::host::PlatformConfig config;
     const char* name = rx::render::PresetName(tier);
-    Check(rx::app::ReadPlatformChain(vfs, "", tier, &config), "the tier file exists", name);
+    Check(rx::host::ReadPlatformChain(vfs, "", tier, &config), "the tier file exists", name);
     Check(config.problems == 0, "the tier resolves without problems", name);
     Check(!config.render.empty(), "the tier sets render keys", name);
   }

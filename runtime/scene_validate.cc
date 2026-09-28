@@ -21,10 +21,10 @@
 #include "rxe/asset/procedural_texture.h"
 #include "rxe/asset/vfs.h"
 #include "rxe/ecs/world.h"
-#include "rxe/edit/reflect.h"
-#include "rxe/edit/scene_io.h"
 #include "rxe/importers/materialx/materialx.h"
 #include "rxe/scene/components.h"
+#include "rxe/scene/reflect.h"
+#include "rxe/scene/scene_io.h"
 #include "scene_authoring.h"
 
 namespace rx {
@@ -183,14 +183,14 @@ class Report {
 // How many of PropValue::f a type actually uses. Zero for the types that carry
 // no float, which is what keeps the non-finite sweep generic over the registry
 // instead of listing components by hand.
-u32 FloatLanes(edit::PropType type) {
+u32 FloatLanes(scene::PropType type) {
   switch (type) {
-    case edit::PropType::kF32: return 1;
-    case edit::PropType::kVec2: return 2;
-    case edit::PropType::kVec3: return 3;
-    case edit::PropType::kVec4:
-    case edit::PropType::kQuat:
-    case edit::PropType::kColor: return 4;
+    case scene::PropType::kF32: return 1;
+    case scene::PropType::kVec2: return 2;
+    case scene::PropType::kVec3: return 3;
+    case scene::PropType::kVec4:
+    case scene::PropType::kQuat:
+    case scene::PropType::kColor: return 4;
     default: return 0;
   }
 }
@@ -216,9 +216,9 @@ bool FullyParsedInteger(const base::String& text) {
 // zero. The text is the only place they stay visible.
 void CheckNumberLiterals(ecs::World& world, const Source& source, Report& report) {
   for (const SourceAssign& assign : source.assigns) {
-    const edit::ComponentDesc* comp = edit::FindComponentByName(assign.comp);
+    const scene::ComponentDesc* comp = scene::FindComponentByName(assign.comp);
     if (!comp) continue;  // the load finding already named it
-    const edit::PropDesc* prop = nullptr;
+    const scene::PropDesc* prop = nullptr;
     for (u32 i = 0; i < comp->prop_count && !prop; ++i) {
       if (assign.prop == comp->props[i].name) prop = &comp->props[i];
     }
@@ -226,8 +226,8 @@ void CheckNumberLiterals(ecs::World& world, const Source& source, Report& report
     const ecs::Entity entity{assign.entity_index, 0};
     if (!world.IsAlive(entity)) continue;
 
-    if (prop->type == edit::PropType::kI32 || prop->type == edit::PropType::kU32 ||
-        prop->type == edit::PropType::kU64) {
+    if (prop->type == scene::PropType::kI32 || prop->type == scene::PropType::kU32 ||
+        prop->type == scene::PropType::kU64) {
       if (!FullyParsedInteger(assign.raw)) {
         report.ErrorAt(entity, assign.line, "unparsed_number",
                        rx::StrFormat("{}.{} = {} is not a number; the loader keeps whatever prefix "
@@ -752,8 +752,8 @@ bool ValidateSceneFile(const base::String& path, bool json) {
   // other twenty findings, so fall back to a lenient load of the same file: the
   // gate says no, and this still explains the whole document.
   base::String error;
-  const bool strict_loaded = edit::LoadScene(world, db, path, &error, /*strict=*/true);
-  if (!strict_loaded) edit::LoadScene(world, db, path, nullptr, /*strict=*/false);
+  const bool strict_loaded = scene::LoadScene(world, db, path, &error, /*strict=*/true);
+  if (!strict_loaded) scene::LoadScene(world, db, path, nullptr, /*strict=*/false);
 
   Report report(world, source.entity_lines);
   if (!strict_loaded) report.FileError("load", error);

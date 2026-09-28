@@ -23,7 +23,7 @@
 // registered component by name without knowing its C++ type. The ecs core
 // carries only size/align/move/destruct per component; this layer adds names,
 // field offsets and types on top, entirely outside the ecs module.
-namespace rx::edit {
+namespace rx::scene {
 
 enum class PropType : u32 {
   kBool,
@@ -43,7 +43,7 @@ enum class PropType : u32 {
 
 // Stable spelling of a PropType ("vec3", "assetid", ...), for anything that
 // has to name a type outside C++ (the schema dump an authoring tool reads).
-RX_EDIT_EXPORT const char* PropTypeName(PropType type);
+RX_SCENE_EXPORT const char* PropTypeName(PropType type);
 
 // A tagged value carrying any reflected field. The active member is selected by
 // `type`; the makers below fill exactly the relevant fields.
@@ -107,11 +107,11 @@ namespace detail {
 // Opaque per-component registration record; the reflector appends fields to it.
 struct RegEntry;
 
-RX_EDIT_EXPORT RegEntry* CreateEntry(const char* name, ecs::ComponentId id,
+RX_SCENE_EXPORT RegEntry* CreateEntry(const char* name, ecs::ComponentId id,
                                      void (*default_construct)(void*));
-RX_EDIT_EXPORT void AddProp(RegEntry* entry, const char* name, PropType type, u32 offset);
-RX_EDIT_EXPORT void SetRange(RegEntry* entry, f32 min, f32 max);
-RX_EDIT_EXPORT void SetHint(RegEntry* entry, const char* hint);
+RX_SCENE_EXPORT void AddProp(RegEntry* entry, const char* name, PropType type, u32 offset);
+RX_SCENE_EXPORT void SetRange(RegEntry* entry, f32 min, f32 max);
+RX_SCENE_EXPORT void SetHint(RegEntry* entry, const char* hint);
 
 // Byte offset of a member within its enclosing struct. Computed against a real
 // (default-constructed) instance rather than the null-pointer trick, so it is
@@ -222,25 +222,25 @@ ComponentReflector<T>& ReflectComponent(const char* name) {
 }
 
 // Every registered component (builtins are registered on first use).
-RX_EDIT_EXPORT base::Span<const ComponentDesc* const> AllComponents();
-RX_EDIT_EXPORT const ComponentDesc* FindComponent(ecs::ComponentId id);
-RX_EDIT_EXPORT const ComponentDesc* FindComponentByName(base::StringRef name);
+RX_SCENE_EXPORT base::Span<const ComponentDesc* const> AllComponents();
+RX_SCENE_EXPORT const ComponentDesc* FindComponent(ecs::ComponentId id);
+RX_SCENE_EXPORT const ComponentDesc* FindComponentByName(base::StringRef name);
 // Reflected components present on `entity`, in registration order.
-RX_EDIT_EXPORT base::Vector<const ComponentDesc*> ComponentsOn(ecs::World& world, ecs::Entity entity);
+RX_SCENE_EXPORT base::Vector<const ComponentDesc*> ComponentsOn(ecs::World& world, ecs::Entity entity);
 
 // Reads/writes a single field. False if the component is absent on the entity.
-RX_EDIT_EXPORT bool GetProp(ecs::World& world, ecs::Entity entity, const ComponentDesc& comp,
+RX_SCENE_EXPORT bool GetProp(ecs::World& world, ecs::Entity entity, const ComponentDesc& comp,
                             const PropDesc& prop, PropValue* out);
-RX_EDIT_EXPORT bool SetProp(ecs::World& world, ecs::Entity entity, const ComponentDesc& comp,
+RX_SCENE_EXPORT bool SetProp(ecs::World& world, ecs::Entity entity, const ComponentDesc& comp,
                             const PropDesc& prop, const PropValue& value);
 
 // Adds a default-constructed component (no-op-safe if already present: it is
 // re-default-constructed). Removes a component. False on a bad entity/desc.
-RX_EDIT_EXPORT bool AddComponentByDesc(ecs::World& world, ecs::Entity entity,
+RX_SCENE_EXPORT bool AddComponentByDesc(ecs::World& world, ecs::Entity entity,
                                        const ComponentDesc& comp);
-RX_EDIT_EXPORT bool RemoveComponentByDesc(ecs::World& world, ecs::Entity entity,
+RX_SCENE_EXPORT bool RemoveComponentByDesc(ecs::World& world, ecs::Entity entity,
                                           const ComponentDesc& comp);
 
-}  // namespace rx::edit
+}  // namespace rx::scene
 
 #endif  // RX_EDIT_REFLECT_H_

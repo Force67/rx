@@ -91,7 +91,7 @@ struct SkyLighting {
   // stars/moon/aurora would otherwise never fade in.
   f32 night = 0;
 };
-RX_APP_EXPORT SkyLighting ComputeSkyLighting(f32 hour);
+RX_HOST_EXPORT SkyLighting ComputeSkyLighting(f32 hour);
 
 }  // namespace rx
 

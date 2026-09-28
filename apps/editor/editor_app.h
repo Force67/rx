@@ -7,9 +7,9 @@
 #include "rxe/anim/body_dynamics.h"
 #include "rxe/anim/pose.h"
 #include "rxe/anim/procedural_gait.h"
-#include "rxe/app/application.h"
 #include "rxe/asset/asset_database.h"
 #include "rxe/asset/mesh.h"
+#include "rxe/host/host_client.h"
 #include "rxe/ui/events/input.h"
 
 #include "base/containers/map.h"
@@ -21,12 +21,12 @@
 #include "base/optional.h"
 #include "base/strings/xstring.h"
 #include "plugins/terrain/terrain.h"
-#include "rxe/edit/hierarchy.h"
-#include "rxe/edit/reflect.h"
-#include "rxe/edit/scene_io.h"
 #include "rxe/edit/selection.h"
 #include "rxe/edit/undo.h"
 #include "rxe/scene/fly_camera.h"
+#include "rxe/scene/hierarchy.h"
+#include "rxe/scene/reflect.h"
+#include "rxe/scene/scene_io.h"
 #include "rxe/ui/ugui/ugui_backend.h"
 #include "rxe/ui/ugui/ugui_platform.h"
 #include "rxe/world/world_bake.h"
@@ -102,8 +102,8 @@ struct ImportedModel {
 struct Scrub {
   bool active = false;
   ecs::Entity entity;
-  const edit::ComponentDesc *comp = nullptr;
-  const edit::PropDesc *prop = nullptr;
+  const scene::ComponentDesc *comp = nullptr;
+  const scene::PropDesc *prop = nullptr;
   int axis = 0;                  // 0..3 vector component
   f32 start_mouse = 0;           // mouse_x at grab
   f32 base_value = 0;            // value at grab
@@ -147,11 +147,11 @@ struct PlacementBrush {
   Vec3 last_position{};
 };
 
-class Editor final : public app::Application {
+class Editor final : public host::HostClient {
 public:
   explicit Editor(base::String open_path) : open_path_(base::move(open_path)) {}
 
-  bool OnInitialize(app::Services &services) override;
+  bool OnInitialize(host::Services &services) override;
   void OnUpdate(f32 dt) override;
   void OnBuildView(f32 dt, render::FrameView &view) override;
   void OnFrameEnd() override;
@@ -214,7 +214,7 @@ private:
   // Bake World: save first, then cook what was saved into <scene>.rxp. The cook
   // reads the file rather than this live world - the editor's world holds
   // transients the author never wrote (terrain tile visuals, preview models),
-  // and edit::SaveScene already knows which of those to leave out.
+  // and scene::SaveScene already knows which of those to leave out.
   void DoBakeWorld();
   void DoLoad(const base::String &path);
   void OpenDocument(const base::String &path);
@@ -248,8 +248,8 @@ private:
   const MeshRecord *FindMesh(u64 hash) const;
   base::String EntityLabel(ecs::Entity e) const;
 
-  app::Services *services_ = nullptr;
-  app::Host *host_ = nullptr;
+  host::Services *services_ = nullptr;
+  host::Host *host_ = nullptr;
   Window *window_ = nullptr;
   render::Renderer *renderer_ = nullptr;
   ecs::World *world_ = nullptr;

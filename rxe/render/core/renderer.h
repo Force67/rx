@@ -434,7 +434,7 @@ struct FrameView {
   mutable SamplerHandle blur_sampler;
 
   // Back to defaults, but the gather lists keep their capacity: a FrameView
-  // held across frames (app::Host does) stops re-allocating every list every
+  // held across frames (host::Host does) stops re-allocating every list every
   // frame. New container members must be added to the move-dance here.
   void Clear() {
     FrameView fresh;
@@ -576,7 +576,7 @@ public:
                       const Mat4 &transform);
   void SetHairGroomTransform(u32 id, const Mat4 &transform);
   // This frame's simulated node positions (world xyz, strand-major), read
-  // back from the physics strand groom; see app::HairStrandBinding.
+  // back from the physics strand groom; see host::HairStrandBinding.
   void SetHairGroomPoints(u32 id, const f32 *positions, u32 count);
   void SetHairGroomTint(u32 id, const Vec3 &tint);
   // The groom's fibre material and quality tier (render/pipeline/hair_material.h).

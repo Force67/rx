@@ -26,7 +26,7 @@ namespace rx {
 // The two halves of the design show up as two different jobs:
 //
 //   Gameplay cells materialize real ECS entities carrying Transform and
-//   Renderable, so app::Host::GatherEntityDraws finds them with everything
+//   Renderable, so host::Host::GatherEntityDraws finds them with everything
 //   else and this class does nothing at all for them.
 //
 //   Representation cells stay out of the ECS. Their rows are transforms in a

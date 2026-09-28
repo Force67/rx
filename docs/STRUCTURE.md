@@ -69,12 +69,12 @@ rxe/                  the engine (Chromium: content/)
   render2d/           sprites, tile maps, iso
   ecs/
   script/
-  scene/              scene components, cameras, .rxscene io, reflection, scene script handlers
+  scene/              scene components, cameras, .rxscene io, reflection, transform hierarchy, script handlers
   world/              world format, map, streaming, overlays, claims
   world_bake/         offline world baking (tools and the editor link it, games do not)
   devtools/           the command bridge and endpoint (rxcall, agents)
   host/               Host, HostClient, HostConfig, platform config, world clock
-  editor/             the editor itself: hierarchy, selection, undo, panels, editor ui
+  editor/             the editor itself: selection, undo, panels, editor ui
   resources/          everything in rxe://: fonts/, config/
 
 plugins/              optional, enabled per app (Chromium: components/)
@@ -224,8 +224,8 @@ Paths on the right are under `rxe/` unless they start with `plugins/` or `apps/`
 | `rpc` | `net/rpc` |
 | `app/*` | `host`. `app::Application` becomes `HostClient` (a `Client` is the interface an embedder implements), `AppConfig` becomes `HostConfig`. |
 | `ecs`, `script`, `anim`, `render2d` | same name |
-| `scene/*`, `edit/reflect`, `edit/scene_io` | `scene`. Loading a scene is not an editor feature: the shell and `--validate` need it. |
-| `edit/hierarchy`, `selection`, `undo` | `editor` |
+| `scene/*`, `edit/reflect`, `edit/scene_io`, `edit/hierarchy` | `scene` (done in 4d-1). Loading a scene and composing world transforms are not editor features: the shell and `--validate` need them. |
+| `edit/selection`, `undo` | `editor` |
 | `apps/editor/*` minus `main.cc` | `editor` |
 | `world/*` minus `world_bake` | `world` |
 | `world/world_bake` | `world_bake` |
@@ -402,9 +402,14 @@ and after.
      module, since `Device::Create` constructs every backend), `net/transport`,
      `net/http`, `net/rpc`, `ui/ugui`; `render/util` dissolves into `gpu/rhi`,
      `asset` and `ui/imgui`.
-   - 4d: namespace and module renames (`app` to `host`, `authoring` to
-     `devtools`, `edit` split between `scene` and `editor`, the namespaces
-     table below).
+   - 4d-1 (done): `app` becomes `host` (`HostClient`, `HostConfig`),
+     `authoring` becomes `devtools`, and reflection, `.rxscene` io and the
+     transform hierarchy move from `edit` into `scene`. What stays in `edit`
+     (selection, undo) becomes `editor` in phase 6, with `apps/editor`.
+   - 4d-2: namespace consolidation: flat foundation, `internal`, `rx::net`
+     absorbing http and rpc, and `rx::importers`, `rx::vehicles`,
+     `rx::weather`, `rx::replication` matching their folders.
+   - 4d-3: the RHI into `rx::gpu` (backends nested), ui into `rx::ui`.
 5. **Development shared build.** Add the single-instance fixes and the `-dev`
    presets, then per-module feature flags on the single registry.
 6. **Plugins and apps.** Add `RX_PLUGIN`, `PluginRegistry` and `rx_add_app`.

@@ -1,17 +1,17 @@
-#ifndef RX_ENGINE_APP_APPLICATION_H_
-#define RX_ENGINE_APP_APPLICATION_H_
+#ifndef RX_HOST_HOST_CLIENT_H_
+#define RX_HOST_HOST_CLIENT_H_
 
 
 #include "base/functional/function.h"
-#include "rxe/app/services.h"
+#include "rxe/host/services.h"
 #include "rxe/render/core/presets.h"
 
-namespace rx::app {
+namespace rx::host {
 
 // What to boot: the renderer description, the hardware quality tier and
 // whether to run headless. Content selection, CLI parsing and every other
 // game decision stays with the application.
-struct AppConfig {
+struct HostConfig {
   render::RendererDesc renderer;
   // kAuto picks a tier from the gpu at startup; the rest force one (steam
   // deck, android, low/medium/high/ultra, console).
@@ -72,9 +72,9 @@ struct AppConfig {
 // A headless run ticks the fixed-step side and OnSimulate; the per-drawn-frame
 // callbacks (OnUpdate/OnBuildView/OnFrameEnd) fire only when a window is up.
 // All callbacks run on the main thread.
-class Application {
+class HostClient {
  public:
-  virtual ~Application() = default;
+  virtual ~HostClient() = default;
 
   // Subsystems are up and `services` is fully populated (renderer null when
   // headless). Load content, register ECS systems, spawn entities. Returning
@@ -110,6 +110,6 @@ class Application {
   virtual void OnShutdown() {}
 };
 
-}  // namespace rx::app
+}  // namespace rx::host
 
-#endif  // RX_ENGINE_APP_APPLICATION_H_
+#endif  // RX_HOST_HOST_CLIENT_H_

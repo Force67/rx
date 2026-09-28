@@ -9,7 +9,7 @@
 #include "rxe/asset/vfs.h"
 #include "rxe/render/core/presets.h"
 
-namespace rx::app {
+namespace rx::host {
 
 // A platform config: the ini files that decide how the engine and a game run on
 // one kind of machine (docs/CONFIG.md). Each section belongs to the subsystem
@@ -37,7 +37,7 @@ struct PlatformConfig {
 // deep). A path without a mount (no "://") is read from disk instead, for
 // RX_CONFIG; its includes still go through the vfs. False when `path` itself
 // does not exist; a missing include only counts as a problem.
-RX_APP_EXPORT bool ReadPlatformConfig(const asset::Vfs& vfs, base::StringRef path,
+RX_HOST_EXPORT bool ReadPlatformConfig(const asset::Vfs& vfs, base::StringRef path,
                                       PlatformConfig* out);
 
 // Reads a platform's config files into `out`, in override order:
@@ -51,15 +51,15 @@ RX_APP_EXPORT bool ReadPlatformConfig(const asset::Vfs& vfs, base::StringRef pat
 // kAuto reads the default.ini files only: what can be known before the gpu,
 // and with it the tier, is. An empty name skips the game's and the player's
 // files. False when a concrete tier has no engine file: no config to run with.
-RX_APP_EXPORT bool ReadPlatformChain(const asset::Vfs& vfs, base::StringRef name,
+RX_HOST_EXPORT bool ReadPlatformChain(const asset::Vfs& vfs, base::StringRef name,
                                      render::QualityPreset tier, PlatformConfig* out);
 
 // Sets each [options] entry on its registered base::Option. An option the
 // environment already set keeps that value: env > file > built-in default.
 // Options read at startup (window size, fullscreen) only see what the files
 // read before the window opens, which is default.ini.
-RX_APP_EXPORT void ApplyPlatformOptions(PlatformConfig& config);
+RX_HOST_EXPORT void ApplyPlatformOptions(PlatformConfig& config);
 
-}  // namespace rx::app
+}  // namespace rx::host
 
 #endif  // RX_ENGINE_APP_PLATFORM_CONFIG_H_

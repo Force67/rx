@@ -1,4 +1,4 @@
-#include "rxe/edit/scene_io.h"
+#include "rxe/scene/scene_io.h"
 
 #include <math.h>
 #include <stdlib.h>
@@ -16,11 +16,11 @@
 #include "foundation/strings/text_reader.h"
 #include "foundation/strings/text_writer.h"
 #include "rxe/asset/asset_id.h"
-#include "rxe/edit/hierarchy.h"
-#include "rxe/edit/reflect.h"
 #include "rxe/scene/components.h"
+#include "rxe/scene/hierarchy.h"
+#include "rxe/scene/reflect.h"
 
-namespace rx::edit {
+namespace rx::scene {
 namespace {
 
 constexpr int kSceneVersion = 1;
@@ -545,4 +545,4 @@ bool LoadScene(ecs::World& world, asset::AssetDatabase& db, const base::String& 
   return true;
 }
 
-}  // namespace rx::edit
+}  // namespace rx::scene

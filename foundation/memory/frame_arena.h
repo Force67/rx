@@ -16,7 +16,7 @@ namespace rx::mem {
 // bump; Reset at the top of the frame reclaims everything at once. Nothing is
 // destructed; only trivially-destructible payloads belong here.
 //
-// Single-threaded by design: owned by the frame loop (app::Host resets it in
+// Single-threaded by design: owned by the frame loop (host::Host resets it in
 // RunFrame). Worker threads must not allocate from it.
 //
 // Requests that do not fit fall back to the heap and are freed on Reset; the
@@ -64,7 +64,7 @@ class RX_FOUNDATION_EXPORT FrameArena {
   size_t overflow_bytes_ = 0;
 };
 
-// The main-thread frame arena, reset by app::Host at the top of each frame.
+// The main-thread frame arena, reset by host::Host at the top of each frame.
 RX_FOUNDATION_EXPORT FrameArena& MainFrameArena();
 
 }  // namespace rx::mem

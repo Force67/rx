@@ -1,4 +1,4 @@
-// rx::authoring acceptance: the live command endpoint, from an encoded rpc frame
+// rx::devtools acceptance: the live command endpoint, from an encoded rpc frame
 // on a unix socket all the way into a real ecs::World and back. Covers the two
 // things that make it safe to leave in a shipping binary: the signature check
 // in front of every handler, and the trust gate in front of the registry, with
@@ -17,8 +17,8 @@
 #include "base/optional.h"
 #include "base/strings/xstring.h"
 #include "foundation/strings/format.h"
-#include "rxe/authoring/command_bridge.h"
-#include "rxe/authoring/command_endpoint.h"
+#include "rxe/devtools/command_bridge.h"
+#include "rxe/devtools/command_endpoint.h"
 #include "rxe/ecs/world.h"
 #include "rxe/net/rpc/rpc_message.h"
 #include "rxe/scene/components.h"
@@ -40,7 +40,7 @@ int g_failures = 0;
     }                                                             \
   } while (0)
 
-namespace authoring = rx::authoring;
+namespace devtools = rx::devtools;
 namespace ecs = rx::ecs;
 namespace rpc = rx::rpc;
 namespace scene = rx::scene;
@@ -55,7 +55,7 @@ struct Rig {
   script::ScriptArena scratch;
   script::HandlerRegistry commands;
   script::HandlerContext ctx;
-  base::Optional<authoring::CommandBridge> bridge;  // built after the registry is filled
+  base::Optional<devtools::CommandBridge> bridge;  // built after the registry is filled
 
   Rig() {
     scene::SetupSceneCommands(commands);
@@ -65,8 +65,8 @@ struct Rig {
     bridge.emplace(commands, ctx);
   }
 
-  authoring::CommandBridge::Reply Call(base::String name, rpc::RpcArgs args) {
-    const rpc::RpcContext local{authoring::kLocalSender, /*from_server=*/false};
+  devtools::CommandBridge::Reply Call(base::String name, rpc::RpcArgs args) {
+    const rpc::RpcContext local{devtools::kLocalSender, /*from_server=*/false};
     return bridge->Invoke(local, rpc::RpcCall{base::move(name), base::move(args)});
   }
 };
@@ -77,7 +77,7 @@ void TestMarshalling() {
   CHECK(rig.bridge->registry().Has("World.Spawn"));
 
   // World.Spawn(symbol, vec3, float): 3 params, 5 wire args.
-  authoring::CommandBridge::Reply reply =
+  devtools::CommandBridge::Reply reply =
       rig.Call("World.Spawn", {rpc::RpcValue(base::String("crate")), rpc::RpcValue(1.0),
                                rpc::RpcValue(2.0), rpc::RpcValue(3.0), rpc::RpcValue(rx::i64(2))});
   CHECK(reply.ok);
@@ -124,7 +124,7 @@ void TestRejection() {
   Rig rig;
 
   // Too few args for the signature.
-  authoring::CommandBridge::Reply reply = rig.Call("World.Teleport", {rpc::RpcValue(rx::i64(1))});
+  devtools::CommandBridge::Reply reply = rig.Call("World.Teleport", {rpc::RpcValue(rx::i64(1))});
   CHECK(!reply.ok);
   CHECK(reply.error.find("expects 4 arg(s) for (entity, vec3)") != base::String::npos);
 
@@ -156,12 +156,12 @@ void TestTrustGate() {
                            rpc::RpcValue(9.0)}};
 
   // A remote game peer: any peer id the net path could attribute a packet to.
-  authoring::CommandBridge::Reply reply = rig.bridge->Invoke(rpc::RpcContext{7, false}, move);
+  devtools::CommandBridge::Reply reply = rig.bridge->Invoke(rpc::RpcContext{7, false}, move);
   CHECK(!reply.ok);
   CHECK(reply.error.find("local-endpoint only") != base::String::npos);
 
   // The host, on a client build. Also not the local authoring endpoint.
-  reply = rig.bridge->Invoke(rpc::RpcContext{authoring::kLocalSender, true}, move);
+  reply = rig.bridge->Invoke(rpc::RpcContext{devtools::kLocalSender, true}, move);
   CHECK(!reply.ok);
 
   // Nothing moved: a refusal happens before any marshalling or dispatch.
@@ -169,14 +169,14 @@ void TestTrustGate() {
 
   // Dispatching straight through the registry, bypassing Invoke, also cannot
   // reach a handler: there is no reply slot, so the bound handler does nothing.
-  CHECK(rig.bridge->registry().Dispatch(rpc::RpcContext{authoring::kLocalSender, false}, move));
+  CHECK(rig.bridge->registry().Dispatch(rpc::RpcContext{devtools::kLocalSender, false}, move));
   CHECK(rig.world.Get<scene::Transform>(e)->position[0] == 1.0f);
 }
 
 // The real socket path: frame in, frame out, over a live CommandEndpoint.
 void TestEndpoint() {
   Rig rig;
-  authoring::CommandEndpoint endpoint;
+  devtools::CommandEndpoint endpoint;
   const base::String path = "/tmp/rx_command_test_" + rx::ToString(::getpid()) + ".sock";
   base::String error;
   if (!endpoint.Start(path, &error)) {
@@ -187,7 +187,7 @@ void TestEndpoint() {
   CHECK(endpoint.running());
 
   // A second endpoint must not steal a live socket.
-  authoring::CommandEndpoint duplicate;
+  devtools::CommandEndpoint duplicate;
   CHECK(!duplicate.Start(path, &error));
 
   sockaddr_un addr{};

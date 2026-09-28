@@ -8,12 +8,12 @@
 #include "foundation/build_config/export.h"
 #include "rxe/ecs/entity.h"
 #include "rxe/ecs/world.h"
-#include "rxe/edit/reflect.h"
+#include "rxe/scene/reflect.h"
 
 // Undo/redo built on reversible Commands. Commands identify their target
 // entities by Guid, not by ecs handle, so a target destroyed and recreated by
 // other undo/redo steps is re-resolved through the world rather than dangling
-// (see edit::FindByGuid). The factory helpers snapshot whatever prior state
+// (see scene::FindByGuid). The factory helpers snapshot whatever prior state
 // their Revert needs at construction time.
 namespace rx::edit {
 
@@ -66,16 +66,16 @@ private:
 
 // Sets a single reflected field. Captures the current value for Revert.
 RX_EDIT_EXPORT base::UniquePointer<Command>
-MakeSetProp(ecs::World &world, ecs::Entity entity, const ComponentDesc &comp,
-            const PropDesc &prop, PropValue new_value);
+MakeSetProp(ecs::World &world, ecs::Entity entity, const scene::ComponentDesc &comp,
+            const scene::PropDesc &prop, scene::PropValue new_value);
 
 // Creates an entity with the given components and initial prop values. The
 // entity's Guid is stable across undo/redo; *out_entity (may be null) receives
 // the live handle from the initial Apply inside UndoStack::Push only; a stack
 // address is safe, later undo/redo never writes through it.
 RX_EDIT_EXPORT base::UniquePointer<Command> MakeCreateEntity(
-    base::Vector<base::Pair<const ComponentDesc *,
-                          base::Vector<base::Pair<const PropDesc *, PropValue>>>>
+    base::Vector<base::Pair<const scene::ComponentDesc *,
+                          base::Vector<base::Pair<const scene::PropDesc *, scene::PropValue>>>>
         initial,
     ecs::Entity *out_entity);
 
@@ -93,12 +93,12 @@ MakeReparent(ecs::World &world, ecs::Entity entity, ecs::Entity new_parent);
 // removes it (only if this command added it).
 RX_EDIT_EXPORT base::UniquePointer<Command>
 MakeAddComponent(ecs::World &world, ecs::Entity entity,
-                 const ComponentDesc &comp);
+                 const scene::ComponentDesc &comp);
 
 // Removes a component; snapshots its props so Revert restores them.
 RX_EDIT_EXPORT base::UniquePointer<Command>
 MakeRemoveComponent(ecs::World &world, ecs::Entity entity,
-                    const ComponentDesc &comp);
+                    const scene::ComponentDesc &comp);
 
 } // namespace rx::edit
 

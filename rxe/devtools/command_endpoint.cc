@@ -1,4 +1,4 @@
-#include "rxe/authoring/command_endpoint.h"
+#include "rxe/devtools/command_endpoint.h"
 
 #include "base/containers/vector.h"
 #include "base/memory/mem_ops.h"
@@ -7,7 +7,7 @@
 #include "base/strings/xstring.h"
 #include "foundation/logging/log.h"
 #include "foundation/strings/format.h"
-#include "rxe/authoring/command_bridge.h"
+#include "rxe/devtools/command_bridge.h"
 #include "rxe/net/rpc/rpc_message.h"
 
 #if !defined(_WIN32)
@@ -22,7 +22,7 @@
 #include <string.h>
 #endif
 
-namespace rx::authoring {
+namespace rx::devtools {
 namespace {
 
 // An authoring call is a name and a handful of scalars; anything approaching
@@ -270,4 +270,4 @@ void CommandEndpoint::Poll(CommandBridge& bridge) {
 
 #endif  // !_WIN32
 
-}  // namespace rx::authoring
+}  // namespace rx::devtools

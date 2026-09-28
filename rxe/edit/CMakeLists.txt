@@ -1,14 +1,12 @@
 rx_add_module(edit
-  reflect.cc
-  hierarchy.cc
   selection.cc
-  scene_io.cc
   undo.cc
 )
 
-# Editor foundations: reflection, hierarchy, serialization, undo and selection.
-# Depends on the data modules only; deliberately NOT on rx::render (the editor
-# UI links render separately and drives it through the FrameView contract).
+# Editor state over the scene: undo/redo and selection. Reflection, the
+# transform hierarchy and .rxscene io live in rx::scene, because a game needs
+# them without the editor. Deliberately NOT on rx::render (the editor UI links
+# render separately and drives it through the FrameView contract).
 target_link_libraries(rx_edit PUBLIC rx::foundation rx::ecs rx::scene rx::asset)
 
 if(RX_BUILD_TESTS)

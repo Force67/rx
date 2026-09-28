@@ -8,8 +8,8 @@
 #include "foundation/files/file_system.h"
 #include "foundation/logging/log.h"
 #include "material_palette.h"
-#include "rxe/app/host.h"
-#include "rxe/edit/reflect.h"
+#include "rxe/host/host.h"
+#include "rxe/scene/reflect.h"
 #include "rxe/scene/scene_handlers.h"
 #include "rxe/script/handler_registry.h"
 #include "rxe/script/script_value.h"
@@ -37,7 +37,7 @@ void PrintUsage() {
   RX_INFO("  --demo <id>           builtin scene: water | fluid | weather | materials | gaussian | cornell |");
   RX_INFO("                        featuregym | cloth | locomotion | ship | nav | gym | shooter | puppet | drive |");
   RX_INFO("                        placement | grass | lod | oit | fire | brick | silpom | sss | scenehook | ... (cube)");
-  RX_INFO("  --new-app-id          print a fresh cuid2 for AppConfig::id and exit");
+  RX_INFO("  --new-app-id          print a fresh cuid2 for HostConfig::id and exit");
   RX_INFO("  --dump-schema         print the .rxscene component schema as json and exit");
   RX_INFO("  --dump-commands       print the live command schema as json and exit");
   RX_INFO("  --dump-materials [dir]  print the material palette as json and exit (default");
@@ -88,18 +88,18 @@ void PrintJsonString(const char* s) {
 void DumpSchema() {
   rx::RegisterSceneComponents();
   ::printf("{\n  \"components\": [\n");
-  const auto components = rx::edit::AllComponents();
+  const auto components = rx::scene::AllComponents();
   for (size_t i = 0; i < components.size(); ++i) {
-    const rx::edit::ComponentDesc& comp = *components[i];
+    const rx::scene::ComponentDesc& comp = *components[i];
     ::printf("    {\n      \"name\": ");
     PrintJsonString(comp.name);
     ::printf(",\n      \"props\": [");
     for (rx::u32 p = 0; p < comp.prop_count; ++p) {
-      const rx::edit::PropDesc& prop = comp.props[p];
+      const rx::scene::PropDesc& prop = comp.props[p];
       ::printf("%s\n        {\"name\": ", p ? "," : "");
       PrintJsonString(prop.name);
       ::printf(", \"type\": ");
-      PrintJsonString(rx::edit::PropTypeName(prop.type));
+      PrintJsonString(rx::scene::PropTypeName(prop.type));
       // 0/0 is "unbounded" (PropDesc), so only a real Range prints.
       if (prop.min != 0.0f || prop.max != 0.0f)
         ::printf(", \"min\": %g, \"max\": %g", prop.min, prop.max);
@@ -146,7 +146,7 @@ void DumpCommands() {
 
 int main(int argc, char** argv) {
   rx::EngineConfig config;
-  rx::app::AppConfig app_config;
+  rx::host::HostConfig app_config;
   app_config.id = "dyrcg9826wzw53y6vr0g0cjx";
   app_config.name = "rx";
   app_config.title = "rx";
@@ -268,7 +268,7 @@ int main(int argc, char** argv) {
 #endif
 
   rx::Viewer viewer(config);
-  rx::app::Host host;
+  rx::host::Host host;
   if (!host.Initialize(app_config, viewer)) {
     RX_ERROR("engine initialization failed");
     return 1;

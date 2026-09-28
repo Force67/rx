@@ -6,11 +6,11 @@
 #include <base/containers/vector.h>
 
 #include "rxe/anim/expression.h"
-#include "rxe/app/application.h"
-#include "rxe/app/host.h"
 #include "rxe/asset/mesh.h"
-#include "rxe/authoring/command_bridge.h"
-#include "rxe/authoring/command_endpoint.h"
+#include "rxe/devtools/command_bridge.h"
+#include "rxe/devtools/command_endpoint.h"
+#include "rxe/host/host.h"
+#include "rxe/host/host_client.h"
 #include "rxe/importers/gltf/gltf_loader.h"
 #include "rxe/importers/usd/usd_loader.h"
 #include "rxe/script/handler_context.h"
@@ -33,17 +33,17 @@ namespace rx {
 
 class DemoScenes;
 
-// The rx viewer: the reference app::Application. Loads a glTF scene or a
+// The rx viewer: the reference host::HostClient. Loads a glTF scene or a
 // builtin demo, drives the free-fly camera and the scripted camera paths
 // (orbit / record / replay / cinematic showcase), the day/night sun, the
 // imgui debug overlay and the capture/benchmark hooks. Everything here is
-// viewer policy; the subsystems and the loop live in app::Host.
-class Viewer : public app::Application {
+// viewer policy; the subsystems and the loop live in host::Host.
+class Viewer : public host::HostClient {
  public:
   explicit Viewer(const EngineConfig& config);
   ~Viewer() override;
 
-  bool OnInitialize(app::Services& services) override;
+  bool OnInitialize(host::Services& services) override;
   void OnSimulate(f32 frame_delta) override;
   void OnUpdate(f32 frame_delta) override;
   void OnBuildView(f32 frame_delta, render::FrameView& view) override;
@@ -93,9 +93,9 @@ class Viewer : public app::Application {
 
   EngineConfig config_;
 
-  // Engine services, cached from app::Services at OnInitialize. Owned by the
+  // Engine services, cached from host::Services at OnInitialize. Owned by the
   // host; stable for its lifetime.
-  app::Host* host_ = nullptr;
+  host::Host* host_ = nullptr;
   Window* window_ = nullptr;
   render::Renderer* renderer_ = nullptr;
   ecs::World* world_ = nullptr;
@@ -181,8 +181,8 @@ class Viewer : public app::Application {
   script::ScriptSymbols symbols_;
   script::ScriptArena script_scratch_;
   script::HandlerContext script_ctx_;
-  base::UniquePointer<authoring::CommandBridge> bridge_;
-  authoring::CommandEndpoint authoring_endpoint_;
+  base::UniquePointer<devtools::CommandBridge> bridge_;
+  devtools::CommandEndpoint authoring_endpoint_;
 
   // Shared service bundle handed to the demo scenes and the debug overlay.
   EngineContext ctx_;

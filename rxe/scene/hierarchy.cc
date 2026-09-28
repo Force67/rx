@@ -1,9 +1,9 @@
-#include "rxe/edit/hierarchy.h"
+#include "rxe/scene/hierarchy.h"
 
 #include "base/external/xoshiro256ss/xoshiro256ss.h"
 #include "base/random/random.h"
 
-namespace rx::edit {
+namespace rx::scene {
 
 namespace {
 
@@ -94,4 +94,4 @@ Mat4 WorldMatrix(ecs::World& world, ecs::Entity entity) {
   return m;
 }
 
-}  // namespace rx::edit
+}  // namespace rx::scene

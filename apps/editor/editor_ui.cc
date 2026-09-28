@@ -18,7 +18,7 @@
 #include "editor_app.h"
 #include "foundation/files/file_system.h"
 #include "foundation/logging/log.h"
-#include "rxe/edit/hierarchy.h"
+#include "rxe/scene/hierarchy.h"
 
 #include "base/algorithm.h"
 #include "base/containers/pair.h"
@@ -336,7 +336,7 @@ void Editor::UpdateGizmoWidgets() {
   bool show = e && editor_mode_ == EditorMode::kSelect &&
               gizmo_mode_ == GizmoMode::kTranslate;
   scene::Transform wt =
-      e ? edit::WorldTransform(*world_, e) : scene::Transform{};
+      e ? scene::WorldTransform(*world_, e) : scene::Transform{};
   Vec3 origin{wt.position[0], wt.position[1], wt.position[2]};
   f32 len = e ? rx::Max(0.5f, Length(origin - camera_.position()) * 0.18f) : 0;
   for (int a = 0; a < 3; ++a) {
@@ -603,7 +603,7 @@ base::String Editor::BuildInspector() {
   }
 
   // Inspector tab: one section per component.
-  for (const edit::ComponentDesc *comp : edit::ComponentsOn(*world_, e)) {
+  for (const scene::ComponentDesc *comp : scene::ComponentsOn(*world_, e)) {
     if (base::String(comp->name) == "Guid")
       continue; // internal
     out += "panel ch { class: comp_header;\n";
@@ -617,33 +617,33 @@ base::String Editor::BuildInspector() {
     out += "}\n";
     out += "panel cb { layout: column; padding: 8 12; gap: 8;\n";
     for (u32 pi = 0; pi < comp->prop_count; ++pi) {
-      const edit::PropDesc &pd = comp->props[pi];
-      edit::PropValue v;
-      edit::GetProp(*world_, e, *comp, pd, &v);
+      const scene::PropDesc &pd = comp->props[pi];
+      scene::PropValue v;
+      scene::GetProp(*world_, e, *comp, pd, &v);
       out += F("  panel r%u { layout: row; align: center; gap: 8;\n", pi);
       out += F("    text rl { class: row_label; text: \"%s\"; }\n",
                DisplayName(pd.name).c_str());
       int count =
-          (v.type == edit::PropType::kVec3) ? 3
-          : (v.type == edit::PropType::kVec4 || v.type == edit::PropType::kQuat)
+          (v.type == scene::PropType::kVec3) ? 3
+          : (v.type == scene::PropType::kVec4 || v.type == scene::PropType::kQuat)
               ? 3
-          : (v.type == edit::PropType::kVec2) ? 2
+          : (v.type == scene::PropType::kVec2) ? 2
                                               : 1;
-      if (v.type == edit::PropType::kString) {
+      if (v.type == scene::PropType::kString) {
         const base::String escaped_value = EscapeUguiString(v.s);
         out += F("    panel fv { class: field; text vv { class: field_val; "
                  "text: \"%s\"; } }\n",
                  escaped_value.c_str());
-      } else if (v.type == edit::PropType::kBool) {
+      } else if (v.type == scene::PropType::kBool) {
         out += F("    button field_%u_%u_0 { width: 18; height: 18; "
                  "corner-radius: 4; "
                  "background: %s; cursor: pointer; }\n",
                  comp->id, pi, v.b ? "#3a5bbf" : "#33363c");
-      } else if (v.type == edit::PropType::kU64 ||
-                 v.type == edit::PropType::kAssetId ||
-                 v.type == edit::PropType::kEntity) {
+      } else if (v.type == scene::PropType::kU64 ||
+                 v.type == scene::PropType::kAssetId ||
+                 v.type == scene::PropType::kEntity) {
         base::String txt;
-        if (v.type == edit::PropType::kEntity)
+        if (v.type == scene::PropType::kEntity)
           txt = F("entity %u", v.e.index);
         else
           txt = F("%016llx", (unsigned long long)v.u);
@@ -652,7 +652,7 @@ base::String Editor::BuildInspector() {
                  txt.c_str());
       } else {
         f32 disp[4] = {v.f[0], v.f[1], v.f[2], v.f[3]};
-        if (v.type == edit::PropType::kQuat)
+        if (v.type == scene::PropType::kQuat)
           QuatToEuler(Quat{v.f[0], v.f[1], v.f[2], v.f[3]}, disp);
         out += "    panel fields { layout: row; gap: 5; flex-grow: 1;\n";
         for (int a = 0; a < count; ++a) {
@@ -680,7 +680,7 @@ base::String Editor::BuildInspector() {
     out += "  panel addmenu { layout: column; margin: 6 0 0 0; background: "
            "#191a1d; corner-radius: 6; border-color:#33363c; border-width:1; "
            "padding: 4;\n";
-    for (const edit::ComponentDesc *comp : edit::AllComponents()) {
+    for (const scene::ComponentDesc *comp : scene::AllComponents()) {
       if (world_->HasRaw(e, comp->id))
         continue;
       if (base::String(comp->name) == "Guid")
@@ -1184,15 +1184,15 @@ bool Editor::RouteClick(const base::String &name, ugui::MouseButton) {
 
   if (name == "hier_add") {
     ecs::Entity out;
-    const edit::ComponentDesc *xf = edit::FindComponentByName("Transform");
-    const edit::ComponentDesc *nm = edit::FindComponentByName("Name");
+    const scene::ComponentDesc *xf = scene::FindComponentByName("Transform");
+    const scene::ComponentDesc *nm = scene::FindComponentByName("Name");
     base::Vector<base::Pair<
-        const edit::ComponentDesc *,
-        base::Vector<base::Pair<const edit::PropDesc *, edit::PropValue>>>>
+        const scene::ComponentDesc *,
+        base::Vector<base::Pair<const scene::PropDesc *, scene::PropValue>>>>
         initial;
     initial.push_back({xf, {}});
     initial.push_back(
-        {nm, {{&nm->props[0], edit::PropValue::String("Empty")}}});
+        {nm, {{&nm->props[0], scene::PropValue::String("Empty")}}});
     undo_.Push(*world_, edit::MakeCreateEntity(base::move(initial), &out));
     selection_.Set(out);
     doc_dirty_ = true;
@@ -1227,7 +1227,7 @@ bool Editor::RouteClick(const base::String &name, ugui::MouseButton) {
   }
   if (starts("insp_add_")) {
     ecs::ComponentId id = tail_u("insp_add_");
-    if (const edit::ComponentDesc *c = edit::FindComponent(id))
+    if (const scene::ComponentDesc *c = scene::FindComponent(id))
       if (ecs::Entity e = selection_.primary()) {
         undo_.Push(*world_, edit::MakeAddComponent(*world_, e, *c));
         add_menu_open_ = false;
@@ -1238,7 +1238,7 @@ bool Editor::RouteClick(const base::String &name, ugui::MouseButton) {
   }
   if (starts("insp_rm_")) {
     ecs::ComponentId id = tail_u("insp_rm_");
-    if (const edit::ComponentDesc *c = edit::FindComponent(id))
+    if (const scene::ComponentDesc *c = scene::FindComponent(id))
       if (ecs::Entity e = selection_.primary()) {
         undo_.Push(*world_, edit::MakeRemoveComponent(*world_, e, *c));
         doc_dirty_ = true;
@@ -1250,14 +1250,14 @@ bool Editor::RouteClick(const base::String &name, ugui::MouseButton) {
   if (starts("field_") && name.find("_tint_") == base::String::npos) {
     unsigned cid = 0, pi = 0, ax = 0;
     if (::sscanf(name.c_str() + 6, "%u_%u_%u", &cid, &pi, &ax) == 3) {
-      const edit::ComponentDesc *c = edit::FindComponent(cid);
+      const scene::ComponentDesc *c = scene::FindComponent(cid);
       ecs::Entity e = selection_.primary();
       if (c && e && pi < c->prop_count &&
-          c->props[pi].type == edit::PropType::kBool) {
-        edit::PropValue v;
-        edit::GetProp(*world_, e, *c, c->props[pi], &v);
+          c->props[pi].type == scene::PropType::kBool) {
+        scene::PropValue v;
+        scene::GetProp(*world_, e, *c, c->props[pi], &v);
         undo_.Push(*world_, edit::MakeSetProp(*world_, e, *c, c->props[pi],
-                                              edit::PropValue::Bool(!v.b)));
+                                              scene::PropValue::Bool(!v.b)));
         doc_dirty_ = true;
         MarkDirty();
       }
@@ -1326,7 +1326,7 @@ void Editor::OnBuildView(f32 dt, render::FrameView &view) {
         const bool terrain_visual = IsTerrainVisual(e);
         render::DrawItem d;
         d.mesh = r.mesh.hash;
-        d.transform = edit::WorldMatrix(*world_, e);
+        d.transform = scene::WorldMatrix(*world_, e);
         d.prev_transform = d.transform;
         uint32_t tint = terrain_visual
                             ? 0u
@@ -1391,7 +1391,7 @@ void Editor::OnBuildView(f32 dt, render::FrameView &view) {
   if (editor_mode_ == EditorMode::kSelect && primary &&
       world_->IsAlive(primary) && !IsTerrainVisual(primary) &&
       gizmo_mode_ == GizmoMode::kTranslate) {
-    scene::Transform wt = edit::WorldTransform(*world_, primary);
+    scene::Transform wt = scene::WorldTransform(*world_, primary);
     Vec3 o{wt.position[0], wt.position[1], wt.position[2]};
     f32 len = rx::Max(0.5f, Length(o - camera_.position()) * 0.18f);
     gizmo_lines_.push_back({o, {o.x + len, o.y, o.z}, 0xe0655fff}); // X red
@@ -1458,15 +1458,15 @@ bool Editor::TryStartScrub(f32 mx) {
   }
   if (::sscanf(name.c_str() + 6, "%u_%u_%u", &cid, &pi, &ax) != 3)
     return false;
-  const edit::ComponentDesc *c = edit::FindComponent(cid);
+  const scene::ComponentDesc *c = scene::FindComponent(cid);
   ecs::Entity e = selection_.primary();
   if (!c || !e || pi >= c->prop_count)
     return false;
-  const edit::PropDesc &pd = c->props[pi];
-  if (pd.type == edit::PropType::kBool || pd.type == edit::PropType::kString)
+  const scene::PropDesc &pd = c->props[pi];
+  if (pd.type == scene::PropType::kBool || pd.type == scene::PropType::kString)
     return false;
-  edit::PropValue v;
-  edit::GetProp(*world_, e, *c, pd, &v);
+  scene::PropValue v;
+  scene::GetProp(*world_, e, *c, pd, &v);
   scrub_ = {};
   scrub_.active = true;
   scrub_.entity = e;
@@ -1474,8 +1474,8 @@ bool Editor::TryStartScrub(f32 mx) {
   scrub_.prop = &pd;
   scrub_.axis = (int)ax;
   scrub_.start_mouse = mx;
-  scrub_.step = (pd.type == edit::PropType::kQuat) ? 0.5f : 0.02f;
-  if (pd.type == edit::PropType::kQuat) {
+  scrub_.step = (pd.type == scene::PropType::kQuat) ? 0.5f : 0.02f;
+  if (pd.type == scene::PropType::kQuat) {
     f32 euler[3];
     QuatToEuler(Quat{v.f[0], v.f[1], v.f[2], v.f[3]}, euler);
     scrub_.base_value = euler[ax];
@@ -1507,21 +1507,21 @@ void Editor::UpdateScrub() {
     return;
   }
 
-  const edit::PropDesc &pd = *scrub_.prop;
-  edit::PropValue v;
-  edit::GetProp(*world_, scrub_.entity, *scrub_.comp, pd, &v);
-  if (pd.type == edit::PropType::kQuat) {
+  const scene::PropDesc &pd = *scrub_.prop;
+  scene::PropValue v;
+  scene::GetProp(*world_, scrub_.entity, *scrub_.comp, pd, &v);
+  if (pd.type == scene::PropType::kQuat) {
     f32 euler[3] = {scrub_.base_euler[0], scrub_.base_euler[1],
                     scrub_.base_euler[2]};
     euler[scrub_.axis] = scrub_.base_value + dx * scrub_.step;
     Quat q = EulerToQuat(euler);
     undo_.Push(*world_,
                edit::MakeSetProp(*world_, scrub_.entity, *scrub_.comp, pd,
-                                 edit::PropValue::Quat(q.x, q.y, q.z, q.w)));
+                                 scene::PropValue::Quat(q.x, q.y, q.z, q.w)));
   } else {
     if (pd.min != pd.max)
       nv = rx::Clamp(nv, pd.min, pd.max);
-    edit::PropValue out = v;
+    scene::PropValue out = v;
     out.f[scrub_.axis] = nv;
     undo_.Push(*world_, edit::MakeSetProp(*world_, scrub_.entity, *scrub_.comp,
                                           pd, out));

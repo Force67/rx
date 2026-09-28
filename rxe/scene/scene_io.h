@@ -14,14 +14,14 @@
 // target's Guid; a Renderable's AssetId is written as its source path when the
 // asset system knows it (falling back to the raw hash). Unknown component/prop
 // names on load are skipped with a warning rather than failing the load.
-namespace rx::edit {
+namespace rx::scene {
 
 // Writes the scene to `file_path`. Assigns Guids to identity-bearing entities
 // that lack one (so references resolve on reload). False + *error on I/O error,
 // or on a nan/inf float: the format has no literal for one that reads back, so
 // it is refused (before the file is opened) rather than written as a value that
 // silently reloads as 0.
-RX_EDIT_EXPORT bool SaveScene(ecs::World& world, const base::String& file_path,
+RX_SCENE_EXPORT bool SaveScene(ecs::World& world, const base::String& file_path,
                               base::String* error = nullptr);
 
 // Loads a scene into `world`, creating fresh entities, remapping Guid-based
@@ -36,10 +36,10 @@ RX_EDIT_EXPORT bool SaveScene(ecs::World& world, const base::String& file_path,
 // back as an authored zero, both of which read as "the loader is broken". A
 // rejected strict load creates no entities. The editor stays lenient so a scene
 // saved by a build that had extra components still opens.
-RX_EDIT_EXPORT bool LoadScene(ecs::World& world, asset::AssetDatabase& db,
+RX_SCENE_EXPORT bool LoadScene(ecs::World& world, asset::AssetDatabase& db,
                               const base::String& file_path, base::String* error = nullptr,
                               bool strict = false);
 
-}  // namespace rx::edit
+}  // namespace rx::scene
 
 #endif  // RX_EDIT_SCENE_IO_H_

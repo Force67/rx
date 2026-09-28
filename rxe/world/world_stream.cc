@@ -13,8 +13,8 @@
 #include "base/strings/xstring.h"
 #include "foundation/math/scalar.h"
 #include "foundation/strings/format.h"
-#include "rxe/edit/reflect.h"
 #include "rxe/scene/components.h"
+#include "rxe/scene/reflect.h"
 
 namespace rx::world {
 namespace {
@@ -58,9 +58,9 @@ Tier TierFromChannels(u32 channels) {
 // reference is refused outright. What cannot is a member nobody reflected -
 // neither this nor the layout hash can see one - so a component meant to be
 // baked has to be fully reflected, and that is a rule for whoever writes it.
-bool BakeableContents(const edit::ComponentDesc& desc, base::String* error) {
+bool BakeableContents(const scene::ComponentDesc& desc, base::String* error) {
   for (u32 i = 0; i < desc.prop_count; ++i) {
-    if (desc.props[i].type != edit::PropType::kEntity) continue;
+    if (desc.props[i].type != scene::PropType::kEntity) continue;
     *error = base::String("field '") + desc.props[i].name +
              "' is an entity reference, which does not survive a bake; refer across a cell by "
              "stable id instead";
@@ -130,7 +130,7 @@ base::UniquePointer<CellLoader> MakeArchiveCellLoader(const WorldMap& map, const
 }
 
 bool RuntimeComponentLayout(base::StringRef component, u32* stride, u64* layout_hash) {
-  const edit::ComponentDesc* desc = edit::FindComponentByName(component);
+  const scene::ComponentDesc* desc = scene::FindComponentByName(component);
   if (!desc) return false;
   const ecs::ComponentInfo& info = ecs::GetComponentInfo(desc->id);
   base::Vector<base::StringRef> names;
@@ -215,7 +215,7 @@ base::Span<const base::String> WorldStreamer::errors() const {
   return base::Span<const base::String>(errors_.data(), errors_.size());
 }
 
-u64 WorldStreamer::LayoutHash(const edit::ComponentDesc& desc) const {
+u64 WorldStreamer::LayoutHash(const scene::ComponentDesc& desc) const {
   // A component's reflected layout cannot change for the life of the process,
   // but ResolveSchema would otherwise recompute it - three vector allocations
   // and an fnv1a over every field - once per column, per archetype, per cell,
@@ -255,7 +255,7 @@ bool WorldStreamer::ResolveSchema(DomainCell& cell, base::String* error) const {
                  "' is not readable";
         return false;
       }
-      const edit::ComponentDesc* desc = edit::FindComponentByName(name);
+      const scene::ComponentDesc* desc = scene::FindComponentByName(name);
       if (!desc) {
         *error = "component '" + base::String(name) +
                  "' is not registered in this build; the cook and the runtime disagree about what "

@@ -12,7 +12,7 @@
 #include "foundation/build_config/export.h"
 #include "rxe/asset/vfs.h"
 #include "rxe/ecs/world.h"
-#include "rxe/edit/reflect.h"
+#include "rxe/scene/reflect.h"
 #include "rxe/scene/world_streaming.h"
 #include "rxe/world/world_claim.h"
 #include "rxe/world/world_map.h"
@@ -325,7 +325,7 @@ class RX_WORLD_EXPORT WorldStreamer {
   void AdvanceRetirements(Domain domain, DomainState& state);
 
   // The reflected layout hash of a component as this build sees it, memoized.
-  u64 LayoutHash(const edit::ComponentDesc& desc) const;
+  u64 LayoutHash(const scene::ComponentDesc& desc) const;
   bool ResolveSchema(DomainCell& cell, base::String* error) const;
   // Materializes at most `rows` rows; true when the cell is fully published.
   bool MaterializeStep(DomainCell& cell, u32 rows);

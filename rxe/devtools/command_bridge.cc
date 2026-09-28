@@ -1,4 +1,4 @@
-#include "rxe/authoring/command_bridge.h"
+#include "rxe/devtools/command_bridge.h"
 
 #include "base/strings/xstring.h"
 #include "foundation/logging/log.h"
@@ -10,7 +10,7 @@
 #include "rxe/script/script_symbols.h"
 #include "rxe/script/script_value.h"
 
-namespace rx::authoring {
+namespace rx::devtools {
 namespace {
 
 using script::ScriptType;
@@ -247,4 +247,4 @@ CommandBridge::Reply CommandBridge::Invoke(const rpc::RpcContext& ctx,
   return reply;
 }
 
-}  // namespace rx::authoring
+}  // namespace rx::devtools
