@@ -52,7 +52,7 @@ g++ -std=c++20 -O2 pattern_gen.cc -o pattern_gen
 ./pattern_gen placement_pattern.h      # overwrites the checked-in header
 ```
 
-then re-run `placement_test` (test/placement_test.cc), which asserts the
+then re-run `placement_test` (plugins/placement/placement_test.cc), which asserts the
 pattern's guarantees.
 
 ## Achieved quality

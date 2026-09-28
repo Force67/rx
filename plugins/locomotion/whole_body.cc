@@ -100,7 +100,7 @@ LegIkResult SolveLegIk(const Vec3& hip_to_sole, const Vec3& sole_normal_parent, 
   // -alpha about the knee axis and then swinging -Y onto the ankle direction
   // lands the *bent* ankle exactly on the target:
   //   hip = QuatBetween(-Y, a_hat) * QuatFromAxisAngle(-X, -alpha)
-  // FK-verified (test/locomotion_math_test.cc): Rotate(hip, V0) == ankle_target
+  // FK-verified (plugins/locomotion/locomotion_math_test.cc): Rotate(hip, V0) == ankle_target
   // where V0 is the bent chain's ankle in the pre-hip frame.
   f32 cos_alpha = (u * u + d * d - l * l) / (2.0f * u * d);
   cos_alpha = Clampf(cos_alpha, -1.0f, 1.0f);

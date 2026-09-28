@@ -144,7 +144,7 @@ shooter needs. `SphereCast` fills it too.
 
 ## Tested
 
-`test/combat_test.cc` runs headless against real Jolt: rate of fire and fire
+`plugins/combat/combat_test.cc` runs headless against real Jolt: rate of fire and fire
 modes, magazine/reserve and per-round reloading, weapon swap timing, spread
 bloom and aim, view-recoil kick and recovery totals, falloff, head-shot zones,
 armor and regeneration, friendly fire, penetration through thin cover versus

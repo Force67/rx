@@ -40,7 +40,7 @@ light goes after it enters one:
 | Volume sampling, shared | `rxe/render/shaders/geometry/hair_transmittance.hlsli` |
 | Strand shading | `rxe/render/shaders/geometry/hair.ps.hlsl` |
 | Card shading | the `kFlagHair` branch in `shaders/pipeline/mesh.ps.hlsl` |
-| Regression test | `test/hair_bsdf_test.cc` |
+| Regression test | `rxe/render/pipeline/hair_bsdf_test.cc` |
 
 ```sh
 build/linux/runtime/rx --demo strands                    # loose hair, a braid, a ponytail
@@ -225,7 +225,7 @@ narrow lobe is aliasing, not detail.
 
 ## What the tests pin
 
-`test/hair_bsdf_test.cc`, on the CPU mirror:
+`rxe/render/pipeline/hair_bsdf_test.cc`, on the CPU mirror:
 
 1. **Energy.** A non-absorbing fibre reflects 0.93-1.02 of what it receives,
    integrated over the whole **sphere** (a cylinder scatters on every side),

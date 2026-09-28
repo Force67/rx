@@ -8,7 +8,7 @@ and requires the selected coverage to execute.
 From an already configured checkout:
 
 ```sh
-nix develop -c python3 tests/renderer/check.py --runner swrun
+nix develop -c python3 testing/renderer/check.py --runner swrun
 ```
 
 The default `portable` profile builds ten tests and runs them on software
@@ -19,7 +19,7 @@ only its standard library. Configure the build with `RX_BUILD_TESTS=ON` first
 On an NVIDIA machine with the SDKs and D3D12 backend built:
 
 ```sh
-nix develop -c python3 tests/renderer/check.py --runner vkrun --profile all
+nix develop -c python3 testing/renderer/check.py --runner vkrun --profile all
 ```
 
 Profiles can also be selected individually or combined with repeated `--profile`:

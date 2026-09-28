@@ -134,7 +134,7 @@ Fuel / spool / refuel model:
   thrust, applied along the move intent so airborne WASD accelerates faster with
   the pack burning than a free-fall drift.
 
-**Measured behaviour** (from `test/jetpack_test.cc`, headless, over the real
+**Measured behaviour** (from `plugins/character/jetpack_test.cc`, headless, over the real
 Jolt character controller):
 
 | Scenario | Result |

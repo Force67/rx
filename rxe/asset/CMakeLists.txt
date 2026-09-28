@@ -34,3 +34,28 @@ if(NOT MSVC)
   set_source_files_properties(${PROJECT_SOURCE_DIR}/third_party/miniz/miniz.c
     PROPERTIES COMPILE_OPTIONS -w)
 endif()
+
+if(RX_BUILD_TESTS)
+  # Vfs mount points + .rxp pack round trip, pure CPU: no driver or window
+  # needed, runs everywhere plain `ctest` runs.
+  add_executable(vfs_test vfs_test.cc)
+  target_link_libraries(vfs_test PRIVATE rx::asset rx::foundation)
+  add_test(NAME vfs_test COMMAND vfs_test)
+
+  add_executable(asset_database_test asset_database_test.cc)
+  target_link_libraries(asset_database_test PRIVATE rx::asset rx::foundation)
+  add_test(NAME asset_database_test COMMAND asset_database_test)
+
+  # Procedural texture synthesis and the blockout primitives behind the
+  # .rxscene Pattern/Shape components.
+  add_executable(procedural_asset_test procedural_asset_test.cc)
+  target_link_libraries(procedural_asset_test PRIVATE rx::asset rx::foundation)
+  add_test(NAME procedural_asset_test COMMAND procedural_asset_test)
+
+  # BCn block encoders and the import-time compressor, against decoders written
+  # from the format definitions. No gpu involved, so this one really runs under
+  # a plain ctest.
+  add_executable(bc_encode_test bc_encode_test.cc)
+  target_link_libraries(bc_encode_test PRIVATE rx::asset rx::foundation)
+  add_test(NAME bc_encode_test COMMAND bc_encode_test)
+endif()

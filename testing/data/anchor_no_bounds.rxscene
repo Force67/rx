@@ -5,7 +5,7 @@ rxscene 1
 # stand on - which the load has to say, because the alternative is a box left at
 # the origin and an author hunting for why.
 #
-#   rx --validate test/data/anchor_no_bounds.rxscene --json
+#   rx --validate testing/data/anchor_no_bounds.rxscene --json
 
 entity
 Name.value = "Lamp"

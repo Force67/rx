@@ -1,7 +1,7 @@
 // Pure-math locomotion tests (docs/LOCOMOTION.md): the gait clock, capture
 // point, swing trajectory and footstep planner. No Jolt / physics involved.
 // terrain is faked through a synthetic downward probe. Hand-rolled Check/Near
-// harness in the rx test style (see test/camera_test.cc).
+// harness in the rx test style (see rxe/scene/camera_test.cc).
 
 #include <math.h>
 #include <stdio.h>

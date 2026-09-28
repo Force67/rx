@@ -31,3 +31,13 @@ if(ANDROID)
   # log.cc writes to logcat.
   target_link_libraries(rx_foundation PUBLIC log)
 endif()
+
+if(RX_BUILD_TESTS)
+  # CPU-side memory infrastructure test (tracker/arena/chunk pool/small vector/
+  # config). rx_enable_mimalloc gives it the tracked new/delete override so the
+  # tracker assertions run against the real allocation path.
+  add_executable(memory_test memory/memory_test.cc)
+  target_link_libraries(memory_test PRIVATE rx::foundation)
+  rx_enable_mimalloc(memory_test)
+  add_test(NAME memory_test COMMAND memory_test)
+endif()

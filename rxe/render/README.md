@@ -158,11 +158,11 @@ class FooPass {
    `RX_RHI_D3D12` defaults ON. Configure **only inside
    `nix develop`**; a host-compiler-contaminated cache SIGBUSes.
 2. Numerical renderer regression:
-   `nix develop -c python3 tests/renderer/check.py --runner swrun`.
+   `nix develop -c python3 testing/renderer/check.py --runner swrun`.
    This builds and runs the portable tests and rejects missing/skipped coverage.
    Run the relevant hardware profiles too, for example
-   `nix develop -c python3 tests/renderer/check.py --runner vkrun --profile all`
-   on the NVIDIA SDK runner. See [profiles and coverage](../../tests/renderer/README.md).
+   `nix develop -c python3 testing/renderer/check.py --runner vkrun --profile all`
+   on the NVIDIA SDK runner. See [profiles and coverage](../../testing/renderer/README.md).
    For numerical/temporal fixes, add a production-shader or pass regression that
    fails against the original bug and has an independent expected result.
    API validation alone does not prove sampling, motion, exposure, or history
@@ -177,7 +177,7 @@ class FooPass {
    must all render clean frames, with no validation errors under `swrun`
    (lavapipe + validation layers) where it runs.
 6. Scene integration:
-   `nix develop -c python3 tests/feature_gym/tour.py --runner vkrun`.
+   `nix develop -c python3 testing/feature_gym/tour.py --runner vkrun`.
    The tour requires Pillow and saves a process log with the captures. It rejects
    missing/black/uniform frames and validation/SDK evaluation errors. Inspect
    intentional appearance changes too; these smoke checks cannot judge visual

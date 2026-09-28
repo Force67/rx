@@ -21,3 +21,12 @@ if(TARGET rx_render)
     shaders/bubble_wire.vs.hlsl
     shaders/bubble_wire.ps.hlsl)
 endif()
+
+if(RX_BUILD_TESTS AND "net" IN_LIST RX_MODULES)
+  # rx::net / rx::replication unit tests: pure logic (wire codec, per-peer delta streams, bubble
+  # membership + ownership), no GPU, driver or transport needed, so plain
+  # `ctest` runs them everywhere.
+  add_executable(net_test net_test.cc)
+  target_link_libraries(net_test PRIVATE rx::replication rx::net rx::foundation)
+  add_test(NAME net_test COMMAND net_test)
+endif()

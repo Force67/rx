@@ -43,7 +43,7 @@ should not move the picture can be **proven** not to:
 - Never compare by hash: deterministic is not bit-identical.
 - The shipped scenes in `runtime/scenes/` are the reliable numeric surface. The
   feature gym tour is **not**; several of its stops flip bimodally between
-  process launches, and `tests/feature_gym/tour.py` cannot run here at all.
+  process launches, and `testing/feature_gym/tour.py` cannot run here at all.
 - **GPU-backed tests skip with exit 0 with no Vulkan loader**, and plain `ctest`
   has none, so they pass vacuously. Run them under `vkrun` directly to know they
   executed.

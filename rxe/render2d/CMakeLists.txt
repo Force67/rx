@@ -22,3 +22,11 @@ rx_embed_shaders(rx_render2d
   shaders/composite.vs.hlsl
   shaders/composite.ps.hlsl
 )
+
+if(RX_BUILD_TESTS)
+  # rx::render2d CPU tests: camera transforms, isometric picking and tilemap data
+  # rules need no GPU or window, so they run on every build host.
+  add_executable(render2d_test render2d_test.cc)
+  target_link_libraries(render2d_test PRIVATE rx::render2d)
+  add_test(NAME render2d_test COMMAND render2d_test)
+endif()

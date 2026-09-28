@@ -478,7 +478,7 @@ void TestCompressTexture() {
   Check(normal.format == asset::TextureFormat::kBc5, "normal did not pick BC5");
 
   asset::Texture data = MakeTexture(albedo, size, false);
-  Check(asset::CompressTexture(&data, asset::TextureRole::kData, "test/data"),
+  Check(asset::CompressTexture(&data, asset::TextureRole::kData, "testing/data"),
         "data did not compress");
   Check(data.format == asset::TextureFormat::kBc7, "data did not pick BC7");
 

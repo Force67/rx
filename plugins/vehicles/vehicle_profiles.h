@@ -11,7 +11,7 @@ namespace rx::physics {
 // CreateVehicle. Each function returns a complete desc (chassis dims, mass,
 // wheel geometry, drivetrain, engine, gearbox, suspension, tyres, aero and the
 // handling-profile extensions). One line per preset states the intended
-// signature; the measured orderings are proven in test/handling_test.cc.
+// signature; the measured orderings are proven in plugins/vehicles/handling_test.cc.
 //
 // Units follow VehicleDesc: metres/kg/s, +Z forward, +Y up. The presets differ
 // in wheelbase/track/radius and chassis half-extents so a demo scaling its

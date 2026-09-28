@@ -49,7 +49,7 @@ RX_FIXED_DT=0.016666667 RX_SHOWCASE=1 \
   build/linux/runtime/rx --demo featuregym
 ```
 
-`tests/feature_gym/tour.py` wraps that command and rejects missing, black, or
+`testing/feature_gym/tour.py` wraps that command and rejects missing, black, or
 uniform captures.
 
 ## Captures

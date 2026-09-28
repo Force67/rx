@@ -5,7 +5,7 @@ rxscene 1
 # depth counter would turn into a mystery and the chain of files that produced
 # an entity turns into a sentence.
 #
-#   rx --validate test/data/prefab_cycle.rxscene --json
+#   rx --validate testing/data/prefab_cycle.rxscene --json
 
 entity
 Name.value = "Outer"

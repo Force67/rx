@@ -30,7 +30,7 @@ Surface.roughness = 0.85
 entity
 Name.value = "Two boxes"
 Transform.position = -1.1 0 0
-Model.path = "test/data/TwoBoxes.gltf"
+Model.path = "testing/data/TwoBoxes.gltf"
 
 # One mesh out of the same file, placed at this Transform instead of where the
 # file's node put it. The file is imported once and shared with the entity
@@ -39,7 +39,7 @@ entity
 Name.value = "Cobalt box on its own"
 Transform.position = 1.5 0.35 0.6
 Transform.scale = 0.8
-Model.path = "test/data/TwoBoxes.gltf#mesh1"
+Model.path = "testing/data/TwoBoxes.gltf#mesh1"
 
 # A second file, to show the placement is per-file. Its node scales the cube by
 # 100, so the authored scale brings it back to something that fits the frame.
@@ -47,7 +47,7 @@ entity
 Name.value = "Morph cube"
 Transform.position = 1.4 0.45 -0.9
 Transform.scale = 0.45
-Model.path = "test/data/AnimatedMorphCube.glb"
+Model.path = "testing/data/AnimatedMorphCube.glb"
 
 entity
 Name.value = "Key light"

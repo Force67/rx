@@ -76,15 +76,15 @@ physics step, before `PhysicsWorld::Update`.
 
 ## Testing
 
-- `test/locomotion_math_test.cc`: pure math (gait clock, capture point, step
+- `plugins/locomotion/locomotion_math_test.cc`: pure math (gait clock, capture point, step
   clamping, swing trajectory, leg IK), no Jolt required.
-- `test/locomotion_test.cc`: Jolt acceptance tests: rig build sanity, motor
+- `plugins/locomotion/locomotion_test.cc`: Jolt acceptance tests: rig build sanity, motor
   target convergence, standing survival + push recovery, walking speed
   tracking, unrecoverable-push fall, no NaNs anywhere.
 
 ## Status and future work
 
-Measured v1 capabilities (all asserted by `test/locomotion_test.cc` on real Jolt):
+Measured v1 capabilities (all asserted by `plugins/locomotion/locomotion_test.cc` on real Jolt):
 
 - **Standing** is robust: 60 s upright with negligible COM drift.
 - **Push recovery**: 40 kg·m/s torso impulses from all four directions recover

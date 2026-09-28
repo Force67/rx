@@ -24,3 +24,19 @@ if(TARGET rx_render)
     shaders/placement_generate.cs.hlsl
     shaders/placement_transform.cs.hlsl)
 endif()
+
+if(RX_BUILD_TESTS)
+  add_executable(placement_test placement_test.cc)
+  target_link_libraries(placement_test PRIVATE rx::placement rx::foundation)
+  add_test(NAME placement_test COMMAND placement_test)
+endif()
+
+if(RX_BUILD_TESTS AND (RX_RHI_VULKAN OR RX_RHI_D3D12))
+  # Procedural placement: runs the DENSITYMAP/GENERATE/PLACEMENT compute
+  # pipeline offscreen and compares the resulting instances against the CPU
+  # reference generator (same tiles, same seeds). Skips without a driver.
+  add_executable(placement_gpu_test placement_gpu_test.cc)
+  target_link_libraries(placement_gpu_test PRIVATE rx::placement_gpu rx::placement
+    rx::render rx::foundation)
+  add_test(NAME placement_gpu_test COMMAND placement_gpu_test)
+endif()
