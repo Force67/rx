@@ -9,11 +9,11 @@ namespace rx::gpu {
 // build-time property (RX_RHI_*); returning null means "not available
 // on this machine", and Create falls through to the next candidate.
 namespace vk {
-base::UniquePointer<Device> CreateVulkanDevice(const DeviceDesc& desc, Window& window);
+base::UniquePointer<Device> CreateVulkanDevice(const DeviceDesc& desc, ui::Window& window);
 base::UniquePointer<Device> CreateVulkanDeviceOffscreen(const DeviceDesc& desc);
 }
 namespace d3d12 {
-base::UniquePointer<Device> CreateD3D12Device(const DeviceDesc& desc, Window& window);
+base::UniquePointer<Device> CreateD3D12Device(const DeviceDesc& desc, ui::Window& window);
 base::UniquePointer<Device> CreateD3D12DeviceOffscreen(const DeviceDesc& desc);
 }
 namespace null {
@@ -30,7 +30,7 @@ const char* BackendName(Backend backend) {
   return "?";
 }
 
-base::UniquePointer<Device> Device::Create(const DeviceDesc& desc, Window& window) {
+base::UniquePointer<Device> Device::Create(const DeviceDesc& desc, ui::Window& window) {
   base::UniquePointer<Device> device;
   switch (desc.backend) {
     case Backend::kVulkan:

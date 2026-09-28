@@ -356,11 +356,11 @@ class D3D12Device final : public Device {
  public:
   // `window` may be null: an offscreen device has no HWND and never creates a
   // swapchain (frames complete through the swapchainless SubmitFrame overload).
-  static base::UniquePointer<Device> Create(const DeviceDesc& desc, Window* window);
+  static base::UniquePointer<Device> Create(const DeviceDesc& desc, ui::Window* window);
   ~D3D12Device() override;
 
   void WaitIdle() override;
-  bool RecreateSurface(Window& window) override { (void)window; return true; }
+  bool RecreateSurface(ui::Window& window) override { (void)window; return true; }
   void DestroySurface() override {}
   // `hdr` is accepted but not yet honored: the offscreen Linux swapchain has
   // no display pipe, and the DXGI path needs CheckColorSpaceSupport wiring.

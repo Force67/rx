@@ -42,7 +42,7 @@ class DebugUi {
   // `vfs` supplies the default UI font from the engine's rxe://fonts/ archive
   // and the platform tiers the quality preset combo applies; a
   // null one (or a missing archive) falls back to imgui's built-in font.
-  bool Initialize(Window& window, render::Renderer& renderer, asset::Vfs* vfs);
+  bool Initialize(ui::Window& window, render::Renderer& renderer, asset::Vfs* vfs);
   // Call between renderer WaitIdle and renderer Shutdown.
   void Shutdown();
 
@@ -60,7 +60,7 @@ class DebugUi {
 
   // The day/night clock, so the Lighting panel can scrub the time of day and the
   // timescale. Null leaves those controls out.
-  void set_clock(WorldClock* clock) { clock_ = clock; }
+  void set_clock(app::WorldClock* clock) { clock_ = clock; }
   void ToggleVisible() { visible_ = !visible_; }
   void SetVisible(bool v) { visible_ = v; }
   // Hide/show every overlay window at once, for clean captures.
@@ -95,13 +95,13 @@ class DebugUi {
   bool initialized_ = false;
   bool visible_ = true;
   bool status_bar_visible_ = true;
-  Window* window_ = nullptr;  // for the live system-HDR state in the Display tab
+  ui::Window* window_ = nullptr;  // for the live system-HDR state in the Display tab
   // Per-pass GPU timestamps follow overlay visibility; the boot value
   // (RX_GPU_TIMINGS / preset) is latched so a forced run keeps them.
   bool gpu_timings_latched_ = false;
   bool gpu_timings_forced_ = false;
   bool show_demo_ = false;
-  WorldClock* clock_ = nullptr;  // day/night cycle, for the Lighting time controls
+  app::WorldClock* clock_ = nullptr;  // day/night cycle, for the Lighting time controls
   base::String world_status_;     // --world: one status-bar line, empty when off
   int preset_choice_ = 0;  // 0 = custom/hand-tuned, else a QualityPreset combo row
   // The platform tier files (rxe/resources/config) the debug ui edits: the discovered file
@@ -114,7 +114,7 @@ class DebugUi {
   char preset_save_name_[64] = "custom";
   base::String preset_status_;
 #if defined(RX_HAS_IMGUI)
-  render::ImGuiRenderer imgui_renderer_;  // RHI imgui render backend
+  ui::ImGuiRenderer imgui_renderer_;  // RHI imgui render backend
 #endif
   f32 render_scale_ui_ = 1.0f;  // in-progress render-scale slider; committed on release
   f32 frame_times_[150] = {};

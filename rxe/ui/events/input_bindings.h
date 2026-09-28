@@ -10,7 +10,7 @@
 #include "rxe/ui/events/input.h"
 #include "rxe/ui/events/input_actions.h"
 
-namespace rx {
+namespace rx::ui {
 
 // A single physical source that drives an action or axis. For kGamepadAxis,
 // axis_dir picks a half-axis when the binding feeds a digital Action (+1 = the
@@ -186,6 +186,6 @@ bool BindingFromToken(const char* token, Binding* out);
 // Short label for a binding as shown next to an action in the settings list.
 base::String BindingLabel(const Binding& b);
 
-}  // namespace rx
+}  // namespace rx::ui
 
 #endif  // RX_UI_EVENTS_INPUT_BINDINGS_H_

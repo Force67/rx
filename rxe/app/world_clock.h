@@ -8,7 +8,7 @@
 #include "foundation/build_config/types.h"
 #include "foundation/math/math.h"
 
-namespace rx {
+namespace rx::app {
 
 // The in-world clock that drives the day/night cycle. Game time advances with
 // real time scaled by `timescale` (game minutes per real minute); the
@@ -93,6 +93,6 @@ struct SkyLighting {
 };
 RX_APP_EXPORT SkyLighting ComputeSkyLighting(f32 hour);
 
-}  // namespace rx
+}  // namespace rx::app
 
 #endif  // RX_APP_WORLD_CLOCK_H_

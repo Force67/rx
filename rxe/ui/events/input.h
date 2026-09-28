@@ -3,7 +3,7 @@
 
 #include "foundation/build_config/types.h"
 
-namespace rx {
+namespace rx::ui {
 
 // The physical keys the engine can deliver to bindings. Purely device codes;
 // which action each drives is a game decision (see InputMap). Backends
@@ -293,6 +293,6 @@ struct InputState {
   bool button_released(MouseButton b) const { return mouse_released[static_cast<u8>(b)]; }
 };
 
-}  // namespace rx
+}  // namespace rx::ui
 
 #endif  // RX_UI_EVENTS_INPUT_H_

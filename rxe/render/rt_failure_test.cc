@@ -104,7 +104,7 @@ class TestDevice final : public gpu::Device {
   void Free(rx::u64 id) { if (id) CHECK(live.erase(id)); }
 
   void WaitIdle() override {}
-  bool RecreateSurface(Window&) override { return false; }
+  bool RecreateSurface(ui::Window&) override { return false; }
   void DestroySurface() override {}
   base::UniquePointer<gpu::Swapchain> CreateSwapchain(u32, u32, bool, bool) override { return nullptr; }
   MemoryBudget memory_budget() const override { return {}; }

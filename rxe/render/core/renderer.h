@@ -467,7 +467,7 @@ public:
   Renderer();
   ~Renderer();
 
-  bool Initialize(const RendererDesc &desc, Window &window);
+  bool Initialize(const RendererDesc &desc, ui::Window &window);
   // Windowless bringup for offscreen capture (--headless --shot, CI): a
   // surfaceless device (Device::CreateOffscreen) with no presentation surface,
   // so every frame renders into the capture image and completes through the
@@ -751,7 +751,7 @@ private:
 
   // Shared bringup for both entry points. `window` is null for the offscreen
   // path, which also decides the device factory and the swapchain stand-in.
-  bool InitializeCommon(const RendererDesc &desc, Window *window, u32 width, u32 height);
+  bool InitializeCommon(const RendererDesc &desc, ui::Window *window, u32 width, u32 height);
   bool CreateFrameResources();
   void DestroyFrameResources();
   // Fills this slot's DrawRecord arena from view.draws (growing it first) and
@@ -793,7 +793,7 @@ private:
 
   RendererDesc desc_;
   RenderSettings settings_;
-  Window *window_ = nullptr;
+  ui::Window *window_ = nullptr;
   // Windowless run (InitializeOffscreen): there is nothing to present to, so
   // every frame takes the capture path below, armed or not. The warm-up frames
   // a non-black capture needs (sky/atmosphere bakes, temporal history, streamed

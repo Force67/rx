@@ -18,7 +18,7 @@
 #include "shaders/imgui_ps_hlsl.h"
 #include "shaders/imgui_vs_hlsl.h"
 
-namespace rx::render {
+namespace rx::ui {
 namespace {
 
 struct ImGuiPush {
@@ -272,4 +272,4 @@ void ImGuiRenderer::Shutdown() {
   device_ = nullptr;
 }
 
-}  // namespace rx::render
+}  // namespace rx::ui

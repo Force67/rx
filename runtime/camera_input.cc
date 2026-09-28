@@ -37,7 +37,7 @@ void Viewer::UpdateCamera(f32 frame_delta) {
     DriveCamera(frame_delta);
     return;
   }
-  const InputState& input = window_->input();
+  const ui::InputState& input = window_->input();
 
   bool kb = debug_ui_.wants_keyboard();
   bool allow_mouse = !debug_ui_.wants_mouse() || camera_.looking();

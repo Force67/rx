@@ -14,7 +14,7 @@
 #include "rxe/ui/window/wayland_kde_hdr.h"
 #endif
 
-namespace rx {
+namespace rx::ui {
 namespace {
 
 Key TranslateKey(SDL_Scancode code) {
@@ -491,4 +491,4 @@ base::UniquePointer<Window> CreateSdl3Window(const WindowDesc& desc) {
   return base::MakeUnique<Sdl3Window>(window);
 }
 
-}  // namespace rx
+}  // namespace rx::ui

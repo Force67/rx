@@ -91,7 +91,7 @@ void TrimTransparentBorder(ugui::SvgImage& image) {
 
 Splash::~Splash() { Shutdown(); }
 
-bool Splash::Initialize(Window& window, render::Renderer& renderer, asset::Vfs& vfs,
+bool Splash::Initialize(ui::Window& window, render::Renderer& renderer, asset::Vfs& vfs,
                         f32 seconds) {
   window_ = &window;
   renderer_ = &renderer;

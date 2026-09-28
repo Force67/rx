@@ -14,7 +14,7 @@
 #include "foundation/logging/log.h"
 #include "kde-output-device-v2-client-protocol.h"
 
-namespace rx {
+namespace rx::ui {
 namespace {
 
 struct Device {
@@ -162,4 +162,4 @@ bool KdeOutputHdrMonitor::AnyHdrEnabled() {
   return false;
 }
 
-}  // namespace rx
+}  // namespace rx::ui

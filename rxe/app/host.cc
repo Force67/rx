@@ -74,7 +74,7 @@ void ApplyMemoryPlan(const base::String& text) {
 }  // namespace
 
 bool Host::Initialize(const AppConfig& config, Application& app,
-                      base::UniquePointer<Window> window) {
+                      base::UniquePointer<ui::Window> window) {
   config_ = config;
   app_ = &app;
   InitFeatures();              // apply RX_FEATURES overrides before any flag read
@@ -108,7 +108,7 @@ bool Host::Initialize(const AppConfig& config, Application& app,
 
   // --width/--height first, then RX_WIN_W/RX_WIN_H, then the WindowDesc
   // default; the same size answers for a window and for an offscreen target.
-  WindowDesc desc;
+  ui::WindowDesc desc;
   desc.title = GetAppIdentity().title;
   if (WinW > 0) desc.width = static_cast<u32>(WinW.get());
   if (WinH > 0) desc.height = static_cast<u32>(WinH.get());
@@ -120,7 +120,7 @@ bool Host::Initialize(const AppConfig& config, Application& app,
       desc.fullscreen = Fullscreen;
     else if (WinW <= 0 && config_.width == 0)
       desc.fullscreen = IsSteamDeck() || IsGamescope();
-    window_ = window ? base::move(window) : Window::Create(desc);
+    window_ = window ? base::move(window) : ui::Window::Create(desc);
     if (!renderer_.Initialize(config_.renderer, *window_)) return false;
     ApplyRenderPreset();
   } else if (config_.offscreen) {

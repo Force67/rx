@@ -39,7 +39,7 @@ struct HairStrandBinding {
 struct Services {
   Host* host = nullptr;  // RequestQuit / surface lifecycle
 
-  Window* window = nullptr;  // null when headless
+  ui::Window* window = nullptr;  // null when headless
   JobSystem* jobs = nullptr;
   WorldClock* clock = nullptr;  // advanced by the host each frame
 
@@ -56,8 +56,8 @@ struct Services {
 
   // Bindings + the per-frame resolved action snapshot. The host resolves them
   // each pump; the application may rebind (InputMap is serialisable).
-  InputMap* input_map = nullptr;
-  const ActionState* actions = nullptr;
+  ui::InputMap* input_map = nullptr;
+  const ui::ActionState* actions = nullptr;
 
   base::Vector<PhysicsBinding>* physics_bindings = nullptr;
   base::Vector<HairStrandBinding>* hair_bindings = nullptr;

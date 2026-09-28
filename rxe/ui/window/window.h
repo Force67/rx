@@ -15,7 +15,7 @@
 struct ANativeWindow;
 #endif
 
-namespace rx {
+namespace rx::ui {
 
 struct WindowDesc {
   base::String title = "rx";
@@ -155,6 +155,6 @@ class AndroidWindowBase : public Window {
 base::UniquePointer<AndroidWindowBase> CreateAndroidWindow(::ANativeWindow* window);
 #endif
 
-}  // namespace rx
+}  // namespace rx::ui
 
 #endif  // RX_UI_WINDOW_WINDOW_H_

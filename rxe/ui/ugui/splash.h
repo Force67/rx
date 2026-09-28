@@ -48,7 +48,7 @@ class RX_UI_EXPORT Splash {
   // wordmark and lays the plate out. Returns false when the splash cannot draw
   // (no Vulkan backend, ultragui refused to initialize); the host then simply
   // runs without one. `vfs` supplies the text font through fonts://.
-  bool Initialize(Window& window, render::Renderer& renderer, asset::Vfs& vfs,
+  bool Initialize(ui::Window& window, render::Renderer& renderer, asset::Vfs& vfs,
                   f32 seconds = kDefaultSeconds);
 
   // Advances the timeline by one frame. Returns false once the plate is spent
@@ -84,7 +84,7 @@ class RX_UI_EXPORT Splash {
   void BuildDocument();
 
   render::Renderer* renderer_ = nullptr;
-  Window* window_ = nullptr;
+  ui::Window* window_ = nullptr;
 
   // Held by value only once Initialize ran: constructing a UIContext makes it
   // the thread's active WidgetRegistry, and `park_` hands that slot straight

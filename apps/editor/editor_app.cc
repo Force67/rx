@@ -788,7 +788,7 @@ base::String Editor::EntityLabel(ecs::Entity e) const {
 void Editor::OnUpdate(f32 dt) {
   if (!window_)
     return;
-  const InputState &in = window_->input();
+  const ui::InputState &in = window_->input();
 
   f32 inst = dt > 0 ? 1.0f / dt : 0.0f;
   fps_ = fps_ <= 0 ? inst : (fps_ * 0.9f + inst * 0.1f);
@@ -798,7 +798,7 @@ void Editor::OnUpdate(f32 dt) {
     UiFeedInput(dt);
   }
 
-  bool lmb = in.button(MouseButton::kLeft);
+  bool lmb = in.button(ui::MouseButton::kLeft);
   bool lmb_edge = lmb && !prev_lmb_;
   bool over_vp = CursorOverViewport();
 
@@ -843,32 +843,32 @@ void Editor::OnUpdate(f32 dt) {
     RunAutopilot();
 
   // keyboard shortcuts
-  bool ctrl = in.key(Key::kLeftCtrl);
-  auto edge = [&](Key k) {
+  bool ctrl = in.key(ui::Key::kLeftCtrl);
+  auto edge = [&](ui::Key k) {
     bool now = in.key(k);
     bool e = now && !prev_key_[(int)k];
     return e;
   };
-  if (ctrl && edge(Key::kS)) {
+  if (ctrl && edge(ui::Key::kS)) {
     if (scene_path_ == "untitled.rxscene")
       OpenFileDialog();
     else
       DoSave(scene_path_);
   }
-  if (ctrl && edge(Key::kZ))
+  if (ctrl && edge(ui::Key::kZ))
     PerformUndo();
   // rx's Key enum has no Y/N/O; use available keys (R = redo, B = new scene, G
   // = open).
-  if (ctrl && edge(Key::kR))
+  if (ctrl && edge(ui::Key::kR))
     PerformRedo();
-  if (ctrl && edge(Key::kB))
+  if (ctrl && edge(ui::Key::kB))
     NewScene();
-  if (ctrl && edge(Key::kG))
+  if (ctrl && edge(ui::Key::kG))
     OpenFileDialog();
-  if (!ctrl && edge(Key::kEscape) && editor_mode_ != EditorMode::kSelect)
+  if (!ctrl && edge(ui::Key::kEscape) && editor_mode_ != EditorMode::kSelect)
     SetEditorMode(EditorMode::kSelect);
   if (!ctrl && editor_mode_ == EditorMode::kSelect && over_vp &&
-      edge(Key::kDelete)) {
+      edge(ui::Key::kDelete)) {
     if (ecs::Entity e = selection_.primary()) {
       undo_.Push(*world_, edit::MakeDestroyEntity(*world_, e));
       selection_.Clear();
@@ -876,17 +876,17 @@ void Editor::OnUpdate(f32 dt) {
       doc_dirty_ = true;
     }
   }
-  if (!ctrl && editor_mode_ == EditorMode::kSelect && over_vp && edge(Key::kF))
+  if (!ctrl && editor_mode_ == EditorMode::kSelect && over_vp && edge(ui::Key::kF))
     FocusSelection();
 
-  for (int k = 0; k < (int)Key::kCount; ++k)
-    prev_key_[k] = in.key((Key)k);
+  for (int k = 0; k < (int)ui::Key::kCount; ++k)
+    prev_key_[k] = in.key((ui::Key)k);
   prev_lmb_ = lmb;
-  prev_rmb_ = in.button(MouseButton::kRight);
+  prev_rmb_ = in.button(ui::MouseButton::kRight);
 }
 
 void Editor::UpdateCamera(f32 dt) {
-  const InputState &in = window_->input();
+  const ui::InputState &in = window_->input();
   bool typing =
       false; // camera only flies while RMB is held, so text fields are safe
   bool allow_mouse = CursorOverViewport() || camera_.looking();
@@ -909,7 +909,7 @@ void Editor::UpdateCamera(f32 dt) {
 bool Editor::CursorOverViewport() const {
   if (!window_)
     return false;
-  const InputState &in = window_->input();
+  const ui::InputState &in = window_->input();
   const f32 s = window_->pixel_density();
   f32 W = (f32)window_->width(), H = (f32)window_->height();
   return in.mouse_x >= kLeftPanel * s && in.mouse_x <= W - kRightPanel * s &&

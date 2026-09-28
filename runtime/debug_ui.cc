@@ -134,7 +134,7 @@ const render::QualityPreset kPresetValues[] = {
 DebugUi::DebugUi() = default;
 DebugUi::~DebugUi() { Shutdown(); }
 
-bool DebugUi::Initialize(Window& window, render::Renderer& renderer, asset::Vfs* vfs) {
+bool DebugUi::Initialize(ui::Window& window, render::Renderer& renderer, asset::Vfs* vfs) {
   vfs_ = vfs;
   SDL_Window* sdl_window = static_cast<SDL_Window*>(window.native_handles().window);
   gpu::Device* device = renderer.device();
@@ -149,15 +149,15 @@ bool DebugUi::Initialize(Window& window, render::Renderer& renderer, asset::Vfs*
   // offsets; it sets no imgui globals itself (RX_SHARED keeps one context in
   // this app DSO), so the flags are the app's to set.
   io.BackendFlags |= ImGuiBackendFlags_RendererHasTextures | ImGuiBackendFlags_RendererHasVtxOffset;
-  render::ApplyRxImGuiStyle();
+  ui::ApplyRxImGuiStyle();
 
   // Roboto out of the engine's fonts:// archive. imgui's built-in font is the
   // fallback when the archive is absent (an unpacked source tree, say).
   base::Optional<base::Vector<u8>> ttf;
-  if (vfs) ttf = vfs->Read(render::kRxDefaultFontPath);
-  if (!ttf || !render::LoadRxImGuiFont(ttf->data(), ttf->size())) {
+  if (vfs) ttf = vfs->Read(ui::kRxDefaultFontPath);
+  if (!ttf || !ui::LoadRxImGuiFont(ttf->data(), ttf->size())) {
     RX_WARN("debug ui: {} unavailable, using the built-in font",
-            render::kRxDefaultFontPath);
+            ui::kRxDefaultFontPath);
     io.Fonts->AddFontDefault();
   }
 
@@ -1146,7 +1146,7 @@ namespace rx {
 
 DebugUi::DebugUi() = default;
 DebugUi::~DebugUi() = default;
-bool DebugUi::Initialize(Window&, render::Renderer&, asset::Vfs*) { return false; }
+bool DebugUi::Initialize(ui::Window&, render::Renderer&, asset::Vfs*) { return false; }
 void DebugUi::Shutdown() {}
 void DebugUi::BeginFrame() {}
 void DebugUi::Build(render::Renderer&, scene::FlyCamera&, const ecs::World&, f32, render::FrameView*) {}

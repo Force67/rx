@@ -5,7 +5,7 @@
 #include "base/strings/xstring.h"
 #include "foundation/build_config/types.h"
 
-namespace rx::render {
+namespace rx::asset {
 
 // Writes a 3-channel (RGB) 32-bit float, uncompressed, scanline OpenEXR. `rgb`
 // is width*height*3 floats, row-major, top row first. Returns false on a file
@@ -13,6 +13,6 @@ namespace rx::render {
 // ffmpeg) to read the engine's linear-hdr captures as a production container.
 bool WriteExrRgbF32(const base::String& path, u32 width, u32 height, const f32* rgb);
 
-}  // namespace rx::render
+}  // namespace rx::asset
 
 #endif  // RX_RENDER_EXR_WRITE_H_

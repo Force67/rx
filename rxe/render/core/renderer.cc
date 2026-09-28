@@ -442,7 +442,7 @@ private:
 Renderer::Renderer() = default;
 Renderer::~Renderer() = default;
 
-bool Renderer::Initialize(const RendererDesc &desc, Window &window) {
+bool Renderer::Initialize(const RendererDesc &desc, ui::Window &window) {
   return InitializeCommon(desc, &window, window.width(), window.height());
 }
 
@@ -452,7 +452,7 @@ bool Renderer::InitializeOffscreen(const RendererDesc &desc, u32 width,
   return InitializeCommon(desc, nullptr, width, height);
 }
 
-bool Renderer::InitializeCommon(const RendererDesc &desc, Window *window,
+bool Renderer::InitializeCommon(const RendererDesc &desc, ui::Window *window,
                                 u32 width, u32 height) {
 #if defined(RX_SHARED_BUILD)
   // base::Option self-registers through base::InitChain, whose list head is a
@@ -1318,7 +1318,7 @@ void Renderer::WriteHdr() {
                 hdr_path_.compare(hdr_path_.size() - 4, 4, ".exr") == 0;
   bool ok =
       is_exr
-          ? WriteExrRgbF32(hdr_path_, hdr_width_, hdr_height_, rgb.data())
+          ? asset::WriteExrRgbF32(hdr_path_, hdr_width_, hdr_height_, rgb.data())
           : stbi_write_hdr(hdr_path_.c_str(), static_cast<int>(hdr_width_),
                            static_cast<int>(hdr_height_), 3, rgb.data()) != 0;
   if (ok) {

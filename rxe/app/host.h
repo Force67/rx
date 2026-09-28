@@ -32,7 +32,7 @@ class RX_APP_EXPORT Host {
   // brought up (the destructor calls Shutdown), so callers need not Shutdown
   // after a failure. `app` must outlive the host.
   bool Initialize(const AppConfig& config, Application& app,
-                  base::UniquePointer<Window> window = nullptr);
+                  base::UniquePointer<ui::Window> window = nullptr);
   int Run();
   // One iteration of the main loop. Returns false when the host wants to
   // stop. Platforms that own the loop drive this directly instead of the
@@ -77,7 +77,7 @@ class RX_APP_EXPORT Host {
   AppConfig config_;
   Application* app_ = nullptr;
 
-  base::UniquePointer<Window> window_;
+  base::UniquePointer<ui::Window> window_;
   base::UniquePointer<JobSystem> jobs_;
   FrameTimer timer_;
   // The clock driving the day/night cycle; applications derive sun/sky from
@@ -99,8 +99,8 @@ class RX_APP_EXPORT Host {
   base::Vector<f32> hair_positions_;  // strand readback scratch
 
   // Device-agnostic input: bindings + the per-frame resolved action snapshot.
-  InputMap input_map_;
-  ActionState actions_;
+  ui::InputMap input_map_;
+  ui::ActionState actions_;
 
   // Last frame's world matrices keyed by entity, for motion vectors.
   base::UnorderedMap<u64, Mat4> prev_transforms_;

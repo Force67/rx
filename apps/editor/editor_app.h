@@ -250,11 +250,11 @@ private:
 
   app::Services *services_ = nullptr;
   app::Host *host_ = nullptr;
-  Window *window_ = nullptr;
+  ui::Window *window_ = nullptr;
   render::Renderer *renderer_ = nullptr;
   ecs::World *world_ = nullptr;
-  InputMap *input_map_ = nullptr;
-  const ActionState *actions_ = nullptr;
+  ui::InputMap *input_map_ = nullptr;
+  const ui::ActionState *actions_ = nullptr;
   asset::Vfs *vfs_ = nullptr;
   bool headless_ = false;
 
@@ -335,7 +335,7 @@ private:
 
   // input edge tracking
   bool prev_lmb_ = false, prev_rmb_ = false;
-  bool prev_key_[static_cast<int>(Key::kCount)] = {};
+  bool prev_key_[static_cast<int>(ui::Key::kCount)] = {};
 
   // fps smoothing
   f32 fps_ = 0;

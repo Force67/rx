@@ -248,7 +248,7 @@ void CpuDescriptorPool::Free(u32 index) { free_.push_back(index); }
 
 // device creation
 
-base::UniquePointer<Device> D3D12Device::Create(const DeviceDesc& desc, Window* window) {
+base::UniquePointer<Device> D3D12Device::Create(const DeviceDesc& desc, ui::Window* window) {
   auto device = base::UniquePointer<D3D12Device>(new D3D12Device());
   // Unused on linux (offscreen swapchain). Null for an offscreen device, and
   // for any window backend that has no OS handle to give.
@@ -343,7 +343,7 @@ base::UniquePointer<Device> D3D12Device::Create(const DeviceDesc& desc, Window* 
   return device;
 }
 
-base::UniquePointer<Device> CreateD3D12Device(const DeviceDesc& desc, Window& window) {
+base::UniquePointer<Device> CreateD3D12Device(const DeviceDesc& desc, ui::Window& window) {
   return D3D12Device::Create(desc, &window);
 }
 

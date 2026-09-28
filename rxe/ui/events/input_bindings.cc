@@ -16,7 +16,7 @@
 #include <stdlib.h>
 #include <string.h>
 
-namespace rx {
+namespace rx::ui {
 namespace {
 
 // Device token tables. Each is indexed by the matching enum value, so order
@@ -501,4 +501,4 @@ bool InputMap::SaveToIni(const base::String& path) const {
   return fs::WriteTextFile(path, out);
 }
 
-}  // namespace rx
+}  // namespace rx::ui

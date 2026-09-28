@@ -55,7 +55,7 @@ class NullDevice final : public Device {
   NullDevice() { caps_.backend = Backend::kNull; }
 
   void WaitIdle() override {}
-  bool RecreateSurface(Window&) override { return false; }
+  bool RecreateSurface(ui::Window&) override { return false; }
   void DestroySurface() override {}
   base::UniquePointer<Swapchain> CreateSwapchain(u32, u32, bool, bool) override { return nullptr; }
   MemoryBudget memory_budget() const override { return {}; }

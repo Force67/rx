@@ -28,8 +28,8 @@ bool Near(rx::f32 a, rx::f32 b) {
   return ::fabsf(a - b) < 1e-4f;
 }
 
-using rx::TouchState;
-using Phase = rx::TouchState::Phase;
+using rx::ui::TouchState;
+using Phase = rx::ui::TouchState::Phase;
 
 // One finger: down, drag, lift. The lift has to survive a pump so a frame that
 // only samples state still sees the tap end.

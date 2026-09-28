@@ -32,7 +32,7 @@ namespace rx::gpu {
 class CommandList;
 }  // namespace rx::gpu
 
-namespace rx::render {
+namespace rx::ui {
 
 
 class RX_IMGUI_RENDERER_EXPORT ImGuiRenderer {
@@ -92,6 +92,6 @@ class RX_IMGUI_RENDERER_EXPORT ImGuiRenderer {
   base::Vector<ImTextureData*> textures_;
 };
 
-}  // namespace rx::render
+}  // namespace rx::ui
 
 #endif  // RX_RENDER_UTIL_IMGUI_RENDERER_H_

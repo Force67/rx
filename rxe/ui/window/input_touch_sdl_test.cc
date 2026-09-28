@@ -58,14 +58,14 @@ void PushFinger(Uint32 type, SDL_FingerID finger, float nx, float ny, float pres
 int main() {
   ::printf("sdl finger event translation\n");
 
-  rx::WindowDesc desc;
+  rx::ui::WindowDesc desc;
   desc.width = 640;
   desc.height = 480;
   // The point is to prove touch does NOT also move the mouse when this is off,
   // which is what the steamdeck profile relies on.
   desc.touch_emits_mouse = false;
 
-  auto window = rx::Window::Create(desc);
+  auto window = rx::ui::Window::Create(desc);
   if (!window || !window->native_handles().window) {
     ::printf("  no display available, skipping\n");
     return 0;
@@ -91,7 +91,7 @@ int main() {
   PushFinger(SDL_EVENT_FINGER_DOWN, kFinger, 0.25f, 0.5f, 1.0f);
   window->PumpEvents();
 
-  const rx::TouchState& t = window->touch();
+  const rx::ui::TouchState& t = window->touch();
   Check("a contact appeared", t.count == 1);
   if (t.count == 1) {
     Check("x scaled from normalized to pixels", Near(t.points[0].x, 0.25f * w));
@@ -117,7 +117,7 @@ int main() {
   PushFinger(SDL_EVENT_FINGER_MOTION, kFinger, 0.5f, 0.25f, 1.0f);
   window->PumpEvents();
   if (window->touch().count == 1) {
-    const rx::TouchPoint& p = window->touch().points[0];
+    const rx::ui::TouchPoint& p = window->touch().points[0];
     Check("motion moved to the new position", Near(p.x, 0.5f * w) && Near(p.y, 0.25f * h));
     Check("motion delta is the pixel travel",
           Near(p.dx, 0.25f * w) && Near(p.dy, -0.25f * h));

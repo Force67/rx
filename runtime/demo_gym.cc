@@ -565,7 +565,7 @@ void GymDemo::ResetPlayer() {
   if (auto* st = ctx_.world->Get<character::CharacterState>(player_)) st->yaw = spawn_yaw_;
 }
 
-void GymDemo::FillIntent(const InputState& input, const ActionState& actions, bool allow_keyboard,
+void GymDemo::FillIntent(const ui::InputState& input, const ui::ActionState& actions, bool allow_keyboard,
                          bool allow_mouse, f32 dt) {
   auto* intent = ctx_.world->Get<character::CharacterIntent>(player_);
   auto* state = ctx_.world->Get<character::CharacterState>(player_);
@@ -714,25 +714,25 @@ void GymDemo::PickUpNearest() {
   if (best) inventory::PickUpItem(*ctx_.world, *ctx_.physics, catalog_, best, player_);
 }
 
-void GymDemo::Update(f32 dt, const InputState& input, const ActionState& actions,
+void GymDemo::Update(f32 dt, const ui::InputState& input, const ui::ActionState& actions,
                      bool allow_keyboard, bool allow_mouse) {
   if (!player_ || dt <= 0) return;
   ecs::World& world = *ctx_.world;
   physics::PhysicsWorld& phys = *ctx_.physics;
 
   // Cursor release toggle (Tab), so the tuning panel is clickable.
-  if (allow_keyboard && input.key_pressed(Key::kTab)) mouse_captured_ = !mouse_captured_;
+  if (allow_keyboard && input.key_pressed(ui::Key::kTab)) mouse_captured_ = !mouse_captured_;
 
   // Discrete verbs (raw keys; edges from InputState) stay on render cadence: one
   // edge per input pump.
   if (script_.empty() && mouse_captured_ && allow_keyboard) {
-    if (input.key_pressed(Key::kV))
+    if (input.key_pressed(ui::Key::kV))
       character::ToggleCharacterViewMode(world, player_, camera_output_, player_, view_settings_,
                                          {.duration = 0.25f});
-    if (input.key_pressed(Key::kG)) DropCrate();
-    if (input.key_pressed(Key::kF) || input.key_pressed(Key::kT)) PickUpNearest();
-    if (input.key_pressed(Key::kR)) ResetPlayer();
-    if (input.key_pressed(Key::kJ)) {  // toggle the jetpack on / off
+    if (input.key_pressed(ui::Key::kG)) DropCrate();
+    if (input.key_pressed(ui::Key::kF) || input.key_pressed(ui::Key::kT)) PickUpNearest();
+    if (input.key_pressed(ui::Key::kR)) ResetPlayer();
+    if (input.key_pressed(ui::Key::kJ)) {  // toggle the jetpack on / off
       if (auto* ji = world.Get<character::JetpackInput>(player_)) ji->enabled = !ji->enabled;
     }
     if (input.wheel != 0.0f)

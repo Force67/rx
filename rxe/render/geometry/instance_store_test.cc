@@ -22,7 +22,7 @@ class TestDevice final : public gpu::Device {
   ~TestDevice() override = default;
 
   void WaitIdle() override {}
-  bool RecreateSurface(Window&) override { return false; }
+  bool RecreateSurface(ui::Window&) override { return false; }
   void DestroySurface() override {}
   base::UniquePointer<gpu::Swapchain> CreateSwapchain(u32, u32, bool, bool) override { return {}; }
   MemoryBudget memory_budget() const override { return {}; }
