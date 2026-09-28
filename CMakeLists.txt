@@ -641,13 +641,13 @@ if(RX_BUILD_TOOLS AND NOT WIN32 AND "rpc" IN_LIST RX_MODULES)
   rx_set_warnings(rxcall)
 endif()
 
-# Everything the engine ships, packed into one archive: engine/assets (fonts/)
-# and the platform tiers from config/, as rxe://fonts/ and rxe://config/. Games
+# Everything the engine ships, packed into one archive: rxe/resources (fonts/
+# and the platform tiers in config/), as rxe://fonts/ and rxe://config/. Games
 # add their own archives beside it (docs/CONFIG.md).
 if(RX_RXPACK_COMMAND)
   rx_add_archive(rx_engine_archives OUTPUT ${PROJECT_BINARY_DIR}/Data/rx_engine.rxp
-    CONTENT fonts ${CMAKE_CURRENT_SOURCE_DIR}/engine/assets/fonts
-            config ${CMAKE_CURRENT_SOURCE_DIR}/config)
+    CONTENT fonts ${CMAKE_CURRENT_SOURCE_DIR}/rxe/resources/fonts
+            config ${CMAKE_CURRENT_SOURCE_DIR}/rxe/resources/config)
   rx_finish_content_staging()
 endif()
 
@@ -893,10 +893,10 @@ if(RX_BUILD_TESTS)
   endif()
 
   # Platform config: include and section rules, every shipped tier in
-  # rx/config resolving cleanly, and the android tier detection.
+  # rxe/resources/config resolving cleanly, and the android tier detection.
   add_executable(platform_config_test test/platform_config_test.cc)
   target_compile_definitions(platform_config_test PRIVATE
-    RX_CONFIG_SOURCE_DIR="${CMAKE_CURRENT_SOURCE_DIR}/config")
+    RX_CONFIG_SOURCE_DIR="${CMAKE_CURRENT_SOURCE_DIR}/rxe/resources/config")
   target_link_libraries(platform_config_test PRIVATE rx::app)
   add_test(NAME platform_config_test COMMAND platform_config_test)
 

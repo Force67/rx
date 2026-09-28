@@ -323,5 +323,5 @@ if(TARGET rx_imgui)
   # The debug ui lists, loads and saves the platform tiers in the source tree,
   # so an edit lands in the files that ship; RX_PRESETS_DIR points it elsewhere.
   target_compile_definitions(rx PRIVATE
-    RX_PRESETS_DIR_DEFAULT="${PROJECT_SOURCE_DIR}/config")
+    RX_PRESETS_DIR_DEFAULT="${PROJECT_SOURCE_DIR}/rxe/resources/config")
 endif()

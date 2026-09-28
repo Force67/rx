@@ -104,7 +104,7 @@ class DebugUi {
   WorldClock* clock_ = nullptr;  // day/night cycle, for the Lighting time controls
   base::String world_status_;     // --world: one status-bar line, empty when off
   int preset_choice_ = 0;  // 0 = custom/hand-tuned, else a QualityPreset combo row
-  // The platform tier files (rx/config) the debug ui edits: the discovered file
+  // The platform tier files (rxe/resources/config) the debug ui edits: the discovered file
   // list (lazy-scanned, rescannable), the combo selection, the save-as name
   // buffer and the last load/save status line.
   base::Vector<base::String> preset_files_;

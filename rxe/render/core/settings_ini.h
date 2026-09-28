@@ -11,7 +11,7 @@ namespace rx::render {
 // Text (de)serialization of RenderSettings as a flat INI: "key = value" lines
 // grouped under cosmetic [section] headers, enums written as lowercase names.
 // The quality tiers carry these keys in the [render.<group>] sections of their
-// platform config files (rx/config/<tier>.ini); the debug ui loads and saves the
+// platform config files (rxe/resources/config/<tier>.ini); the debug ui loads and saves the
 // same format.
 //
 // The persistent quality/performance knobs and the [weather] group (so a saved

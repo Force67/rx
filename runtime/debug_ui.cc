@@ -51,7 +51,7 @@ namespace {
 base::Option<bool> HideDebugUi{"hide.debug.ui", false, "RX_HIDE_DEBUG_UI"};
 
 // Override for the platform tier directory the debug ui edits; defaults to the
-// compiled-in rx/config source path.
+// compiled-in rxe/resources/config source path.
 base::Option<const char*> PresetsDirOpt{"presets.dir", nullptr, "RX_PRESETS_DIR"};
 
 // Directory holding the platform tier files: RX_PRESETS_DIR, else the
@@ -299,7 +299,7 @@ void DebugUi::Build(render::Renderer& renderer, scene::FlyCamera& camera, const 
         }
       }
 
-      // The platform tier files in the source tree (rx/config): Load applies a
+      // The platform tier files in the source tree (rxe/resources/config): Load applies a
       // file's render keys to the live settings; Save writes the current ones
       // as [render.*] sections. Saving over a tier drops its includes and its
       // [options] / [memory.*] sections, so save to a new name and merge.
