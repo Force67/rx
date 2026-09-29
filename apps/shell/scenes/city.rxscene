@@ -15,8 +15,8 @@ rxscene 1
 #   Stretch reaches all of them (see SceneStretch), so one prefab yields as
 #   many silhouettes as it has instances.
 #
-#   rx --validate runtime/scenes/city.rxscene
-#   rx --scene runtime/scenes/city.rxscene --headless --shot out.png \
+#   rx --validate apps/shell/scenes/city.rxscene
+#   rx --scene apps/shell/scenes/city.rxscene --headless --shot out.png \
 #      --shot-frames 20 --width 1280 --height 720
 
 # Street level, off the centre line so the towers rake and the cross street

@@ -34,7 +34,7 @@ stroke-font billboards in the debug-line pass, no font atlas).
 Regenerate the binary inputs after changing the generator:
 
 ```sh
-python3 runtime/feature_gym/generate_assets.py
+python3 apps/shell/feature_gym/generate_assets.py
 ```
 
 CMake copies these assets beside the viewer binary and the Nix package includes
@@ -46,7 +46,7 @@ Run the deterministic camera pass and capture every stop:
 ```sh
 RX_FIXED_DT=0.016666667 RX_SHOWCASE=1 \
   RX_SHOWCASE_SHOTS=build/feature-gym-shots RX_SHOWCASE_QUIT=1 \
-  build/linux/runtime/rx --demo featuregym
+  build/linux/apps/shell/rx --demo featuregym
 ```
 
 `testing/feature_gym/tour.py` wraps that command and rejects missing, black, or

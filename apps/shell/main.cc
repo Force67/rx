@@ -41,7 +41,7 @@ void PrintUsage() {
   RX_INFO("  --dump-schema         print the .rxscene component schema as json and exit");
   RX_INFO("  --dump-commands       print the live command schema as json and exit");
   RX_INFO("  --dump-materials [dir]  print the material palette as json and exit (default");
-  RX_INFO("                        runtime/scenes/materials; each entry is a Prefab.path)");
+  RX_INFO("                        apps/shell/scenes/materials; each entry is a Prefab.path)");
   RX_INFO("  --validate <path>     structurally check a .rxscene (no gpu); nonzero exit on an");
   RX_INFO("                        error-level finding. --json for a machine-readable report");
   RX_INFO("  --json                emit --validate's report as json instead of text");
@@ -157,7 +157,7 @@ int main(int argc, char** argv) {
   // Where this repo's palette lives, so asking what materials exist is one word
   // from the source root; the optional argument is for a project that ships its
   // own directory of presets.
-  base::String materials_dir = "runtime/scenes/materials";
+  base::String materials_dir = "apps/shell/scenes/materials";
   base::String validate_path;
   bool json = false;
 

@@ -7,7 +7,7 @@ runtime validation + visualization environment for the feedback controller: you
 watch the 13-body ragdoll balance, step, walk, fall and ground itself while the
 full `DebugState` is drawn on top as a line overlay.
 
-Everything lives in `runtime/demo_puppet.{h,cc}`. It touches no controller
+Everything lives in `apps/shell/demo_puppet.{h,cc}`. It touches no controller
 internals: it drives `rx::locomotion::LocomotionController` through its public
 API (`Initialize` / `Tick` / `mode()` / `measurements()` / `contacts()` /
 `debug()` / `rig()`) exactly as a game would. The registry wiring is the usual
@@ -19,7 +19,7 @@ puppet keeps the normal free-fly camera).
 Run it on a real GPU:
 
 ```
-DISPLAY=:10 vkrun ./build/linux/runtime/rx --demo puppet
+DISPLAY=:10 vkrun ./build/linux/apps/shell/rx --demo puppet
 ```
 
 ## Fixed-step cadence (no double-stepping)

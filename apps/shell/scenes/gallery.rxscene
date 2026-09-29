@@ -7,8 +7,8 @@ rxscene 1
 # in degrees. The shell and the colonnade stay square, because a hall that is
 # out of true reads as a bug rather than as a composition.
 #
-#   rx --validate runtime/scenes/gallery.rxscene
-#   rx --scene runtime/scenes/gallery.rxscene --headless --shot out.png \
+#   rx --validate apps/shell/scenes/gallery.rxscene
+#   rx --scene apps/shell/scenes/gallery.rxscene --headless --shot out.png \
 #      --shot-frames 20 --width 1280 --height 720
 
 # Off the centre line and looking across the hall rather than down it. Dead

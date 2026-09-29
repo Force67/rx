@@ -5,7 +5,7 @@ rxscene 1
 # procedural except the ground the models stand on.
 #
 # Paths are relative to the working directory, so run this from the repo root:
-#   rx --scene runtime/scenes/model.rxscene --headless --shot out.png \
+#   rx --scene apps/shell/scenes/model.rxscene --headless --shot out.png \
 #      --shot-frames 20 --width 960 --height 540
 #
 # `rx --dump-schema` prints every component and prop this file may use.

@@ -1,4 +1,4 @@
-engine/assets/fonts/**/*.ttf binary
-runtime/feature_gym/assets/*.rgba binary
-runtime/feature_gym/assets/*.wav binary
-runtime/feature_gym/screenshots/*.jpg binary
+rxe/resources/fonts/**/*.ttf binary
+apps/shell/feature_gym/assets/*.rgba binary
+apps/shell/feature_gym/assets/*.wav binary
+apps/shell/feature_gym/screenshots/*.jpg binary

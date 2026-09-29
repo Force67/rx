@@ -3,9 +3,9 @@ rxscene 1
 # A world authored to be streamed, not loaded whole: 6x6 cells of 32 m (192 m a
 # side), of which the viewer's streaming bubble holds a fraction. Bake and run:
 #
-#   rxworld bake runtime/scenes/streamworld.rxscene world.rxp \
+#   rxworld bake apps/shell/scenes/streamworld.rxscene world.rxp \
 #           --name streamworld --cell-size 32
-#   rx --world <world.rxp>       (the build does both; see runtime/CMakeLists.txt)
+#   rx --world <world.rxp>       (the build does both; see apps/shell/CMakeLists.txt)
 #
 # Two kinds of thing, sorted by the cook into two domains:
 #

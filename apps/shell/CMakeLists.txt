@@ -213,7 +213,7 @@ if(RX_BUILD_TESTS)
     WORKING_DIRECTORY ${PROJECT_SOURCE_DIR})
   set_tests_properties(dump_materials PROPERTIES
     PASS_REGULAR_EXPRESSION
-      "\"name\": \"brushed_aluminium\", \"path\": \"runtime/scenes/materials/brushed_aluminium.rxscene\"")
+      "\"name\": \"brushed_aluminium\", \"path\": \"apps/shell/scenes/materials/brushed_aluminium.rxscene\"")
 
   add_test(NAME dump_materials_missing_directory
     COMMAND rx --dump-materials ${PROJECT_SOURCE_DIR}/testing/data/no_such_palette
@@ -328,7 +328,7 @@ endif()
 
 if(RX_BUILD_TESTS AND TARGET viewer_scene_authoring)
   # The .rxscene authoring passes themselves (viewer_scene_authoring, the
-  # viewer's own library in runtime/). `rx --validate` covers what a scene
+  # viewer's own library in apps/shell/). `rx --validate` covers what a scene
   # REFUSES; this covers what the numbers come out as, which no exit code can
   # show. Null renderer throughout, so it needs no device even though it links
   # rx::render for the signatures.

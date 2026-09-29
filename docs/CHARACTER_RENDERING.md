@@ -27,7 +27,7 @@ reference / colour pipeline
 ```sh
 tools/get_head_scan.sh          # a photogrammetry human, 8K albedo + normal
 cmake --build build/linux
-build/linux/runtime/rx --demo lookdev
+build/linux/apps/shell/rx --demo lookdev
 ```
 
 The bench opens on the frozen rig. Arrow keys cycle OLAT lights (left/right) and
@@ -41,7 +41,7 @@ resets to the region presets.
 | CPU side, presets, tiers, CPU mirror | `rxe/render/pipeline/human_material.{h,cc}` |
 | Authored parameters | `asset::Material::HumanParams` (`rxe/asset/material.h`) |
 | Reference comparison pass | `rxe/render/post/reference_compare.{h,cc}` |
-| The bench | `runtime/demo_lookdev.{h,cc}` (`--demo lookdev`) |
+| The bench | `apps/shell/demo_lookdev.{h,cc}` (`--demo lookdev`) |
 | Residual fitting | `tools/fit_residual.py` |
 | Regression test | `rxe/render/pipeline/human_brdf_test.cc` |
 
@@ -63,9 +63,9 @@ worthless after it. It is defended in two places:
 
   ```sh
   RX_LOOKDEV_NEUTRAL=1 RX_UI_SHOT=/tmp/a.png RX_UI_SHOT_FRAMES=90 \
-    build/linux/runtime/rx --demo lookdev
+    build/linux/apps/shell/rx --demo lookdev
   RX_LOOKDEV_HUMAN=0   RX_UI_SHOT=/tmp/b.png RX_UI_SHOT_FRAMES=90 \
-    build/linux/runtime/rx --demo lookdev
+    build/linux/apps/shell/rx --demo lookdev
   # /tmp/a.png and /tmp/b.png must differ by at most 8-bit rounding.
   ```
 
@@ -317,7 +317,7 @@ only if the summed error actually drops.
 
 ```sh
 RX_FIXED_DT=0.0166667 RX_LOOKDEV_SHOTS=build/lookdev-shots RX_LOOKDEV_QUIT=1 \
-  build/linux/runtime/rx --demo lookdev
+  build/linux/apps/shell/rx --demo lookdev
 ```
 
 Walks the full matrix (14 lights × 7 cameras = 98 frames) and exits. The rig is

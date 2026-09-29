@@ -4,7 +4,7 @@
 by an agent, and verified without opening a window. Everything below is
 reachable from a shell.
 
-Worked examples, smallest first: `runtime/scenes/cornell.rxscene`,
+Worked examples, smallest first: `apps/shell/scenes/cornell.rxscene`,
 `showcase.rxscene`, `model.rxscene`, `gallery.rxscene`, `city.rxscene`.
 
 ## The loop
@@ -45,7 +45,7 @@ distance with nothing in it.
   `Pattern` without restating geometry, but declaring any part of `Shape`
   replaces the prefab's `Shape` entirely, which is why proportions live in
   `Stretch` (below) rather than in `Shape`.
-- **The material palette** (`runtime/scenes/materials/`) is 30 named presets,
+- **The material palette** (`apps/shell/scenes/materials/`) is 30 named presets,
   instanced exactly like any other prefab. Prefer `Prefab.path =
   "materials/steel.rxscene"` over guessing PBR floats.
 - **`Anchor.target` / `Anchor.mode` / `Anchor.offset`** places an entity against

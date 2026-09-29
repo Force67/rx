@@ -128,5 +128,5 @@ cmake --build build/linux --target body_jiggle_example
 build/linux/examples/body_jiggle_example
 ```
 
-See [`examples/body_jiggle.cc`](../examples/body_jiggle.cc) for the complete
+See [`apps/body_jiggle/main.cc`](../apps/body_jiggle/main.cc) for the complete
 per-frame integration.

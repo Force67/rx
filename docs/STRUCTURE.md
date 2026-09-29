@@ -87,7 +87,7 @@ plugins/              optional, enabled per app (Chromium: components/)
 apps/                 every executable, one directory each (Chromium: chrome/, content_shell)
   shell/              the reference host, today's viewer
     demos/            the demo scenes and the feature gym
-    scenes/  shaders/  assets/ (sponza, usd, openpbr downloads)
+    scenes/  shaders/
   editor/             the default editor: main.cc, rxe/editor + every first-party plugin
   body_jiggle/        today's examples/
   rxpack/  rxworld/  rxdiff/  rxcall/
@@ -238,7 +238,7 @@ Paths on the right are under `rxe/` unless they start with `plugins/` or `apps/`
 | `runtime/scenes`, `runtime/shaders` | `apps/shell/scenes`, `apps/shell/shaders` |
 | `apps/editor/main.cc` | `apps/editor/main.cc` |
 | `examples/body_jiggle.cc` | `apps/body_jiggle/` |
-| `assets/` (sponza, usd, openpbr downloads) | `apps/shell/assets/` |
+| `assets/` (sponza, usd, openpbr downloads) | stays at the root: 1.7 GB, untracked, fetched by `tools/get_*.sh`; moving it would strand every existing download |
 | `test/*_test.cc` | next to the unit they test, e.g. `test/aircraft_test.cc` becomes `plugins/vehicles/aircraft_test.cc` |
 | `test/data`, `test/shaders`, `tests/renderer`, `tests/feature_gym` | `testing/` |
 | `tools/rx*.cc` | `apps/rx*/main.cc` |
@@ -426,9 +426,13 @@ and after.
      `GetVulkanHandles`, and the `linux-dev` preset.
    - 5b (done): per-module feature flags on the single registry;
      `features.def` and its three never-read render flags are gone.
-6. **Plugins and apps.** Add `RX_PLUGIN`, `PluginRegistry` and `rx_add_app`.
-   `runtime/` becomes `apps/shell/`, the tools move into `apps/`, and
-   `EngineContext` goes away.
+6. **Plugins and apps.**
+   - 6a (done): `runtime/` becomes `apps/shell/`, the tools `apps/rxpack`,
+     `rxworld`, `rxdiff`, `rxcall`, and `examples/` `apps/body_jiggle`.
+   - 6b: `RX_PLUGIN`, `PluginRegistry` and `rx_add_app`.
+   - 6c: `rxe/editor` and a thin `apps/editor`, per-game editors.
+   - 6d: `EngineContext` goes away; the demos move to `apps/shell/demos` in
+     `rx::shell`.
 7. **Renderer features.** A separate design note for `RenderFeature`, then split
    `renderer.cc`.
 

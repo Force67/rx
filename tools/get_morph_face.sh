@@ -2,7 +2,7 @@
 # Downloads the CC0 MPFB example avatar (~35 MB glb, a MakeHuman-based head
 # with 66 ARKit-style facial blend shapes) from the TalkingHead repository
 # into assets/morphface/. Run once, then:
-#   build/linux/runtime/rx --gltf assets/morphface/mpfb.glb
+#   build/linux/apps/shell/rx --gltf assets/morphface/mpfb.glb
 # The viewer sweeps the expression targets live (see EmitMorphedInstances).
 set -euo pipefail
 

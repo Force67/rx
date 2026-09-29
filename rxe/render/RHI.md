@@ -100,7 +100,7 @@ unavailable), which the existing option plumbing already handles.
 Implemented in `d3d12/` (device, command list, offscreen/DXGI swapchain,
 convert tables) and validated end to end on Linux by running the whole engine
 over vkd3d (WineHQ vkd3d 2.0, the native D3D12-on-Vulkan library, provided by
-the nix dev shell). `vkrun env RX_RHI=d3d12 ./build/nix/runtime/rx
+the nix dev shell). `vkrun env RX_RHI=d3d12 ./build/nix/apps/shell/rx
 --demo materials --no-rt` renders the materials demo pixel-identical to the
 Vulkan backend outside the stochastic cloud layer (MAE < 1/255, p99 = 0
 against `RX_RHI=vulkan` with clouds pinned off; the demo is not run-to-run
@@ -222,7 +222,7 @@ nix develop            # dev shell provides vkd3d 2.0 (libvkd3d, libvkd3d-utils)
 cmake -DRX_RHI_D3D12=ON build/nix   # defaults ON when vkd3d is found
 ninja -C build/nix rx
 vkrun env RX_RHI=d3d12 RX_UI_SHOT=/tmp/shot.png RX_UI_SHOT_FRAMES=45 \
-  ./build/nix/runtime/rx --demo materials --no-rt
+  ./build/nix/apps/shell/rx --demo materials --no-rt
 ```
 
 vkd3d findings (2026-07): unsigned DXIL is accepted; the highest usable

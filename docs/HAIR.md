@@ -43,8 +43,8 @@ light goes after it enters one:
 | Regression test | `rxe/render/pipeline/hair_bsdf_test.cc` |
 
 ```sh
-build/linux/runtime/rx --demo strands                    # loose hair, a braid, a ponytail
-RX_DEBUG_VIEW=24 build/linux/runtime/rx --demo strands   # the fibre count
+build/linux/apps/shell/rx --demo strands                    # loose hair, a braid, a ponytail
+RX_DEBUG_VIEW=24 build/linux/apps/shell/rx --demo strands   # the fibre count
 ```
 
 ## One evaluator, cards and strands

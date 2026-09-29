@@ -6,7 +6,7 @@ cut from the same `WeaponDef` struct, and shoots targets with head and torso
 hitboxes. It is the tuning environment for weapon feel and the end-to-end
 exercise of every combat system.
 
-Everything lives in `runtime/demo_shooter.{h,cc}`. It touches no engine
+Everything lives in `apps/shell/demo_shooter.{h,cc}`. It touches no engine
 internals: it drives `rx::combat`, `rx::character` and the scene camera rig
 through their public APIs exactly as a game would. The registry wiring is the
 usual few lines: a `shooter_` member on `DemoScenes`, a dispatch arm in
@@ -17,7 +17,7 @@ owns its camera + input, like the gym) a `shooter()->Update(...)` route in
 Run it on a real GPU:
 
 ```
-vkrun ./build/linux/runtime/rx --demo shooter
+vkrun ./build/linux/apps/shell/rx --demo shooter
 ```
 
 ## Controls
@@ -99,7 +99,7 @@ gym's `RX_GYM_SCRIPT`). Pair it with the viewer's capture hook:
 
 ```
 RX_SHOOTER_AUTOFIRE=1 RX_UI_SHOT=/tmp/shot.png RX_UI_SHOT_FRAMES=140 \
-  vkrun ./build/linux/runtime/rx --demo shooter
+  vkrun ./build/linux/apps/shell/rx --demo shooter
 ```
 
 `RX_FIXED_DT` overrides the simulation step, as in the gym.

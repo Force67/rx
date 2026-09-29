@@ -1,8 +1,11 @@
 # rx
 
 A real-time rendering engine. C++23, Vulkan and D3D12 behind an RHI, HLSL/Slang
-shaders. Modules are top-level directories: `engine/<domain>`, `runtime/`
-(viewer), `apps/` (editor).
+shaders. Code lives in four folders, each depending only on the ones before it:
+`foundation/` (what rx adds to equilibrium base), `rxe/` (the engine modules),
+`plugins/` (optional modules a game enables) and `apps/` (the viewer in
+`apps/shell`, the editor, the tools). [docs/STRUCTURE.md](docs/STRUCTURE.md) has
+the rules; `tools/checkincludes` enforces them as a ctest.
 
 ## Building and running
 
@@ -40,12 +43,12 @@ Captures are deterministic (`--shot` implies a lockstep clock), so a change that
 should not move the picture can be **proven** not to:
 
 ```sh
-./build/linux/rxdiff before.png after.png     # rmse limit 0.002, measured floor 0.00055
+./build/linux/apps/rxdiff/rxdiff before.png after.png     # rmse limit 0.002, measured floor 0.00055
 ```
 
 - Diff at **20+ frames**. At 8, a busy scene's own noise can exceed the limit.
 - Never compare by hash: deterministic is not bit-identical.
-- The shipped scenes in `runtime/scenes/` are the reliable numeric surface. The
+- The shipped scenes in `apps/shell/scenes/` are the reliable numeric surface. The
   feature gym tour is **not**; several of its stops flip bimodally between
   process launches, and `testing/feature_gym/tour.py` cannot run here at all.
 - **GPU-backed tests skip with exit 0 with no Vulkan loader**, and plain `ctest`
