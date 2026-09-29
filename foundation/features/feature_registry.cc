@@ -2,47 +2,28 @@
 
 #include <stdlib.h>
 
+#include "base/strings/string_ref.h"
 #include "foundation/logging/log.h"
 
 namespace rx {
 namespace {
 
-// The one and only table. Each entry is direct-initialized in place, so
-// base::Feature's deleted copy/move is never needed. Non-const because the env
-// override flips `enabled`. This object is referenced by InitFeatures() which
-// runs from engine startup, so the linker keeps it: no static-init stripping.
-base::Feature g_features[] = {
-#define RX_FEATURE(id, name, enabled) {name, enabled},
-#include "base/strings/string_ref.h"
-#include "foundation/features/features.def"
-#undef RX_FEATURE
-};
-
-constexpr unsigned kCount = static_cast<unsigned>(FeatureId::kCount);
-static_assert(sizeof(g_features) / sizeof(g_features[0]) == kCount,
-              "features.def and FeatureId disagree on the flag count");
-
-// Flip the flag whose name matches `name`. Returns false if there is no such
-// flag.
+// Flip the flag whose name matches `name`. Returns false if no flag in this
+// binary carries it.
 bool ApplyOne(base::StringRef name, bool enabled) {
-  for (auto& f : g_features) {
-    if (name == f.name) {
-      f.enabled = enabled;
-      return true;
+  bool found = false;
+  base::Feature::VisitAll([&](const base::Feature* feature) {
+    if (name == feature->name) {
+      // The chain hands out const pointers; flags are mutable globals, which is
+      // the one thing this function exists to write.
+      const_cast<base::Feature*>(feature)->enabled = enabled;
+      found = true;
     }
-  }
-  return false;
+  });
+  return found;
 }
 
 }  // namespace
-
-bool FeatureEnabled(FeatureId id) {
-  return g_features[static_cast<unsigned>(id)].enabled;
-}
-
-base::Span<base::Feature> Features() {
-  return base::Span<base::Feature>(g_features);
-}
 
 void InitFeatures() {
   const char* spec = ::getenv("RX_FEATURES");
