@@ -1,5 +1,5 @@
-#ifndef RX_RUNTIME_SCENE_VALIDATE_H_
-#define RX_RUNTIME_SCENE_VALIDATE_H_
+#ifndef RX_APPS_SHELL_SCENE_VALIDATE_H_
+#define RX_APPS_SHELL_SCENE_VALIDATE_H_
 
 #include "base/strings/xstring.h"
 
@@ -13,13 +13,13 @@
 // It lives beside scene_authoring.cc because it validates that file's
 // components against that file's builder, and shares its tables so the two
 // cannot disagree about what a scene may say.
-namespace rx {
+namespace rx::shell {
 
 // Loads `path` and reports every structural problem it finds, as a
 // compiler-style human report or (`json`) as one object on stdout. False when
 // any error-level finding fired; warnings alone still return true.
 bool ValidateSceneFile(const base::String& path, bool json);
 
-}  // namespace rx
+}  // namespace rx::shell
 
-#endif  // RX_RUNTIME_SCENE_VALIDATE_H_
+#endif  // RX_APPS_SHELL_SCENE_VALIDATE_H_

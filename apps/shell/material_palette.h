@@ -1,10 +1,10 @@
-#ifndef RX_RUNTIME_MATERIAL_PALETTE_H_
-#define RX_RUNTIME_MATERIAL_PALETTE_H_
+#ifndef RX_APPS_SHELL_MATERIAL_PALETTE_H_
+#define RX_APPS_SHELL_MATERIAL_PALETTE_H_
 
 #include "base/strings/xstring.h"
 
 
-namespace rx {
+namespace rx::shell {
 
 // Prints the material palette in `dir` as json, one entry per .rxscene file:
 // the name an author picks a material by, the path a Prefab.path names it with,
@@ -23,6 +23,6 @@ namespace rx {
 // directory with no presets in it, and a preset that does not load.
 bool DumpMaterialPalette(const base::String& dir);
 
-}  // namespace rx
+}  // namespace rx::shell
 
-#endif  // RX_RUNTIME_MATERIAL_PALETTE_H_
+#endif  // RX_APPS_SHELL_MATERIAL_PALETTE_H_

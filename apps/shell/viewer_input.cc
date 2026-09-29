@@ -7,7 +7,7 @@
 // controls.ini, the digital->analog movement folds, and the built-in
 // keyboard/mouse + gamepad bindings. All of this is a game decision, so it lives
 // here rather than in the engine.
-namespace rx {
+namespace rx::shell {
 
 void RegisterViewerInput(ui::InputMap& map) {
   map.RegisterAction(Action::kMoveForward, "move_forward");
@@ -76,4 +76,4 @@ scene::FlyCameraInput FlyCameraIntent(const ui::ActionState& actions) {
   return fly;
 }
 
-}  // namespace rx
+}  // namespace rx::shell

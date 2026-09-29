@@ -1,5 +1,5 @@
-#ifndef RX_RUNTIME_SHOWCASE_CAMERA_H_
-#define RX_RUNTIME_SHOWCASE_CAMERA_H_
+#ifndef RX_APPS_SHELL_SHOWCASE_CAMERA_H_
+#define RX_APPS_SHELL_SHOWCASE_CAMERA_H_
 
 
 #include <base/containers/vector.h>
@@ -7,7 +7,7 @@
 #include "base/strings/xstring.h"
 #include "foundation/math/math.h"
 
-namespace rx {
+namespace rx::shell {
 
 struct ShowcasePose {
   Vec3 eye{};
@@ -47,6 +47,6 @@ class ShowcaseCamera {
   f32 total_ = 0;
 };
 
-}  // namespace rx
+}  // namespace rx::shell
 
-#endif  // RX_RUNTIME_SHOWCASE_CAMERA_H_
+#endif  // RX_APPS_SHELL_SHOWCASE_CAMERA_H_

@@ -86,7 +86,7 @@ void PrintJsonString(const char* s) {
 // so it can never drift from what the loader accepts. This is the API doc for
 // anything writing scene files by hand.
 void DumpSchema() {
-  rx::RegisterSceneComponents();
+  rx::shell::RegisterSceneComponents();
   ::printf("{\n  \"components\": [\n");
   const auto components = rx::scene::AllComponents();
   for (size_t i = 0; i < components.size(); ++i) {
@@ -145,7 +145,7 @@ void DumpCommands() {
 }  // namespace
 
 int main(int argc, char** argv) {
-  rx::EngineConfig config;
+  rx::shell::ViewerConfig config;
   rx::app::AppConfig app_config;
   app_config.id = "dyrcg9826wzw53y6vr0g0cjx";
   app_config.name = "rx";
@@ -219,10 +219,10 @@ int main(int argc, char** argv) {
     return 0;
   }
   // Content rather than schema, so this one loads files and can fail.
-  if (dump_materials) return rx::DumpMaterialPalette(materials_dir) ? 0 : 1;
+  if (dump_materials) return rx::shell::DumpMaterialPalette(materials_dir) ? 0 : 1;
   // Same category: the structural checks touch no device and no window, which
   // is what lets this run on every edit and in CI.
-  if (!validate_path.empty()) return rx::ValidateSceneFile(validate_path, json) ? 0 : 1;
+  if (!validate_path.empty()) return rx::shell::ValidateSceneFile(validate_path, json) ? 0 : 1;
 
   if (config.demo_scene == "featuregym" || config.demo_scene == "feature-gym") {
     config.renderer.software_gi_fallback = true;
@@ -259,7 +259,7 @@ int main(int argc, char** argv) {
   if (verify_shot) rx::fs::Remove(config.shot_path);
 
 
-  rx::Viewer viewer(config);
+  rx::shell::Viewer viewer(config);
   rx::app::Host host;
   if (!host.Initialize(app_config, viewer)) {
     RX_ERROR("engine initialization failed");

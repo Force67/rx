@@ -28,7 +28,7 @@
 #include "base/memory/unique_pointer.h"
 #include "base/strings/string_ref.h"
 #include "base/strings/xstring.h"
-#include "demo_scenes.h"
+#include "demos/scenes.h"
 #include "foundation/algorithm/sort.h"
 #include "foundation/math/scalar.h"
 #include "foundation/strings/text_reader.h"
@@ -39,7 +39,7 @@
 // capture hooks. The camera and its scripted drivers live in the sibling
 // camera_input.cc translation unit; the subsystems and the loop live in
 // app::Host.
-namespace rx {
+namespace rx::shell {
 namespace {
 // Viewer options. Namespace scope, so they register before the host runs
 // InitOptionsFromEnv(). SunDir pins a fixed sun for headless lighting/shadow
@@ -102,7 +102,7 @@ base::Option<const char*> Tattoo{"tattoo", nullptr, "RX_TATTOO"};
 base::Option<const char*> TattooAtlas{"tattoo.atlas", nullptr, "RX_TATTOO_ATLAS"};
 }  // namespace
 
-Viewer::Viewer(const EngineConfig& config) : config_(config) {}
+Viewer::Viewer(const ViewerConfig& config) : config_(config) {}
 
 Viewer::~Viewer() {
   if (cam_record_) {
@@ -139,19 +139,10 @@ bool Viewer::OnInitialize(app::Services& services) {
   }
 
   // Wire the shared service bundle and build the demo subsystem.
-  ctx_.config = &config_;
-  ctx_.world = world_;
-  ctx_.scheduler = services.scheduler;
-  ctx_.renderer = renderer_;
-  ctx_.camera = &camera_;
-  ctx_.physics = physics_;
-  ctx_.vfs = services.vfs;
-  ctx_.audio = services.audio;
-  ctx_.debug_ui = &debug_ui_;
-  ctx_.physics_entities = physics_entities_;
-  ctx_.hair_bindings = services.hair_bindings;
-  ctx_.actions = actions_;
-  demos_ = base::MakeUnique<DemoScenes>(ctx_);
+  vfs_ = services.vfs;
+  demos_ = base::MakeUnique<DemoScenes>(*world_, *services.scheduler, *renderer_, camera_, *physics_, config_,
+                                        services.audio, &debug_ui_, physics_entities_,
+                                        services.hair_bindings, actions_, &scene_owns_sun_);
 
   if (physics_->initialized()) CreatePhysicsCubeAsset();
 
@@ -285,7 +276,7 @@ bool Viewer::LoadRxScene() {
   RegisterSceneComponents();
   // Resolves Renderable asset paths (a shape-authored scene has none) and holds
   // the textures BuildSceneShapes synthesizes for the scene's patterns.
-  asset::AssetDatabase db(*ctx_.vfs);
+  asset::AssetDatabase db(*vfs_);
   base::String error;
   if (!scene::LoadScene(*world_, db, config_.scene_path, &error, /*strict=*/true)) {
     RX_ERROR("rxscene: {}", error);
@@ -326,7 +317,7 @@ bool Viewer::LoadRxScene() {
   // the very next frame, and a capture whose light depends on when it was taken
   // is not the reproducible one --shot promises.
   if (ApplySceneEnvironment(*world_, &renderer_->settings())) {
-    ctx_.scene_owns_sun = true;
+    scene_owns_sun_ = true;
     drive_sun_from_clock_ = false;
   }
 
@@ -765,7 +756,7 @@ void Viewer::ApplySceneLighting(const asset::ImportedScene& scene) {
     s.sun_color = {sun->color[0], sun->color[1], sun->color[2]};
     s.sun_intensity =
         sun->intensity * ::exp2f(sun->exposure) * UsdSunScale.get();
-    ctx_.scene_owns_sun = true;
+    scene_owns_sun_ = true;
     drive_sun_from_clock_ = false;
   }
 
@@ -932,7 +923,7 @@ void Viewer::ApplySceneCamera(const asset::ImportedScene& scene) {
 void Viewer::DriveSunFromClock() {
   // Throttled to ~0.02-hour steps so the IBL environment is not rebuilt every
   // frame for sub-degree motion.
-  if (!drive_sun_from_clock_ || ctx_.scene_owns_sun) return;
+  if (!drive_sun_from_clock_ || scene_owns_sun_) return;
   const f32 hour = clock_->hour();
   if (last_sky_hour_ >= -100.0f && ::fabsf(hour - last_sky_hour_) < 0.02f) return;
   last_sky_hour_ = hour;
@@ -1129,4 +1120,4 @@ void Viewer::OnShutdown() {
   if (window_) debug_ui_.Shutdown();
 }
 
-}  // namespace rx
+}  // namespace rx::shell

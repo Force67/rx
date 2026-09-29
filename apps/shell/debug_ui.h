@@ -1,5 +1,5 @@
-#ifndef RX_RUNTIME_DEBUG_UI_H_
-#define RX_RUNTIME_DEBUG_UI_H_
+#ifndef RX_APPS_SHELL_DEBUG_UI_H_
+#define RX_APPS_SHELL_DEBUG_UI_H_
 
 // The overlay records through the engine's RHI imgui render backend
 // (render/util/imgui_renderer.h) - no raw Vulkan, no volk here.
@@ -17,16 +17,18 @@
 #endif
 
 namespace rx {
-
 namespace scene {
 class FlyCamera;
 }  // namespace scene
-namespace asset {
-class Vfs;
-}
 namespace ecs {
 class World;
 }
+namespace asset {
+class Vfs;
+}
+}  // namespace rx
+
+namespace rx::shell {
 
 // Dear ImGui overlay: frame stats plus live toggles for every render
 // feature. Rendered through the renderer's ui pass straight onto the
@@ -127,6 +129,6 @@ class DebugUi {
   u64 gpu_memory_budget_bytes_ = 0;
 };
 
-}  // namespace rx
+}  // namespace rx::shell
 
-#endif  // RX_RUNTIME_DEBUG_UI_H_
+#endif  // RX_APPS_SHELL_DEBUG_UI_H_

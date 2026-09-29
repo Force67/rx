@@ -1,5 +1,5 @@
-#ifndef RX_RUNTIME_SCENE_AUTHORING_H_
-#define RX_RUNTIME_SCENE_AUTHORING_H_
+#ifndef RX_APPS_SHELL_SCENE_AUTHORING_H_
+#define RX_APPS_SHELL_SCENE_AUTHORING_H_
 
 
 #include "base/containers/vector.h"
@@ -19,7 +19,7 @@
 // They live in the runtime rather than rxe/scene because materializing them
 // is viewer policy: the engine has no opinion on where a mesh comes from. Being
 // reflected, they document themselves through --dump-schema.
-namespace rx {
+namespace rx::shell {
 
 // Procedural geometry. `size` means something different per kind (see the Hint
 // registered for it), because one vec3 covers half extents, a radius, and the
@@ -452,6 +452,6 @@ bool BuildSceneModels(ecs::World& world, asset::AssetDatabase& db, render::Rende
 // one.
 bool ApplySceneEnvironment(ecs::World& world, render::RenderSettings* settings);
 
-}  // namespace rx
+}  // namespace rx::shell
 
-#endif  // RX_RUNTIME_SCENE_AUTHORING_H_
+#endif  // RX_APPS_SHELL_SCENE_AUTHORING_H_

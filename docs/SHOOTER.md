@@ -6,7 +6,7 @@ cut from the same `WeaponDef` struct, and shoots targets with head and torso
 hitboxes. It is the tuning environment for weapon feel and the end-to-end
 exercise of every combat system.
 
-Everything lives in `apps/shell/demo_shooter.{h,cc}`. It touches no engine
+Everything lives in `apps/shell/demos/shooter.{h,cc}`. It touches no engine
 internals: it drives `rx::combat`, `rx::character` and the scene camera rig
 through their public APIs exactly as a game would. The registry wiring is the
 usual few lines: a `shooter_` member on `DemoScenes`, a dispatch arm in

@@ -34,7 +34,7 @@
 #include "rxe/scene/reflect.h"
 #include "rxe/scene/scene_io.h"
 
-namespace rx {
+namespace rx::shell {
 namespace {
 
 // Surface's and Pattern's numeric fields each form one contiguous block of
@@ -1806,4 +1806,4 @@ bool BuildSceneAnchors(ecs::World& world, const base::String& scene_path, base::
   return true;
 }
 
-}  // namespace rx
+}  // namespace rx::shell

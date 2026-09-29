@@ -6,23 +6,23 @@ set(RX_RUNTIME_SOURCES
   viewer.cc
   camera_input.cc
   viewer_input.cc
-  demo_scenes.cc
+  demos/scenes.cc
   scene_validate.cc
   material_palette.cc
-  demo_grass.cc
-  demo_nav.cc
-  demo_placement.cc
-  placement_demo_assets.cc
-  demo_ship.cc
-  demo_gym.cc
-  demo_lookdev.cc
-  demo_shooter.cc
-  demo_puppet.cc
-  demo_drive.cc
-  demo_world.cc
-  feature_gym/feature_gym.cc
-  scene_hook_demo.cc
-  scene_hook_rhi_demo.cc
+  demos/grass.cc
+  demos/nav.cc
+  demos/placement.cc
+  demos/placement_assets.cc
+  demos/ship.cc
+  demos/gym.cc
+  demos/lookdev.cc
+  demos/shooter.cc
+  demos/puppet.cc
+  demos/drive.cc
+  demos/world.cc
+  demos/feature_gym/feature_gym.cc
+  demos/scene_hook.cc
+  demos/scene_hook_rhi.cc
   showcase_camera.cc
   debug_ui.cc
 )
@@ -280,16 +280,16 @@ if(RX_BUILD_TESTS)
 endif()
 
 file(GLOB RX_FEATURE_GYM_ASSETS CONFIGURE_DEPENDS
-  ${CMAKE_CURRENT_SOURCE_DIR}/feature_gym/assets/*)
+  ${CMAKE_CURRENT_SOURCE_DIR}/demos/feature_gym/assets/*)
 set_property(TARGET rx APPEND PROPERTY LINK_DEPENDS ${RX_FEATURE_GYM_ASSETS})
 add_custom_command(TARGET rx POST_BUILD
   COMMAND ${CMAKE_COMMAND} -E copy_directory
-    ${CMAKE_CURRENT_SOURCE_DIR}/feature_gym/assets
+    ${CMAKE_CURRENT_SOURCE_DIR}/demos/feature_gym/assets
     $<TARGET_FILE_DIR:rx>/feature_gym-assets
   COMMENT "Copying feature-gym assets")
 add_custom_target(rx-feature-gym-assets ALL
   COMMAND ${CMAKE_COMMAND} -E copy_directory
-    ${CMAKE_CURRENT_SOURCE_DIR}/feature_gym/assets
+    ${CMAKE_CURRENT_SOURCE_DIR}/demos/feature_gym/assets
     $<TARGET_FILE_DIR:rx>/feature_gym-assets
   DEPENDS ${RX_FEATURE_GYM_ASSETS}
   COMMENT "Refreshing feature-gym assets")
