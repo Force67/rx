@@ -3,6 +3,7 @@
 
 #include <stdint.h>
 
+#include "foundation/build_config/export.h"
 #include "foundation/math/math.h"
 #include "rxe/anim/body_dynamics.h"
 #include "rxe/anim/pose.h"
@@ -147,7 +148,7 @@ struct PlacementBrush {
   Vec3 last_position{};
 };
 
-class Editor final : public app::Application {
+class RX_EDITOR_EXPORT Editor final : public app::Application {
 public:
   explicit Editor(base::String open_path) : open_path_(base::move(open_path)) {}
 
