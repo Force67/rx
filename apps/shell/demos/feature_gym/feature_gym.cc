@@ -552,18 +552,18 @@ void SetFeatureGymAssetManager(AAssetManager* manager) { g_feature_gym_asset_man
 #endif
 
 struct FeatureGym::Impl {
-  Impl(const ViewerConfig* config, ecs::World& world, ecs::Scheduler& scheduler, render::Renderer& renderer,
-       physics::PhysicsWorld& physics, scene::FlyCamera* camera, audio::AudioSystem* audio,
-       base::Vector<PhysicsEntity>* physics_entities, bool* scene_owns_sun)
-      : config(config),
-        world(world),
-        scheduler(scheduler),
-        renderer(renderer),
-        physics(physics),
-        camera(camera),
-        audio(audio),
-        physics_entities(physics_entities),
-        scene_owns_sun(scene_owns_sun),
+  Impl(const ViewerConfig* config_in, ecs::World& world_in, ecs::Scheduler& scheduler_in, render::Renderer& renderer_in,
+       physics::PhysicsWorld& physics_in, scene::FlyCamera* camera_in, audio::AudioSystem* audio_in,
+       base::Vector<PhysicsEntity>* physics_entities_in, bool* scene_owns_sun_in)
+      : config(config_in),
+        world(world_in),
+        scheduler(scheduler_in),
+        renderer(renderer_in),
+        physics(physics_in),
+        fly_camera(camera_in),
+        audio(audio_in),
+        physics_entities(physics_entities_in),
+        scene_owns_sun(scene_owns_sun_in),
         headless(config->headless) {}
   ~Impl();
 
@@ -624,7 +624,7 @@ struct FeatureGym::Impl {
   ecs::Scheduler& scheduler;
   render::Renderer& renderer;
   physics::PhysicsWorld& physics;
-  scene::FlyCamera* camera;
+  scene::FlyCamera* fly_camera;
   audio::AudioSystem* audio;
   base::Vector<PhysicsEntity>* physics_entities;
   bool* scene_owns_sun;
@@ -959,10 +959,10 @@ void FeatureGym::Impl::Create() {
   settings.rcgi = false;
   baseline = settings;
 
-  camera->set_position({0, 50, 56});
-  const Vec3 direction = Normalize(Vec3{0, 0, -14} - camera->position());
-  camera->set_yaw_pitch(::atan2f(direction.x, -direction.z), ::asinf(direction.y));
-  camera->speed = 15.0f;
+  fly_camera->set_position({0, 50, 56});
+  const Vec3 direction = Normalize(Vec3{0, 0, -14} - fly_camera->position());
+  fly_camera->set_yaw_pitch(::atan2f(direction.x, -direction.z), ::asinf(direction.y));
+  fly_camera->speed = 15.0f;
   RX_INFO(
       "feature gym: nine self-contained districts ready; use RX_SHOWCASE=1 "
       "for regression");
@@ -3134,9 +3134,9 @@ void FeatureGym::Impl::ApplyTourMode(TourMode mode) {
       break;
     case TourMode::kEcsCameraStackRig: {
       if (scene::CameraMode* base = world.Get<scene::CameraMode>(camera_base_mode)) {
-        base->view.position = camera->position();
+        base->view.position = fly_camera->position();
         base->view.orientation =
-            QuatBetween(Vec3{0, 0, -1}, Normalize(camera->target() - camera->position()));
+            QuatBetween(Vec3{0, 0, -1}, Normalize(fly_camera->target() - fly_camera->position()));
       }
       scene::ResolveCameraStacks(world, 0);
       scene::BuildCameraRigs(world, 0);

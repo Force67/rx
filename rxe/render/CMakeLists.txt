@@ -1,5 +1,9 @@
 rx_add_module(render
   core/renderer.cc
+  core/renderer_capture.cc
+  core/renderer_debug.cc
+  core/renderer_frame.cc
+  core/renderer_upload.cc
   core/presets.cc
   core/settings_ini.cc
   core/render_graph.cc
