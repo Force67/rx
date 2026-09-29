@@ -1,6 +1,7 @@
 #ifndef RX_RENDER_RHI_TYPES_H_
 #define RX_RENDER_RHI_TYPES_H_
 
+#include "foundation/build_config/export.h"
 #include "foundation/build_config/types.h"
 
 // Backend-agnostic value types shared by the whole RHI. Nothing in this header
@@ -72,7 +73,7 @@ constexpr bool IsDepthFormat(Format format) {
 
 // Bytes per texel (per block for BC formats), for footprint estimates and
 // tightly packed copies.
-u32 FormatTexelBytes(Format format);
+RX_GPU_EXPORT u32 FormatTexelBytes(Format format);
 
 struct Extent2D {
   u32 width = 0;

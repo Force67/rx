@@ -7,6 +7,7 @@
 // sampled by the forward pass instead of tracing inline, which turns the
 // mirror-to-IBL crossfade into a real glossy distribution.
 
+#include "foundation/build_config/export.h"
 #include "foundation/math/math.h"
 #include "rxe/render/core/render_graph.h"
 #include "rxe/gpu/rhi/device.h"
@@ -15,7 +16,7 @@ namespace rx::render {
 
 class RayTracingContext;
 
-class ReflectionTrace {
+class RX_RENDER_EXPORT ReflectionTrace {
  public:
   struct Frame {
     Mat4 inv_view_proj;  // unjittered

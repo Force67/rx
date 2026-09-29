@@ -3,6 +3,7 @@
 
 #include <base/containers/vector.h>
 
+#include "foundation/build_config/export.h"
 #include "foundation/math/math.h"
 #include "rxe/asset/mesh.h"
 #include "rxe/asset/texture.h"
@@ -84,7 +85,7 @@ bool BuildHairGroom(const asset::Mesh& hair_mesh, const GroomParams& params, Gro
 // and a ponytail whose strands are pinned mid-strand at a gather point. Used
 // by the strands demo and the strand-sim regression test.
 enum class TestGroomStyle { kLoose, kBraid, kPonytail };
-bool BuildTestGroom(TestGroomStyle style, u32 guide_count, u32 seed, GroomData* out);
+RX_RENDER_EXPORT bool BuildTestGroom(TestGroomStyle style, u32 guide_count, u32 seed, GroomData* out);
 
 }  // namespace rx::render
 

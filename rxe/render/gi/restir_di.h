@@ -9,6 +9,7 @@
 // both the analytic cluster evaluation and the local shadow atlas for those
 // lights with per-pixel ray-traced visibility.
 
+#include "foundation/build_config/export.h"
 #include "foundation/math/math.h"
 #include "rxe/render/core/render_graph.h"
 #include "rxe/render/gi/raytracing.h"
@@ -16,7 +17,7 @@
 
 namespace rx::render {
 
-class RestirDi {
+class RX_RENDER_EXPORT RestirDi {
  public:
   bool Initialize(gpu::Device& device);
   void Destroy(gpu::Device& device);

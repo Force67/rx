@@ -16,7 +16,7 @@ namespace rx::asset {
 
 // A source of files: a loose directory, an .rxp pack, a BSA, a BA2. Providers
 // are mounted into the Vfs in priority order.
-class FileProvider {
+class RX_ASSET_EXPORT FileProvider {
  public:
   virtual ~FileProvider() = default;
 

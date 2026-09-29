@@ -6,6 +6,7 @@
 #include <base/containers/vector.h>
 
 #include "base/memory/unique_pointer.h"
+#include "foundation/build_config/export.h"
 #include "rxe/asset/material.h"
 #include "rxe/asset/texture.h"
 #include "rxe/render/core/bindless.h"
@@ -34,7 +35,7 @@ namespace rx::render {
 // materials get NEW binding sets (live ones may be GPU-pending); the bindless
 // slot moves to a fresh index and the old image/set/slot retire once every
 // in-flight frame has drained (BeginFrame flushes the ring).
-class MaterialSystem {
+class RX_RENDER_EXPORT MaterialSystem {
  public:
   // Matches the std140 block in mesh.frag.
   struct Params {

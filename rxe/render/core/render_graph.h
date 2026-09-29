@@ -7,6 +7,7 @@
 #include "base/functional/function.h"
 #include "base/memory/move.h"
 #include "base/strings/xstring.h"
+#include "foundation/build_config/export.h"
 #include "foundation/build_config/types.h"
 #include "rxe/gpu/rhi/command_list.h"
 #include "rxe/gpu/rhi/resources.h"
@@ -47,7 +48,7 @@ struct TransientTextureDesc {
 // Caches images keyed by their description so a steady frame allocates
 // nothing. Contents are not preserved across frames: every acquisition
 // starts in kUndefined and the first barrier discards.
-class TransientPool {
+class RX_RENDER_EXPORT TransientPool {
  public:
   explicit TransientPool(gpu::Device& device) : device_(device) {}
   ~TransientPool();
@@ -84,7 +85,7 @@ struct PassContext {
 // command list. Passes declare reads and writes with a usage; Compile
 // assigns physical images from the transient pool and derives the image
 // barriers between passes from the declared accesses.
-class RenderGraph {
+class RX_RENDER_EXPORT RenderGraph {
  public:
   struct PassBuilder {
     void Read(ResourceHandle handle, ResourceUsage usage) { accesses.push_back({handle, usage}); }

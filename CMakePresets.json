@@ -5,20 +5,42 @@
       "name": "linux",
       "binaryDir": "${sourceDir}/build/linux",
       "generator": "Ninja",
-      "cacheVariables": { "CMAKE_BUILD_TYPE": "RelWithDebInfo" }
+      "cacheVariables": {
+        "CMAKE_BUILD_TYPE": "RelWithDebInfo"
+      }
+    },
+    {
+      "name": "linux-dev",
+      "inherits": "linux",
+      "binaryDir": "${sourceDir}/build/linux-dev",
+      "cacheVariables": {
+        "RX_SHARED": "ON",
+        "RX_INSTALL": "OFF"
+      }
     },
     {
       "name": "windows",
       "binaryDir": "${sourceDir}/build/windows",
       "generator": "Visual Studio 17 2022",
-      "condition": { "type": "equals", "lhs": "${hostSystemName}", "rhs": "Windows" }
+      "condition": {
+        "type": "equals",
+        "lhs": "${hostSystemName}",
+        "rhs": "Windows"
+      }
     },
     {
       "name": "macos",
       "binaryDir": "${sourceDir}/build/macos",
       "generator": "Ninja",
-      "cacheVariables": { "CMAKE_BUILD_TYPE": "RelWithDebInfo", "RX_FETCH_SDL3": "ON" },
-      "condition": { "type": "equals", "lhs": "${hostSystemName}", "rhs": "Darwin" }
+      "cacheVariables": {
+        "CMAKE_BUILD_TYPE": "RelWithDebInfo",
+        "RX_FETCH_SDL3": "ON"
+      },
+      "condition": {
+        "type": "equals",
+        "lhs": "${hostSystemName}",
+        "rhs": "Darwin"
+      }
     }
   ]
 }

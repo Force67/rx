@@ -5,13 +5,14 @@
 // readback), a half-res 48-tap golden-spiral gather, and a full-res
 // composite. Runs on the AA-resolved color, before motion blur.
 
+#include "foundation/build_config/export.h"
 #include "foundation/math/math.h"
 #include "rxe/render/core/render_graph.h"
 #include "rxe/gpu/rhi/device.h"
 
 namespace rx::render {
 
-class DepthOfFieldPass {
+class RX_RENDER_EXPORT DepthOfFieldPass {
  public:
   bool Initialize(gpu::Device& device);
   void Destroy(gpu::Device& device);

@@ -5,6 +5,7 @@
 #include <base/containers/vector.h>
 
 #include "base/memory/unique_pointer.h"
+#include "foundation/build_config/export.h"
 #include "foundation/build_config/types.h"
 #include "rxe/gpu/rhi/device.h"
 
@@ -17,7 +18,7 @@ namespace rx::render {
 // buffer device addresses for the SPIR-V readers (vk::RawBufferLoad) and
 // bindless ByteAddressBuffer slots for DXIL, which has no BDA (see
 // shaders/rt_geometry.hlsli).
-class BindlessRegistry {
+class RX_RENDER_EXPORT BindlessRegistry {
  public:
   static constexpr u32 kMaxTextures = 4096;
   static constexpr u32 kMaxMeshes = 16384;

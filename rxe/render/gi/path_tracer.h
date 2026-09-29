@@ -1,6 +1,7 @@
 #ifndef RX_RENDER_PATH_TRACER_H_
 #define RX_RENDER_PATH_TRACER_H_
 
+#include "foundation/build_config/export.h"
 #include "foundation/math/math.h"
 #include "rxe/render/core/render_graph.h"
 #include "rxe/gpu/rhi/resources.h"
@@ -22,7 +23,7 @@ class RayTracingContext;
 //     (AddGbufferPass), then re-modulate the denoised radiance (AddCompositePass)
 //     so the view stays clean while moving.
 // Needs ray query; the renderer gates it.
-class PathTracer {
+class RX_RENDER_EXPORT PathTracer {
  public:
   struct Frame {
     Mat4 inv_view_proj;

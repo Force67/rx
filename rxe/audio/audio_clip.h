@@ -5,6 +5,7 @@
 #include "base/containers/vector.h"
 #include "base/memory/unique_pointer.h"
 #include "base/strings/string_ref.h"
+#include "foundation/build_config/export.h"
 #include "foundation/build_config/types.h"
 
 namespace rx::audio {
@@ -48,7 +49,7 @@ class Decoder {
 // magic-number fallback (a .fuz is really a wrapped xWMA, a mod's loose file may
 // lie about its extension). `bytes` is copied into the decoder, so the caller's
 // buffer need not outlive it. Null when no decoder handles the data.
-base::UniquePointer<Decoder> OpenDecoder(ByteSpan bytes, base::StringRef extension);
+RX_AUDIO_EXPORT base::UniquePointer<Decoder> OpenDecoder(ByteSpan bytes, base::StringRef extension);
 
 // Decodes `bytes` completely into an AudioClip. Returns an invalid clip (see
 // AudioClip::valid) when the format is unsupported or the data is malformed.

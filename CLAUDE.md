@@ -13,6 +13,10 @@ nix develop -c cmake --build build/linux
 cd build/linux && nix develop <repo> -c ctest
 ```
 
+For day-to-day work `nix develop -c cmake --preset linux-dev` (then build
+`build/linux-dev`) builds every module as its own `.so`, so an edit relinks one
+library. Benchmarks and captures you compare stay on `build/linux`.
+
 The binary needs the dev shell at runtime too (`libvkd3d`), so prefix runs with
 `nix develop -c`, including read-only ones like `--validate` and `--dump-schema`.
 

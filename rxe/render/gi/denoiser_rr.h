@@ -11,6 +11,7 @@
 // native resolution (denoise-only); the engine's upscalers stay separate.
 // Vulkan-backend only, compiled under RX_HAS_DLSS.
 
+#include "foundation/build_config/export.h"
 #include "foundation/math/math.h"
 #include "rxe/render/core/render_graph.h"
 #include "rxe/gpu/rhi/types.h"
@@ -25,7 +26,7 @@ class Device;
 namespace rx::render {
 
 
-class RrDenoiser {
+class RX_RENDER_EXPORT RrDenoiser {
  public:
   struct Frame {
     Mat4 world_to_view;

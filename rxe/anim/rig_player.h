@@ -5,6 +5,7 @@
 #include "base/functional/function.h"
 #include "base/memory/unique_pointer.h"
 #include "base/strings/string_ref.h"
+#include "foundation/build_config/export.h"
 #include "foundation/math/math.h"
 #include "rxe/anim/anim_graph.h"
 #include "rxe/anim/pose.h"
@@ -19,7 +20,7 @@ namespace rx::anim {
 //
 // No heap allocation happens after Bind: the arena and buffers are sized once,
 // and the SoA pose stays SoA until the caller skins it.
-class RigPlayer {
+class RX_ANIM_EXPORT RigPlayer {
  public:
   RigPlayer();
   ~RigPlayer();

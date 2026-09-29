@@ -4,6 +4,7 @@
 
 #include "base/functional/function.h"
 #include "base/memory/unique_pointer.h"
+#include "foundation/build_config/export.h"
 #include "foundation/math/math.h"
 #include "rxe/anim/anim_graph.h"
 #include "rxe/anim/pose.h"
@@ -23,7 +24,7 @@ using GroundProbe = base::Function<bool(const Vec3& origin, Vec3* hit, Vec3* nor
 // and the L/R hip/knee/ankle of its biped rig), then Apply()'d each frame after
 // RigPlayer::Update. Owns its model-space scratch, so the per-frame path never
 // allocates.
-class FootPlacement {
+class RX_ANIM_EXPORT FootPlacement {
  public:
   FootPlacement();
   ~FootPlacement();
