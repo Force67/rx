@@ -70,6 +70,9 @@ static_assert(JPH_VERSION_MAJOR > 5 || (JPH_VERSION_MAJOR == 5 && JPH_VERSION_MI
 namespace rx::physics {
 namespace {
 
+// Cloth simulation as a whole: off, AddCloth refuses and nothing steps.
+base::Feature ClothFeature{"physics.cloth", /*enabled=*/true};
+
 namespace layers {
 constexpr JPH::ObjectLayer kStatic = 0;
 constexpr JPH::ObjectLayer kDynamic = 1;
@@ -2568,7 +2571,7 @@ void PhysicsWorld::RemoveStrandGroom(StrandGroomId id) {
 }
 
 ClothId PhysicsWorld::CreateCloth(const ClothDesc& desc, const Mat4& transform) {
-  if (!impl_ || !FeatureEnabled(FeatureId::kCloth) || !desc.positions || !desc.indices ||
+  if (!impl_ || !ClothFeature || !desc.positions || !desc.indices ||
       desc.vertex_count < 3 || desc.index_count < 3 || (desc.pin_count > 0 && !desc.pins) ||
       !IsFinite(transform)) {
     return 0;

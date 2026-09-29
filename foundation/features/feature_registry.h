@@ -1,8 +1,6 @@
 #ifndef RX_FOUNDATION_FEATURES_FEATURE_REGISTRY_H_
 #define RX_FOUNDATION_FEATURES_FEATURE_REGISTRY_H_
 
-#include <base/containers/span.h>
-
 #include "foundation/build_config/export.h"
 // base/feature.h's constructor parameters shadow its members, so the header is
 // not -Wshadow clean. Silence just this include rather than spraying the
@@ -21,42 +19,24 @@
 #pragma warning(pop)
 #endif
 
-// A linker-proof feature-flag registry.
+// Feature flags. A module declares each flag at namespace scope in the file that
+// reads it, and reads it as a bool:
 //
-// base::Feature self-registers through InitChain, but that registration is a
-// static initializer: when a flag lives in a static library and nothing else
-// references its object file, the linker drops the object (and the
-// registration with it). This registry sidesteps that entirely. Every flag is
-// declared in core/features.def and lives in one table in one translation
-// unit; InitFeatures() is called from engine startup, so that object is always
-// pulled into the link and the table is always complete. We never walk the
-// InitChain.
+//   base::Feature ClothFeature{"physics.cloth", /*enabled=*/true};
+//   ...
+//   if (!ClothFeature) return {};
+//
+// base::Feature registers itself on one process-wide chain (equilibrium makes
+// the chain root unique across shared objects), so there is no central list to
+// edit. A flag lives exactly as long as the code that reads it: if the linker
+// drops an unreferenced object, it drops the flag with the only reader.
 
 namespace rx {
 
-// Stable handle for every flag in core/features.def.
-enum class FeatureId : unsigned {
-#define RX_FEATURE(id, name, enabled) k##id,
-#include "foundation/features/features.def"
-#undef RX_FEATURE
-  kCount
-};
-
-// True when the flag is on (default from the manifest, after env overrides).
-// A single array read, no list walk.
-//
-// The g_features table backing these is an anonymous-namespace global in
-// feature_registry.cc, reached only through these three functions, so under
-// RX_SHARED it stays a single instance inside the core DSO (verified: no other
-// translation unit can name the array).
-RX_FOUNDATION_EXPORT bool FeatureEnabled(FeatureId id);
-
-// The whole table, for listing in the debug UI. size() == kCount.
-RX_FOUNDATION_EXPORT base::Span<base::Feature> Features();
-
-// Apply RX_FEATURES overrides once, early in engine startup. Tokens are comma
-// or whitespace separated: "name" / "+name" enable, "-name" / "name=0" disable.
-// Unknown names are warned about and skipped.
+// Apply RX_FEATURES overrides once, early in startup and before any flag is
+// read. Tokens are comma or whitespace separated: "name" / "+name" enable,
+// "-name" / "name=0" disable. A name no flag in this binary carries is warned
+// about and skipped.
 RX_FOUNDATION_EXPORT void InitFeatures();
 
 }  // namespace rx

@@ -189,7 +189,7 @@ nearly everywhere. Nothing in it may include `rxe/`.
 | `files` | `core/file_system`, `core/paths` |
 | `tasks` | `core/job_system` |
 | `memory` | `core/memory/*`, `core/shared.h` |
-| `features` | `core/feature_registry`. `features.def` goes away: each module declares its own flags in its `features.h`, Chromium's `BASE_DECLARE_FEATURE` shape, so adding a flag no longer edits a shared file. |
+| `features` | `core/feature_registry`. `features.def` is gone (5b): a module declares each flag as a `base::Feature` in the file that reads it, so adding a flag edits no shared file. `InitFeatures` applies `RX_FEATURES` over the one process-wide chain. |
 | `time` | `core/frame_timer` |
 | `system` | `core/platform`, `core/app_identity` |
 | `math` | `core/math.h`, `core/scalar.h` |
@@ -371,7 +371,7 @@ What has to exist once per process, and how the shared build keeps it so:
 | `render/util` | grab-bag | done (4c): `gpu/rhi`, `asset/exr_write`, `ui/imgui` |
 | `runtime/engine_context.h` | god object passed to every demo | phase 6, with the rest of `runtime/` |
 | `fly_camera` | duplicated in `runtime/` and `apps/editor/` | done (2b): `scene::FlyCamera`, fed a resolved `FlyCameraInput` |
-| `core/features.def` | one file every feature edits | phase 5: per-module flags self-register, which needs the one-per-process registry |
+| `core/features.def` | one file every feature edits | done (5b): flags live where they are read |
 | `CMakeLists.txt` | 1381 lines, registers every test centrally | done (4b): each module registers its own |
 | `anim/locomotion` vs `engine/locomotion` | two modules called locomotion | done (2b): `anim::ProceduralGait` |
 
@@ -424,7 +424,8 @@ and after.
    - 5a (done): the whole tree links as shared objects (missing exports
      added), one option registry per process, per-DSO volk filled through
      `GetVulkanHandles`, and the `linux-dev` preset.
-   - 5b: per-module feature flags on the single registry.
+   - 5b (done): per-module feature flags on the single registry;
+     `features.def` and its three never-read render flags are gone.
 6. **Plugins and apps.** Add `RX_PLUGIN`, `PluginRegistry` and `rx_add_app`.
    `runtime/` becomes `apps/shell/`, the tools move into `apps/`, and
    `EngineContext` goes away.
