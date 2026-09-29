@@ -152,7 +152,7 @@ endif()
 # Helpers are included by path, never via CMAKE_MODULE_PATH: a parent project
 # with same-named modules (warnings/shaders/mimalloc) must not shadow these,
 # and rx must not shadow the parent's.
-include(${CMAKE_CURRENT_SOURCE_DIR}/cmake/warnings.cmake)
+include(${CMAKE_CURRENT_SOURCE_DIR}/cmake/modules.cmake)
 
 include(FetchContent)
 find_package(ZLIB QUIET)

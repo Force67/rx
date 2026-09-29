@@ -4,7 +4,7 @@
 #include "base/containers/unordered_map.h"
 #include "base/memory/unique_pointer.h"
 #include "foundation/build_config/types.h"
-#include "plugins/inventory/export.h"
+#include "foundation/build_config/export.h"
 #include "rxe/asset/asset_id.h"
 #include "rxe/asset/shape_desc.h"
 

@@ -164,8 +164,8 @@ endif()
   the module itself or a module in its dependency closure, and never to another
   module's `internal/`. The three `rxe/` rules above are checked here too. CMake
   stays the single source of truth; there are no separate DEPS files to drift.
-- Exports use `RX_<MODULE>_EXPORT` from `foundation/build_config/export.h`, as
-  today.
+- Exports use `RX_<MODULE>_EXPORT`, which `rx_add_module` defines; the
+  `RX_DSO_*` primitives it expands to live in `foundation/build_config/export.h`.
 - Platform and backend variants are files with suffixes selected by the build:
   `_sdl3.cc`, `_android.cc`, `_vulkan.cc`, `_d3d12.cc`. Native Vulkan calls
   outside `gpu/vulkan` (the NRD, DLSS and FSR3 glue, ugui's backend) live only
@@ -270,23 +270,18 @@ become a module, and water or hair can become a plugin.
 `OnShutdown`) and hands it to a `Host`. Identity (`id`, `name`, `title`) stays
 in `AppConfig`, as in CONFIG.md.
 
-A plugin module registers itself through one function:
+A plugin is one or more modules under `plugins/` (rx's) or a game's own
+`plugins/`, built with `rx_add_module` like any engine module. An app enables a
+plugin by linking it; nothing else wires it in, because no plugin needs startup
+hooks today: they are libraries the app calls. The day a plugin must register
+something at startup (components for `--dump-schema`, scheduler systems, editor
+panels), it gets one `RX_PLUGIN` entry point and a registry that holds only
+registration surfaces, never runtime services. Not before: an entry point with
+no caller is a guess at an API.
 
-```cpp
-// plugins/nav/nav/nav_plugin.cc
-RX_PLUGIN(nav, PluginRegistry& registry) {
-  RegisterNavHandlers(registry.script_handlers());
-  registry.scheduler().AddSystem(...);
-}
-```
-
-`PluginRegistry` holds only things that accept registrations: script handlers,
-reflected component types (which is what `--dump-schema` reads), scheduler
-systems, devtools commands and editor panels. It holds no runtime services, so
-it cannot grow into a god object. `rx_add_app` generates the table of enabled
-plugins and the host calls it once at startup. There is no `dlopen` and no
-reliance on static initializers, so a static link cannot drop a plugin
-silently.
+`rx_add_module` also defines the module's export macro (`RX_<NAME>_EXPORT`) as a
+compile definition, so a module outside rx needs no line in any file rx owns,
+and the install package ships it (`find_package(rx)` brings `rx_add_module`).
 
 `apps/shell/engine_context.h` (`EngineContext`) is deleted. Each demo takes the
 services it uses as arguments.
@@ -297,31 +292,26 @@ An out-of-tree game has the same shape as rx itself, minus the engine:
 
 ```
 mygame/
-  CMakeLists.txt        add_subdirectory(rx) or find_package(rx); rx_add_app(...)
+  CMakeLists.txt        add_subdirectory(rx) or find_package(rx)
   apps/mygame/          the game: main.cc (composition root), the Application, gameplay
+  apps/mygame_editor/   optional: the editor with the game's modules linked in
   plugins/<name>/       project plugins, the same shape as plugins/ in rx
   assets/  config/      content, as in CONFIG.md
 ```
 
 ```cmake
-rx_add_app(mygame
-  PLUGINS character combat nav        # rx's plugins/ or the game's, resolved by name
-  EDITOR)                             # also build mygame_editor
+add_subdirectory(plugins/grapple)                 # rx_add_module(grapple ...)
+add_executable(mygame apps/mygame/main.cc)
+target_link_libraries(mygame PRIVATE rx::app rx::grapple rx::character rx::nav)
 ```
 
 ### The editor
 
 The editor is engine code: `rxe/editor` holds it all, and `apps/editor` is the
-default editor, a `main.cc` that links `rxe/editor` with every first-party
-plugin. A game extends it rather than forking it. `EDITOR` builds
-`mygame_editor` from `rxe/editor`, the game's own modules and its plugins, so
-the editor always runs the game's code without loading anything at runtime.
-A plugin adds editor panels, tools and inspectors through `PluginRegistry`,
-the same way it adds script handlers; a game that needs more than that writes
-its own `apps/mygame_editor/main.cc` against `rxe/editor`.
-
-`apps/shell` is `rx_add_app(rx PLUGINS <all first-party>)`. A tool is
-`rx_add_app` with no plugins.
+default editor, a `main.cc` over `rx::editor`. A game extends it rather than
+forking it: `apps/mygame_editor/main.cc` is the same few lines, linking
+`rx::editor` plus the game's own modules, so the editor runs the game's code
+without loading anything at runtime.
 
 Third-party plugins are source plugins built against the engine with the same
 toolchain and equilibrium version, as in Unreal. A binary-stable plugin ABI is
@@ -429,7 +419,11 @@ and after.
 6. **Plugins and apps.**
    - 6a (done): `runtime/` becomes `apps/shell/`, the tools `apps/rxpack`,
      `rxworld`, `rxdiff`, `rxcall`, and `examples/` `apps/body_jiggle`.
-   - 6b: `RX_PLUGIN`, `PluginRegistry` and `rx_add_app`.
+   - 6b (done): a module outside rx builds like one inside: `rx_add_module`
+     defines the export macro (the central table in `export.h` and the two
+     local `export.h` workarounds are gone) and ships in the install package.
+     `RX_PLUGIN`, `PluginRegistry` and `rx_add_app` wait for a plugin that
+     needs startup registration; none does today.
    - 6c: `rxe/editor` and a thin `apps/editor`, per-game editors.
    - 6d: `EngineContext` goes away; the demos move to `apps/shell/demos` in
      `rx::shell`.

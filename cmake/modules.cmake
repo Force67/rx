@@ -29,15 +29,20 @@ function(rx_add_module name)
   # Hidden visibility ALWAYS (both static and shared builds) so the export
   # annotation set is honest: an internal symbol another module reaches without
   # an export macro fails to link in the shared build instead of silently
-  # working. RX_<MODULE>_IMPLEMENTATION (private) selects the export side of the
-  # per-module macro; RX_SHARED_BUILD (public) turns the macros on for everyone
-  # who sees the headers. In the static build both are effectively no-ops.
+  # working. RX_SHARED_BUILD (public) turns the export macros on for everyone
+  # who sees the headers; in the static build they expand to nothing.
   set_target_properties(rx_${name} PROPERTIES
     CXX_VISIBILITY_PRESET hidden
     C_VISIBILITY_PRESET hidden
     VISIBILITY_INLINES_HIDDEN ON)
+  # RX_<MODULE>_EXPORT comes from here, not from a shared header, so a module
+  # (a game's or a third-party plugin's included) needs no line in any file rx
+  # owns: its own sources see the export side, everyone linking it the import
+  # side. Both resolve through foundation/build_config/export.h's RX_DSO_*.
   string(TOUPPER ${name} name_uc)
-  target_compile_definitions(rx_${name} PRIVATE RX_${name_uc}_IMPLEMENTATION)
+  target_compile_definitions(rx_${name}
+    PRIVATE RX_${name_uc}_IMPLEMENTATION "RX_${name_uc}_EXPORT=RX_DSO_EXPORT"
+    INTERFACE "RX_${name_uc}_EXPORT=RX_DSO_IMPORT")
   if(RX_SHARED)
     target_compile_definitions(rx_${name} PUBLIC RX_SHARED_BUILD)
     # Fail the build if a module .so references a cross-DSO symbol its linked
