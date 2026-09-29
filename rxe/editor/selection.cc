@@ -1,8 +1,8 @@
-#include "rxe/edit/selection.h"
+#include "rxe/editor/selection.h"
 
 #include "base/algorithm.h"
 
-namespace rx::edit {
+namespace rx::editor {
 
 void Selection::Clear() {
   entities_.clear();
@@ -41,4 +41,4 @@ bool Selection::Contains(ecs::Entity entity) const {
   return base::Find(entities_.begin(), entities_.end(), entity) != entities_.end();
 }
 
-}  // namespace rx::edit
+}  // namespace rx::editor

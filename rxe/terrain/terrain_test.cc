@@ -6,7 +6,7 @@
 #include "foundation/files/file_system.h"
 #include "foundation/math/scalar.h"
 #include "foundation/strings/format.h"
-#include "plugins/terrain/terrain.h"
+#include "rxe/terrain/terrain.h"
 
 #include <float.h>
 #include <math.h>

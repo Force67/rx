@@ -70,7 +70,7 @@ reproduces the layout beside build-tree executables, re-copied every build:
 
 ```cmake
 rx_stage_content(mygame mytool)               # Data/ beside both (same directory)
-rx_stage_content(rx_editor LOOSE_ENGINE_CONFIG)   # engine builds: + rxe/config/
+rx_stage_content(rx_editor_app LOOSE_ENGINE_CONFIG)   # engine builds: + rxe/config/
 add_custom_target(mygame_config ALL COMMAND ${CMAKE_COMMAND} -E
   copy_directory_if_different ${CMAKE_CURRENT_SOURCE_DIR}/config $<TARGET_FILE_DIR:mygame>/config)
 add_dependencies(mygame mygame_config)

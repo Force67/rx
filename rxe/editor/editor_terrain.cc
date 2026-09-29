@@ -42,7 +42,7 @@ u32 PackRgba(const base::Array<u8, 4>& color) {
          (static_cast<u32>(color[2]) << 8) | color[3];
 }
 
-class TerrainCommand final : public edit::Command {
+class TerrainCommand final : public editor::Command {
  public:
   using Refresh = base::Function<void(base::Span<const terrain::TerrainTileKey>)>;
 
@@ -452,7 +452,7 @@ void Editor::UpdateModeInteraction(bool lmb_down, bool lmb_edge) {
     initial.push_back(
         {renderable, {{&renderable->props[0], scene::PropValue::AssetIdV(placement_.mesh.hash)}}});
     initial.push_back({name, {{&name->props[0], scene::PropValue::String(placement_.name)}}});
-    undo_.Push(*world_, edit::MakeCreateEntity(base::move(initial), nullptr));
+    undo_.Push(*world_, editor::MakeCreateEntity(base::move(initial), nullptr));
     doc_dirty_ = true;
     MarkDirty();
   };

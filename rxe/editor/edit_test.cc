@@ -16,15 +16,15 @@
 #include "rxe/asset/asset_id.h"
 #include "rxe/asset/vfs.h"
 #include "rxe/ecs/world.h"
-#include "rxe/edit/selection.h"
-#include "rxe/edit/undo.h"
+#include "rxe/editor/selection.h"
+#include "rxe/editor/undo.h"
 #include "rxe/scene/components.h"
 #include "rxe/scene/hierarchy.h"
 #include "rxe/scene/reflect.h"
 #include "rxe/scene/scene_io.h"
 
 using namespace rx;
-using namespace rx::edit;
+using namespace rx::editor;
 
 namespace {
 

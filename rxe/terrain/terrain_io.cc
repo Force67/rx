@@ -4,7 +4,7 @@
 #include "base/strings/string_ref.h"
 #include "base/strings/xstring.h"
 #include "foundation/math/scalar.h"
-#include "plugins/terrain/terrain.h"
+#include "rxe/terrain/terrain.h"
 
 #include <math.h>
 

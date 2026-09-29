@@ -7,7 +7,7 @@
 #include "foundation/build_config/export.h"
 
 // Compact, versioned, explicit-little-endian persistence for inventories and
-// equipment. A self-contained binary blob is used rather than edit::/.rxscene
+// equipment. A self-contained binary blob is used rather than editor::/.rxscene
 // reflection: inventories are frequently-mutated gameplay state saved to a game
 // save file, not editor scene documents, and the blob wants to be stable,
 // tiny and independent of the editor module's schema. See the module README for

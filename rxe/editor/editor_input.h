@@ -7,7 +7,7 @@ namespace rx::ui {
 class InputMap;
 }  // namespace rx::ui
 
-namespace rx {
+namespace rx::editor {
 
 
 // The editor's action/axis set. The engine owns no verbs, so the app defines
@@ -31,6 +31,6 @@ enum class Axis : ui::AxisId { kMoveX, kMoveY, kLookX, kLookY, kCount };
 
 void RegisterEditorInput(ui::InputMap& map);
 
-}  // namespace rx
+}  // namespace rx::editor
 
 #endif  // RX_EDITOR_INPUT_H_

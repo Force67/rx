@@ -398,3 +398,8 @@ symbol  rx::kMaxAxes rx::ui::kMaxAxes
 symbol  rx::ComputeSkyLighting rx::app::ComputeSkyLighting
 symbol  rx::SkyLighting rx::app::SkyLighting
 symbol  rx::WorldClock rx::app::WorldClock
+
+# Phase 6c: the editor becomes rx::editor (rxe/editor), terrain joins the engine
+prefix  rxe/edit/ rxe/editor/
+prefix  plugins/terrain/ rxe/terrain/
+symbol  edit:: editor::

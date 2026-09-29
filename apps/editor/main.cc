@@ -5,8 +5,8 @@
 #include <base/option.h>
 
 #include "base/strings/xstring.h"
-#include "editor_app.h"
 #include "rxe/app/host.h"
+#include "rxe/editor/editor_app.h"
 
 int main(int argc, char** argv) {
   base::String open_path;
@@ -15,9 +15,6 @@ int main(int argc, char** argv) {
     if (!a.empty() && a[0] != '-') open_path = a;
   }
 
-#if defined(RX_SHARED_BUILD)
-  rx::base::InitOptionsFromEnv();
-#endif
 
   rx::app::AppConfig config;
   config.id = "xn5ec6v99hcwg9d8xzbqshr0";

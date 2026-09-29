@@ -20,13 +20,13 @@
 #include "base/memory/move.h"
 #include "base/optional.h"
 #include "base/strings/xstring.h"
-#include "plugins/terrain/terrain.h"
-#include "rxe/edit/selection.h"
-#include "rxe/edit/undo.h"
+#include "rxe/editor/selection.h"
+#include "rxe/editor/undo.h"
 #include "rxe/scene/fly_camera.h"
 #include "rxe/scene/hierarchy.h"
 #include "rxe/scene/reflect.h"
 #include "rxe/scene/scene_io.h"
+#include "rxe/terrain/terrain.h"
 #include "rxe/ui/ugui/ugui_backend.h"
 #include "rxe/ui/ugui/ugui_platform.h"
 #include "rxe/world/world_bake.h"
@@ -262,8 +262,8 @@ private:
 
   // editor state
   scene::FlyCamera camera_;
-  edit::Selection selection_;
-  edit::UndoStack undo_;
+  editor::Selection selection_;
+  editor::UndoStack undo_;
   base::Optional<asset::AssetDatabase> assets_; // constructed once vfs is known
   GizmoMode gizmo_mode_ = GizmoMode::kTranslate;
   EditorMode editor_mode_ = EditorMode::kSelect;

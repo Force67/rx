@@ -11,7 +11,7 @@ rx_add_module(world
   world_overlay.cc
   world_stream.cc
 )
-target_link_libraries(rx_world PUBLIC rx::foundation rx::ecs rx::asset rx::scene rx::edit)
+target_link_libraries(rx_world PUBLIC rx::foundation rx::ecs rx::asset rx::scene)
 
 if(RX_BUILD_TESTS)
   add_executable(world_format_test world_format_test.cc)
@@ -23,7 +23,7 @@ if(RX_BUILD_TESTS)
   add_test(NAME world_map_test COMMAND world_map_test)
 
   add_executable(world_stream_test world_stream_test.cc)
-  target_link_libraries(world_stream_test PRIVATE rx::world rx::edit rx::asset rx::scene rx::ecs rx::foundation)
+  target_link_libraries(world_stream_test PRIVATE rx::world rx::asset rx::scene rx::ecs rx::foundation)
   add_test(NAME world_stream_test COMMAND world_stream_test)
 
   add_executable(world_overlay_test world_overlay_test.cc)
@@ -42,7 +42,7 @@ if(RX_BUILD_TESTS)
   # The cook's per-entity verdict, which the editor shows for the selection.
   # A label that lies about what an object will become is worse than no label.
   add_executable(world_classify_test world_classify_test.cc)
-  target_link_libraries(world_classify_test PRIVATE rx::world rx::edit rx::ecs rx::foundation)
+  target_link_libraries(world_classify_test PRIVATE rx::world rx::ecs rx::foundation)
   add_test(NAME world_classify_test COMMAND world_classify_test)
 endif()
 
