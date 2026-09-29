@@ -362,7 +362,7 @@ What has to exist once per process, and how the shared build keeps it so:
 | `physics/aircraft` etc. | vehicles inside the physics module | done (2b): `engine/vehicles` |
 | `asset/usd_loader` etc. | every asset user links tinyusdz | done (2b): `engine/importers/*` |
 | `render/util` | grab-bag | done (4c): `gpu/rhi`, `asset/exr_write`, `ui/imgui` |
-| `runtime/engine_context.h` | god object passed to every demo | phase 6, with the rest of `runtime/` |
+| `runtime/engine_context.h` | god object passed to every demo | done (6d): deleted, each demo takes the services it uses |
 | `fly_camera` | duplicated in `runtime/` and `apps/editor/` | done (2b): `scene::FlyCamera`, fed a resolved `FlyCameraInput` |
 | `core/features.def` | one file every feature edits | done (5b): flags live where they are read |
 | `CMakeLists.txt` | 1381 lines, registers every test centrally | done (4b): each module registers its own |
@@ -433,8 +433,9 @@ and after.
      from `plugins/` into `rxe/`: terrain editing is built into the editor, and
      an engine module cannot depend on a plugin. It can return to `plugins/`
      with its editor mode once the editor has an extension point.
-   - 6d: `EngineContext` goes away; the demos move to `apps/shell/demos` in
-     `rx::shell`.
+   - 6d (done): `EngineContext` goes away (the viewer's settings are
+     `ViewerConfig`); the demos move to `apps/shell/demos`, and all of
+     `apps/shell` is `rx::shell`.
 7. **Renderer features.** A separate design note for `RenderFeature`, then split
    `renderer.cc`.
 

@@ -3,7 +3,7 @@
 #include "foundation/math/scalar.h"
 #include "showcase_camera.h"
 
-namespace rx {
+namespace rx::shell {
 
 void ShowcaseCamera::Add(Waypoint wp) {
   total_ = keys_.empty() ? 0.0f : total_ + rx::Max(0.0f, wp.travel);
@@ -54,5 +54,5 @@ int ShowcaseCamera::CaptureCrossed(f32 prev_t, f32 t, base::String* label) const
   return -1;
 }
 
-}  // namespace rx
+}  // namespace rx::shell
 

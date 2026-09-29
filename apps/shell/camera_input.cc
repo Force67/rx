@@ -8,7 +8,7 @@
 
 #include "base/memory/move.h"
 #include "base/strings/xstring.h"
-#include "demo_scenes.h"
+#include "demos/scenes.h"
 #include "foundation/files/file_system.h"
 #include "foundation/logging/log.h"
 #include "foundation/math/math.h"
@@ -20,7 +20,7 @@
 // Camera and input: routes per-frame input to the free-fly camera, the
 // scripted camera drivers (orbit / replay / cinematic showcase / record), and
 // the debug physics toss.
-namespace rx {
+namespace rx::shell {
 
 // Camera / capture overrides, populated from the environment by
 // base::InitOptionsFromEnv() at startup.
@@ -210,4 +210,4 @@ void Viewer::ThrowPhysicsCube() {
   if (window_ && input_map_->rumble) window_->SetRumble(0.35f, 0.7f, 180);  // toss kick
 }
 
-}  // namespace rx
+}  // namespace rx::shell

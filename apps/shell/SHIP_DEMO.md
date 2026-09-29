@@ -7,7 +7,7 @@ drives the ship through the same public physics/render APIs the water demo uses
 (`AddDynamicBox` + the buoyancy callback, `WaterDisturbance` wakes, additive demo
 particles) and touches no engine internals, water shaders, or `FrameGlobals`.
 
-All the code lives in `apps/shell/demo_ship.{h,cc}`. The registry wiring is three
+All the code lives in `apps/shell/demos/ship.{h,cc}`. The registry wiring is three
 lines: a `ship_` member on `DemoScenes`, a dispatch arm in `CreateDemoScene`, and
 one `ship_->Emit(...)` call in `EmitToView`.
 

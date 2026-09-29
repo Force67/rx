@@ -41,7 +41,7 @@ resets to the region presets.
 | CPU side, presets, tiers, CPU mirror | `rxe/render/pipeline/human_material.{h,cc}` |
 | Authored parameters | `asset::Material::HumanParams` (`rxe/asset/material.h`) |
 | Reference comparison pass | `rxe/render/post/reference_compare.{h,cc}` |
-| The bench | `apps/shell/demo_lookdev.{h,cc}` (`--demo lookdev`) |
+| The bench | `apps/shell/demos/lookdev.{h,cc}` (`--demo lookdev`) |
 | Residual fitting | `tools/fit_residual.py` |
 | Regression test | `rxe/render/pipeline/human_brdf_test.cc` |
 

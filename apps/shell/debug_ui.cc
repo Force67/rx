@@ -44,7 +44,7 @@
 #define RX_VERSION "unknown"
 #endif
 
-namespace rx {
+namespace rx::shell {
 namespace {
 
 // Config toggle formerly read from getenv (populated by base::InitOptionsFromEnv).
@@ -1138,11 +1138,11 @@ void DebugUi::ScanPresetFiles() {
   if (preset_file_choice_ >= static_cast<int>(preset_files_.size())) preset_file_choice_ = 0;
 }
 
-}  // namespace rx
+}  // namespace rx::shell
 
 #else  // !RX_HAS_IMGUI
 
-namespace rx {
+namespace rx::shell {
 
 DebugUi::DebugUi() = default;
 DebugUi::~DebugUi() = default;
@@ -1153,6 +1153,6 @@ void DebugUi::Build(render::Renderer&, scene::FlyCamera&, const ecs::World&, f32
 bool DebugUi::wants_mouse() const { return false; }
 bool DebugUi::wants_keyboard() const { return false; }
 
-}  // namespace rx
+}  // namespace rx::shell
 
 #endif  // RX_HAS_IMGUI

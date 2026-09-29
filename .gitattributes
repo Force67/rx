@@ -1,4 +1,4 @@
 rxe/resources/fonts/**/*.ttf binary
-apps/shell/feature_gym/assets/*.rgba binary
-apps/shell/feature_gym/assets/*.wav binary
-apps/shell/feature_gym/screenshots/*.jpg binary
+apps/shell/demos/feature_gym/assets/*.rgba binary
+apps/shell/demos/feature_gym/assets/*.wav binary
+apps/shell/demos/feature_gym/screenshots/*.jpg binary

@@ -35,7 +35,7 @@ static const float kWetMargin = 1.0;    // splash/capillary rise above the water
 // Height source. The demo beach is a radial gaussian dome that peaks `peak`
 // above the rest water at its center and falls to -peak far out, so the
 // waterline sits near sigma*sqrt(2 ln2). Mirrors the mesh built in
-// demo_scenes.cc. A captured top-down heightmap would replace this function
+// apps/shell/demos/scenes.cc. A captured top-down heightmap would replace this function
 // (the rest of the pass is agnostic to how the terrain height is produced).
 float TerrainHeight(float2 world) {
   float2 d = world - push.island.xy;

@@ -27,6 +27,7 @@
 #include "scene_authoring.h"
 
 using namespace rx;
+using namespace rx::shell;
 
 namespace {
 

@@ -18,7 +18,7 @@
 #include "rxe/scene/scene_io.h"
 #include "scene_authoring.h"
 
-namespace rx {
+namespace rx::shell {
 namespace {
 
 // One loaded preset. The database owns the assets the loader resolves against
@@ -239,4 +239,4 @@ bool DumpMaterialPalette(const base::String& dir) {
   return true;
 }
 
-}  // namespace rx
+}  // namespace rx::shell

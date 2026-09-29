@@ -1,5 +1,5 @@
-#ifndef RX_RUNTIME_VIEWER_H_
-#define RX_RUNTIME_VIEWER_H_
+#ifndef RX_APPS_SHELL_VIEWER_H_
+#define RX_APPS_SHELL_VIEWER_H_
 
 #include <stdio.h>
 
@@ -23,13 +23,13 @@
 #include "base/memory/unique_pointer.h"
 #include "base/strings/xstring.h"
 #include "debug_ui.h"
-#include "demo_world.h"
-#include "engine_context.h"
+#include "demos/world.h"
+#include "viewer_config.h"
 #include "rxe/scene/fly_camera.h"
 #include "showcase_camera.h"
 #include "viewer_input.h"
 
-namespace rx {
+namespace rx::shell {
 
 class DemoScenes;
 
@@ -40,7 +40,7 @@ class DemoScenes;
 // viewer policy; the subsystems and the loop live in app::Host.
 class Viewer : public app::Application {
  public:
-  explicit Viewer(const EngineConfig& config);
+  explicit Viewer(const ViewerConfig& config);
   ~Viewer() override;
 
   bool OnInitialize(app::Services& services) override;
@@ -91,7 +91,7 @@ class Viewer : public app::Application {
   // --world: the baked-world streamer, when one was asked for.
   WorldStreamDemo world_stream_;
 
-  EngineConfig config_;
+  ViewerConfig config_;
 
   // Engine services, cached from app::Services at OnInitialize. Owned by the
   // host; stable for its lifetime.
@@ -185,10 +185,14 @@ class Viewer : public app::Application {
   devtools::CommandEndpoint authoring_endpoint_;
 
   // Shared service bundle handed to the demo scenes and the debug overlay.
-  EngineContext ctx_;
+  asset::Vfs* vfs_ = nullptr;
+  // Set by a demo that stages its own lighting, so the day/night clock stops
+  // re-driving sun direction/intensity/ambient every frame (RX_SUN_DIR has the
+  // same effect globally).
+  bool scene_owns_sun_ = false;
   base::UniquePointer<DemoScenes> demos_;
 };
 
-}  // namespace rx
+}  // namespace rx::shell
 
-#endif  // RX_RUNTIME_VIEWER_H_
+#endif  // RX_APPS_SHELL_VIEWER_H_

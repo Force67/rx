@@ -1,5 +1,5 @@
-#ifndef RX_RUNTIME_VIEWER_INPUT_H_
-#define RX_RUNTIME_VIEWER_INPUT_H_
+#ifndef RX_APPS_SHELL_VIEWER_INPUT_H_
+#define RX_APPS_SHELL_VIEWER_INPUT_H_
 
 #include "rxe/scene/fly_camera.h"
 #include "rxe/ui/events/input_actions.h"
@@ -8,7 +8,7 @@ namespace rx::ui {
 class InputMap;
 }  // namespace rx::ui
 
-namespace rx {
+namespace rx::shell {
 
 
 // The viewer's action set. The engine owns no verbs, so the application defines
@@ -39,6 +39,6 @@ void RegisterViewerInput(ui::InputMap& map);
 // The free camera's intent from this frame's resolved viewer actions.
 scene::FlyCameraInput FlyCameraIntent(const ui::ActionState& actions);
 
-}  // namespace rx
+}  // namespace rx::shell
 
-#endif  // RX_RUNTIME_VIEWER_INPUT_H_
+#endif  // RX_APPS_SHELL_VIEWER_INPUT_H_

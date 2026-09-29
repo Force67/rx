@@ -27,7 +27,7 @@
 #include "rxe/scene/scene_io.h"
 #include "scene_authoring.h"
 
-namespace rx {
+namespace rx::shell {
 namespace {
 
 struct Finding {
@@ -860,4 +860,4 @@ bool ValidateSceneFile(const base::String& path, bool json) {
   return report.errors() == 0;
 }
 
-}  // namespace rx
+}  // namespace rx::shell
