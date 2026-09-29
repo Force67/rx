@@ -50,6 +50,13 @@ if(RX_RHI_VULKAN)
   if(RX_SPIRV_1_4)
     target_compile_definitions(rx_gpu PUBLIC RX_SPIRV_1_4=1)
   endif()
+  # NGX's instance and device extensions (VK_NVX_binary_import among them)
+  # must be enabled when the device is created, long before render's DLSS
+  # code runs. Without them NGX calls a null vkCreateCuModuleNVX.
+  if(RX_DLSS)
+    target_compile_definitions(rx_gpu PRIVATE RX_HAS_DLSS)
+    target_link_libraries(rx_gpu PRIVATE $<BUILD_INTERFACE:rx::dlss>)
+  endif()
 endif()
 
 if(RX_RHI_D3D12)
