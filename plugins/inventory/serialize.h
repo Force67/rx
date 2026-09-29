@@ -4,7 +4,7 @@
 
 #include "base/containers/vector.h"
 #include "foundation/build_config/types.h"
-#include "plugins/inventory/export.h"
+#include "foundation/build_config/export.h"
 
 // Compact, versioned, explicit-little-endian persistence for inventories and
 // equipment. A self-contained binary blob is used rather than edit::/.rxscene

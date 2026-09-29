@@ -190,6 +190,7 @@ write_basic_package_version_file(
   COMPATIBILITY SameMajorVersion)
 
 install(FILES
+  ${PROJECT_SOURCE_DIR}/cmake/modules.cmake
   ${CMAKE_CURRENT_BINARY_DIR}/rxConfig.cmake
   ${CMAKE_CURRENT_BINARY_DIR}/rxConfigVersion.cmake
   DESTINATION ${RX_INSTALL_CMAKEDIR})

@@ -4,7 +4,7 @@
 
 #include "base/memory/unique_pointer.h"
 #include "foundation/build_config/types.h"
-#include "plugins/weather/export.h"
+#include "foundation/build_config/export.h"
 #include "rxe/audio/audio_clip.h"
 
 namespace rx::weather {

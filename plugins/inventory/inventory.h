@@ -2,7 +2,7 @@
 #define RX_INVENTORY_INVENTORY_H_
 
 #include "plugins/inventory/components.h"
-#include "plugins/inventory/export.h"
+#include "foundation/build_config/export.h"
 #include "plugins/inventory/item_catalog.h"
 
 // Free-function operations over Inventory/Equipment components (functional-first

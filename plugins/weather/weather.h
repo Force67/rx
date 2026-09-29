@@ -22,7 +22,7 @@
 #include "base/functional/function.h"
 #include "foundation/build_config/types.h"
 #include "foundation/math/math.h" // Vec2 (weather map XZ offset), Vec3
-#include "plugins/weather/export.h"
+#include "foundation/build_config/export.h"
 #include "rxe/render/atmosphere/cloudscape_types.h"
 #include "rxe/render/core/settings.h"
 

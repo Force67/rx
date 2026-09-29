@@ -136,6 +136,10 @@ endif()
 # the rx module targets
 include("${CMAKE_CURRENT_LIST_DIR}/rxTargets.cmake")
 
+# rx_add_module, so a game's own modules and third-party plugins build exactly
+# like rx's (export macro, visibility, warnings).
+include("${CMAKE_CURRENT_LIST_DIR}/modules.cmake")
+
 # re-attach the bundled closure to the rx:: targets
 if(TARGET rx::foundation)
   set_property(TARGET rx::foundation APPEND PROPERTY

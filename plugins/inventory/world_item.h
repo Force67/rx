@@ -7,7 +7,7 @@
 #include "foundation/build_config/types.h"
 #include "foundation/math/math.h"
 #include "plugins/inventory/components.h"
-#include "plugins/inventory/export.h"
+#include "foundation/build_config/export.h"
 #include "plugins/inventory/item_catalog.h"
 #include "rxe/ecs/entity.h"
 #include "rxe/scene/components.h"
