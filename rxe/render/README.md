@@ -3,14 +3,15 @@
 Read this before touching anything in this directory. It exists so changes
 (human or LLM) keep the renderer portable, data-driven and verifiable. For the
 backend abstraction itself (device model, D3D12 mapping, HDR presentation),
-read `RHI.md`; this file is about how to *add and modify* renderer code
+read `RHI.md`; for where the frame is headed (`RenderFeature`), read
+`FEATURES.md`. This file is about how to *add and modify* renderer code
 without degrading it.
 
 ## Map
 
 ```
-rhi/          public backend-agnostic API (the ONLY thing passes may use)
-vulkan/ d3d12/ null/   backends; each translates rhi/ in its own directory
+../gpu/rhi/   public backend-agnostic API (the ONLY thing passes may use)
+../gpu/vulkan/ d3d12/ null/   backends; each translates rhi/ in its own directory
 core/         renderer orchestration, render graph, bindless, settings, presets
 pipeline/     opaque geometry path: mesh pipeline, materials, culling, meshlets
 gi/           shadows, DDGI, RCGI (light grid + radiance cache + cascades), ReSTIR, path tracers, denoisers, RT context
@@ -22,8 +23,6 @@ texturing/    virtual texturing
 shaders/      HLSL, mirrored per subsystem; rhi_bindings.hlsli is the ABI glue
               human_brdf.hlsli / human_eye.hlsli are the character surface
               model every light path shares (docs/CHARACTER_RENDERING.md)
-util/         gpu profiler, EXR/screenshot, shader utilities
-presets/      quality tier definitions
 ```
 
 ## Iron rules

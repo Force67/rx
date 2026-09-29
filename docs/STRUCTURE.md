@@ -262,8 +262,8 @@ organization, renamed to say what they hold:
 
 The real problem is `renderer/renderer.cc`: 8.1k lines that know every feature.
 Splitting render into per-feature modules first needs a `RenderFeature`
-interface that the render graph drives. That gets its own design note and is
-the last phase here. Once it lands, `render/water` and the others can each
+interface that the render graph drives. Its design note is
+`rxe/render/FEATURES.md`. Once it lands, `render/water` and the others can each
 become a module, and water or hair can become a plugin.
 
 ## Application, plugins and apps
@@ -436,8 +436,11 @@ and after.
    - 6d (done): `EngineContext` goes away (the viewer's settings are
      `ViewerConfig`); the demos move to `apps/shell/demos`, and all of
      `apps/shell` is `rx::shell`.
-7. **Renderer features.** A separate design note for `RenderFeature`, then split
-   `renderer.cc`.
+7. **Renderer features.** (done) The design note is `rxe/render/FEATURES.md`.
+   `renderer.cc` is split by concern into `renderer.cc` (lifecycle),
+   `renderer_upload.cc`, `renderer_frame.cc`, `renderer_capture.cc` and
+   `renderer_debug.cc`. `BuildFrameGraph` shrinks as features migrate to
+   `RenderFeature`, one per change, per the note.
 
 Out-of-tree consumers (recreation, anyvoxel) break whenever a header moves.
 `tools/rewrite_includes/renames.txt` records every include and symbol rename
