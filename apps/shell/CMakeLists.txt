@@ -40,7 +40,7 @@ set(RX_RUNTIME_MODULES
   rx::blend
   rx::scene
   # .rxscene text scenes: component reflection + the text loader.
-  rx::edit
+ 
   # --world: baked worlds streamed around the camera.
   rx::world
   # --authoring-endpoint / --dump-commands: the live script command surface.
@@ -125,7 +125,7 @@ endif()
 add_library(viewer_scene_authoring STATIC scene_authoring.cc)
 target_include_directories(viewer_scene_authoring PUBLIC ${CMAKE_CURRENT_SOURCE_DIR})
 target_link_libraries(viewer_scene_authoring PUBLIC
-  rx::gltf rx::materialx rx::edit rx::scene rx::ecs rx::asset rx::render rx::foundation)
+  rx::gltf rx::materialx rx::scene rx::ecs rx::asset rx::render rx::foundation)
 rx_set_warnings(viewer_scene_authoring)
 
 add_executable(rx main.cc ${RX_RUNTIME_SOURCES})

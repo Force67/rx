@@ -281,7 +281,6 @@ if(NOT DEFINED RX_MODULES)
     importers
     scene
     terrain
-    edit
     world
     render
     ui/imgui
@@ -304,6 +303,7 @@ if(NOT DEFINED RX_MODULES)
     locomotion
     ui/ugui
     app
+    editor
   )
 endif()
 

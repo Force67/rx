@@ -1,4 +1,4 @@
-#include "rxe/edit/undo.h"
+#include "rxe/editor/undo.h"
 
 #include "base/containers/pair.h"
 #include "base/containers/vector.h"
@@ -12,7 +12,7 @@
 #include "rxe/scene/components.h"
 #include "rxe/scene/hierarchy.h"
 
-namespace rx::edit {
+namespace rx::editor {
 namespace {
 
 u64 RandomGuid() {
@@ -444,4 +444,4 @@ base::UniquePointer<Command> MakeRemoveComponent(ecs::World &world,
   return base::MakeUnique<RemoveComponentCommand>(world, entity, comp);
 }
 
-} // namespace rx::edit
+} // namespace rx::editor

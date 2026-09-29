@@ -79,7 +79,7 @@ after any bulk removal so equipped slots referencing vanished items clear.
 
 Inventories and world items serialize to compact, explicit-little-endian blobs
 (`byte_io.h`): a 4-byte magic + `u32` version + records. This was chosen over
-`rxe/edit/` reflection + `.rxscene` deliberately:
+`rxe/scene/` reflection + `.rxscene` deliberately:
 
 - Inventories are **frequently-mutated gameplay state** written to a *game save
   file*, not editor scene documents. They want a tiny, stable, self-describing

@@ -74,11 +74,12 @@ rxe/                  the engine (Chromium: content/)
   world_bake/         offline world baking (tools and the editor link it, games do not)
   devtools/           the command bridge and endpoint (rxcall, agents)
   app/                Host, Application, AppConfig, platform config, world clock
+  terrain/            heightfield terrain (the editor edits it, so it is engine)
   editor/             the editor itself: selection, undo, panels, editor ui
   resources/          everything in rxe://: fonts/, config/
 
 plugins/              optional, enabled per app (Chromium: components/)
-  character/  combat/  inventory/  locomotion/  placement/  terrain/
+  character/  combat/  inventory/  locomotion/  placement/
   nav/                nav/ + nav_debug/ (the only half that knows the renderer)
   replication/        replication/ + replication_debug/
   vehicles/           cars, boats, aircraft, kites: physics, profiles, engine audio
@@ -124,8 +125,10 @@ of that:
   `ecs`, `scene`, `script`, `world` or `app`. They work on their own handles, so
   they can be tested without an entity world, and `scene`/`app` are the only
   places that bind them to entities. This already holds today; the rule keeps it.
-- **Nothing depends on `app`.** It is the engine's composition root: the only
-  module that knows every subsystem, with no feature logic of its own.
+- **Nothing depends on `app` except apps and `editor`.** It is the engine's
+  composition root: the only module that knows every subsystem, with no feature
+  logic of its own. The editor is the one engine module that is itself an
+  application (games extend it), so it sits on the host the way an app does.
 - **Nothing a shipping game must link depends on `editor`, `world_bake` or
   `importers/usd`.** An app gets them only by asking.
 
@@ -424,7 +427,12 @@ and after.
      local `export.h` workarounds are gone) and ships in the install package.
      `RX_PLUGIN`, `PluginRegistry` and `rx_add_app` wait for a plugin that
      needs startup registration; none does today.
-   - 6c: `rxe/editor` and a thin `apps/editor`, per-game editors.
+   - 6c (done): `rxe/editor` (`rx::editor`: the editor app code plus
+     selection and undo from `edit`) and `apps/editor`, now a `main.cc`. A
+     game's editor is its own `main.cc` over `rx::editor`. `terrain` moves
+     from `plugins/` into `rxe/`: terrain editing is built into the editor, and
+     an engine module cannot depend on a plugin. It can return to `plugins/`
+     with its editor mode once the editor has an extension point.
    - 6d: `EngineContext` goes away; the demos move to `apps/shell/demos` in
      `rx::shell`.
 7. **Renderer features.** A separate design note for `RenderFeature`, then split

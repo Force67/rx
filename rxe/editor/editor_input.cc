@@ -3,7 +3,7 @@
 #include "rxe/ui/events/input.h"
 #include "rxe/ui/events/input_bindings.h"
 
-namespace rx {
+namespace rx::editor {
 
 void RegisterEditorInput(ui::InputMap& map) {
   map.RegisterAction(Action::kMoveForward, "move_forward");
@@ -57,4 +57,4 @@ void RegisterEditorInput(ui::InputMap& map) {
   });
 }
 
-}  // namespace rx
+}  // namespace rx::editor

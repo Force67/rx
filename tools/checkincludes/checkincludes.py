@@ -23,9 +23,10 @@ BASELINE = os.path.join(os.path.dirname(os.path.abspath(__file__)), "baseline.tx
 # Modules that work on their own handles and must not know the entity world.
 ENTITY_FREE = {"foundation", "events", "window", "gpu", "imgui_renderer", "ui", "asset", "audio", "net", "http", "rpc", "physics",
                "anim", "render", "render2d"}
-ENTITY_WORLD = {"ecs", "scene", "script", "world", "edit", "devtools", "app"}
-# Headers only the editor and tools may use; a shipping game never links them.
-EDITOR_ONLY = {"rxe/edit/selection.h", "rxe/edit/undo.h", "rxe/world/world_bake.h"}
+ENTITY_WORLD = {"ecs", "scene", "script", "world", "editor", "devtools", "app"}
+# Code only the editor and tools may use; a shipping game never links it.
+EDITOR_ONLY_DIRS = ("rxe/editor/",)
+EDITOR_ONLY = {"rxe/world/world_bake.h"}
 HEADER_EXTS = (".h", ".hpp", ".inl", ".def")
 SOURCE_EXTS = (".cc", ".cpp", ".c") + HEADER_EXTS
 CODE_DIRS = ("foundation", "rxe", "plugins", "apps", "tools")
@@ -186,9 +187,11 @@ def check(graph):
       for mod in sorted(mods):
         if mod in ENTITY_FREE and dep_mods & ENTITY_WORLD:
           found.append(("entity-free", "%s may not know the entity world" % mod))
-        if "app" in dep_mods:
-          found.append(("host", "only apps may depend on the host"))
-        if rel(dep) in EDITOR_ONLY:
+        # The editor is the one engine module that is itself an application
+        # (games extend it), so it may sit on the host like an app does.
+        if "app" in dep_mods and mod != "editor":
+          found.append(("host", "only apps and the editor may depend on the host"))
+        if mod != "editor" and (rel(dep) in EDITOR_ONLY or rel(dep).startswith(EDITOR_ONLY_DIRS)):
           found.append(("editor-only", "a library may not use editor-only code"))
         if mod not in plugins and dep_mods & plugins:
           found.append(("plugin", "engine module %s may not depend on a plugin" % mod))

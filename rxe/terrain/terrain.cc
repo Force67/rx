@@ -4,7 +4,7 @@
 #include "base/numeric_limits.h"
 #include "base/optional.h"
 #include "foundation/math/scalar.h"
-#include "plugins/terrain/terrain.h"
+#include "rxe/terrain/terrain.h"
 
 #include <float.h>
 #include <math.h>

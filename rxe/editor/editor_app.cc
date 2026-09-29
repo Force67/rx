@@ -870,7 +870,7 @@ void Editor::OnUpdate(f32 dt) {
   if (!ctrl && editor_mode_ == EditorMode::kSelect && over_vp &&
       edge(ui::Key::kDelete)) {
     if (ecs::Entity e = selection_.primary()) {
-      undo_.Push(*world_, edit::MakeDestroyEntity(*world_, e));
+      undo_.Push(*world_, editor::MakeDestroyEntity(*world_, e));
       selection_.Clear();
       MarkDirty();
       doc_dirty_ = true;
@@ -1099,7 +1099,7 @@ void Editor::UpdateGizmo(f32 mx, f32 my, bool lmb_down, bool lmb_edge) {
     const scene::ComponentDesc *comp = scene::FindComponentByName("Transform");
     if (comp) {
       undo_.Push(*world_,
-                 edit::MakeSetProp(*world_, e, *comp, comp->props[0],
+                 editor::MakeSetProp(*world_, e, *comp, comp->props[0],
                                    scene::PropValue::Vec3(np.x, np.y, np.z)));
       doc_dirty_ = true;
     }
@@ -1577,10 +1577,10 @@ void Editor::RunAutopilot() {
     selection_.Set(e);
     undo_.BeginGroup("Move");
     undo_.Push(*world_,
-               edit::MakeSetProp(*world_, e, *xf, xf->props[0],
+               editor::MakeSetProp(*world_, e, *xf, xf->props[0],
                                  scene::PropValue::Vec3(-1.2f, 0.55f, 1.0f)));
     undo_.Push(*world_,
-               edit::MakeSetProp(*world_, e, *xf, xf->props[0],
+               editor::MakeSetProp(*world_, e, *xf, xf->props[0],
                                  scene::PropValue::Vec3(-1.2f, 0.55f, 2.0f)));
     undo_.EndGroup();
     doc_dirty_ = true;

@@ -15,7 +15,7 @@
 // other undo/redo steps is re-resolved through the world rather than dangling
 // (see scene::FindByGuid). The factory helpers snapshot whatever prior state
 // their Revert needs at construction time.
-namespace rx::edit {
+namespace rx::editor {
 
 class Command {
 public:
@@ -25,7 +25,7 @@ public:
   virtual const char *label() const = 0;
 };
 
-class RX_EDIT_EXPORT UndoStack {
+class RX_EDITOR_EXPORT UndoStack {
 public:
   // Applies `cmd` immediately, then records it (clearing the redo stack).
   // Inside a group the command is applied and buffered into the group.
@@ -65,7 +65,7 @@ private:
 };
 
 // Sets a single reflected field. Captures the current value for Revert.
-RX_EDIT_EXPORT base::UniquePointer<Command>
+RX_EDITOR_EXPORT base::UniquePointer<Command>
 MakeSetProp(ecs::World &world, ecs::Entity entity, const scene::ComponentDesc &comp,
             const scene::PropDesc &prop, scene::PropValue new_value);
 
@@ -73,7 +73,7 @@ MakeSetProp(ecs::World &world, ecs::Entity entity, const scene::ComponentDesc &c
 // entity's Guid is stable across undo/redo; *out_entity (may be null) receives
 // the live handle from the initial Apply inside UndoStack::Push only; a stack
 // address is safe, later undo/redo never writes through it.
-RX_EDIT_EXPORT base::UniquePointer<Command> MakeCreateEntity(
+RX_EDITOR_EXPORT base::UniquePointer<Command> MakeCreateEntity(
     base::Vector<base::Pair<const scene::ComponentDesc *,
                           base::Vector<base::Pair<const scene::PropDesc *, scene::PropValue>>>>
         initial,
@@ -81,25 +81,25 @@ RX_EDIT_EXPORT base::UniquePointer<Command> MakeCreateEntity(
 
 // Destroys an entity; snapshots all reflected components and their props (and
 // its Guid) so Revert recreates it faithfully.
-RX_EDIT_EXPORT base::UniquePointer<Command> MakeDestroyEntity(ecs::World &world,
+RX_EDITOR_EXPORT base::UniquePointer<Command> MakeDestroyEntity(ecs::World &world,
                                                           ecs::Entity entity);
 
 // Reparents an entity, preserving its world transform. An invalid new_parent
 // unparents it.
-RX_EDIT_EXPORT base::UniquePointer<Command>
+RX_EDITOR_EXPORT base::UniquePointer<Command>
 MakeReparent(ecs::World &world, ecs::Entity entity, ecs::Entity new_parent);
 
 // Adds a default-constructed component (no-op if already present). Revert
 // removes it (only if this command added it).
-RX_EDIT_EXPORT base::UniquePointer<Command>
+RX_EDITOR_EXPORT base::UniquePointer<Command>
 MakeAddComponent(ecs::World &world, ecs::Entity entity,
                  const scene::ComponentDesc &comp);
 
 // Removes a component; snapshots its props so Revert restores them.
-RX_EDIT_EXPORT base::UniquePointer<Command>
+RX_EDITOR_EXPORT base::UniquePointer<Command>
 MakeRemoveComponent(ecs::World &world, ecs::Entity entity,
                     const scene::ComponentDesc &comp);
 
-} // namespace rx::edit
+} // namespace rx::editor
 
 #endif // RX_EDIT_UNDO_H_

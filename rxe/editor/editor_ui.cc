@@ -1193,7 +1193,7 @@ bool Editor::RouteClick(const base::String &name, ugui::MouseButton) {
     initial.push_back({xf, {}});
     initial.push_back(
         {nm, {{&nm->props[0], scene::PropValue::String("Empty")}}});
-    undo_.Push(*world_, edit::MakeCreateEntity(base::move(initial), &out));
+    undo_.Push(*world_, editor::MakeCreateEntity(base::move(initial), &out));
     selection_.Set(out);
     doc_dirty_ = true;
     MarkDirty();
@@ -1201,7 +1201,7 @@ bool Editor::RouteClick(const base::String &name, ugui::MouseButton) {
   }
   if (name == "hier_del") {
     if (ecs::Entity e = selection_.primary()) {
-      undo_.Push(*world_, edit::MakeDestroyEntity(*world_, e));
+      undo_.Push(*world_, editor::MakeDestroyEntity(*world_, e));
       selection_.Clear();
       doc_dirty_ = true;
       MarkDirty();
@@ -1229,7 +1229,7 @@ bool Editor::RouteClick(const base::String &name, ugui::MouseButton) {
     ecs::ComponentId id = tail_u("insp_add_");
     if (const scene::ComponentDesc *c = scene::FindComponent(id))
       if (ecs::Entity e = selection_.primary()) {
-        undo_.Push(*world_, edit::MakeAddComponent(*world_, e, *c));
+        undo_.Push(*world_, editor::MakeAddComponent(*world_, e, *c));
         add_menu_open_ = false;
         doc_dirty_ = true;
         MarkDirty();
@@ -1240,7 +1240,7 @@ bool Editor::RouteClick(const base::String &name, ugui::MouseButton) {
     ecs::ComponentId id = tail_u("insp_rm_");
     if (const scene::ComponentDesc *c = scene::FindComponent(id))
       if (ecs::Entity e = selection_.primary()) {
-        undo_.Push(*world_, edit::MakeRemoveComponent(*world_, e, *c));
+        undo_.Push(*world_, editor::MakeRemoveComponent(*world_, e, *c));
         doc_dirty_ = true;
         MarkDirty();
       }
@@ -1256,7 +1256,7 @@ bool Editor::RouteClick(const base::String &name, ugui::MouseButton) {
           c->props[pi].type == scene::PropType::kBool) {
         scene::PropValue v;
         scene::GetProp(*world_, e, *c, c->props[pi], &v);
-        undo_.Push(*world_, edit::MakeSetProp(*world_, e, *c, c->props[pi],
+        undo_.Push(*world_, editor::MakeSetProp(*world_, e, *c, c->props[pi],
                                               scene::PropValue::Bool(!v.b)));
         doc_dirty_ = true;
         MarkDirty();
@@ -1516,14 +1516,14 @@ void Editor::UpdateScrub() {
     euler[scrub_.axis] = scrub_.base_value + dx * scrub_.step;
     Quat q = EulerToQuat(euler);
     undo_.Push(*world_,
-               edit::MakeSetProp(*world_, scrub_.entity, *scrub_.comp, pd,
+               editor::MakeSetProp(*world_, scrub_.entity, *scrub_.comp, pd,
                                  scene::PropValue::Quat(q.x, q.y, q.z, q.w)));
   } else {
     if (pd.min != pd.max)
       nv = rx::Clamp(nv, pd.min, pd.max);
     scene::PropValue out = v;
     out.f[scrub_.axis] = nv;
-    undo_.Push(*world_, edit::MakeSetProp(*world_, scrub_.entity, *scrub_.comp,
+    undo_.Push(*world_, editor::MakeSetProp(*world_, scrub_.entity, *scrub_.comp,
                                           pd, out));
   }
   doc_dirty_ = true;

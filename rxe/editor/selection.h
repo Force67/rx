@@ -7,12 +7,12 @@
 #include "foundation/build_config/export.h"
 #include "rxe/ecs/entity.h"
 
-namespace rx::edit {
+namespace rx::editor {
 
 // The set of currently selected entities. The "primary" is the anchor for
 // single-target operations (the gizmo pivot, the inspector's subject): the most
 // recently added or set entity, and it stays valid as long as it is in the set.
-class RX_EDIT_EXPORT Selection {
+class RX_EDITOR_EXPORT Selection {
  public:
   void Clear();
   // Replaces the selection with a single entity (becomes primary).
@@ -34,6 +34,6 @@ class RX_EDIT_EXPORT Selection {
   ecs::Entity primary_{};
 };
 
-}  // namespace rx::edit
+}  // namespace rx::editor
 
 #endif  // RX_EDIT_SELECTION_H_
