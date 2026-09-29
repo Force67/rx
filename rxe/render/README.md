@@ -168,7 +168,7 @@ class FooPass {
    API validation alone does not prove sampling, motion, exposure, or history
    correctness. The previously documented `tests/golden/golden.py` does not exist.
 3. Cross-backend spot check for anything touching shared shaders or the RHI:
-   `vkrun env RX_RHI=d3d12 ./build/nix/runtime/rx --demo materials --no-rt`
+   `vkrun env RX_RHI=d3d12 ./build/nix/apps/shell/rx --demo materials --no-rt`
    should match Vulkan pixel-near-identically (see RHI.md for the method).
 4. One-off screenshots: `RX_UI_SHOT=/tmp/shot.png RX_UI_SHOT_FRAMES=45`. A
    capture run locks the clock at 1/60 s already, so time-driven systems land

@@ -5,7 +5,7 @@ rxscene 1
 # and the pbr lobes the mesh shaders actually shade.
 #
 # `rx --dump-schema` prints every component and prop this file may use.
-#   rx --scene runtime/scenes/showcase.rxscene --headless --shot out.png \
+#   rx --scene apps/shell/scenes/showcase.rxscene --headless --shot out.png \
 #      --shot-frames 20 --width 1280 --height 720
 
 entity

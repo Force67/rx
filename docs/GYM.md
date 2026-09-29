@@ -6,7 +6,7 @@ tunes eye heights, capsule dims and player scale against **known-size geometry**
 It is the validation and tuning environment for the character controller and a
 light showcase of the inventory module.
 
-Everything lives in `runtime/demo_gym.{h,cc}`. It touches no engine internals:
+Everything lives in `apps/shell/demo_gym.{h,cc}`. It touches no engine internals:
 it drives the two modules and the scene camera rig through their public APIs
 exactly as a game would. The registry wiring is the usual few lines: a `gym_`
 member on `DemoScenes`, a dispatch arm in `CreateDemoScene`, a `gym_->Emit(...)`
@@ -16,7 +16,7 @@ call in `EmitToView`, and (because the gym owns its camera + input) a
 Run it on a real GPU:
 
 ```
-DISPLAY=:10 vkrun ./build/linux/runtime/rx --demo gym
+DISPLAY=:10 vkrun ./build/linux/apps/shell/rx --demo gym
 ```
 
 ## Controls

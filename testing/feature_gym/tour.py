@@ -72,7 +72,7 @@ def smoke_check(path: Path) -> str | None:
 
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--binary", default=str(REPO / "build/linux/runtime/rx"))
+    parser.add_argument("--binary", default=str(REPO / "build/linux/apps/shell/rx"))
     parser.add_argument("--runner", default="", help="wrapper command, for example vkrun")
     parser.add_argument("--out", default=str(REPO / "build/feature-gym-tour"))
     parser.add_argument("--timeout", type=int, default=900)

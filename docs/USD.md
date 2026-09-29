@@ -4,7 +4,7 @@ rx reads OpenUSD stages (`.usd`, `.usda`, `.usdc`, `.usdz`) into the same
 `asset::ImportedScene` the glTF loader fills, so a USD stage and a `.glb` land
 in the viewer, the editor and the renderer through one path.
 
-- Viewer: `./build/linux/runtime/rx --usd assets/usd/attic/Attic_NVIDIA.usd`
+- Viewer: `./build/linux/apps/shell/rx --usd assets/usd/attic/Attic_NVIDIA.usd`
 - Editor: open a `.usd*` file like any other document (File > Open, or drop it in)
 - API: `importers::LoadUsdScene(path, &scene)` in `rxe/importers/usd/usd_loader.h` (link `rx::usd`)
 
@@ -34,7 +34,7 @@ cmake --preset linux       # RX_USD defaults ON, and off when the checkout is ab
 
 ```sh
 tools/get_usd_samples.sh attic
-./build/linux/runtime/rx --usd assets/usd/attic/Attic_NVIDIA.usd
+./build/linux/apps/shell/rx --usd assets/usd/attic/Attic_NVIDIA.usd
 ```
 
 They land in `assets/`, which is gitignored.

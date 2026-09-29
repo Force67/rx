@@ -26,7 +26,7 @@ tools/get_jolt.sh                                      # physics (optional but r
 tools/get_fidelityfx.sh; tools/get_nrd.sh; tools/get_dlss.sh  # optional
 cmake --preset linux
 cmake --build build/linux
-build/linux/runtime/rx --demo cornell
+build/linux/apps/shell/rx --demo cornell
 ```
 
 Other entry points: `rx --gltf <scene>`, `rx --usd <stage>`,

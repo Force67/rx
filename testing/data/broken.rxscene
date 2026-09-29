@@ -11,7 +11,7 @@ rxscene 1
 # bad number (line 36), and the validator falls back to a lenient load so the
 # report still covers the whole document rather than stopping there.
 #
-# Keep it in sync with the checks in runtime/scene_validate.cc: a check with no
+# Keep it in sync with the checks in apps/shell/scene_validate.cc: a check with no
 # entity here is a check nothing proves still fires. One exception, and it is
 # because of this file rather than despite it: discarded_transform needs the
 # anchor solve to have run, and the degenerate Stretch below makes

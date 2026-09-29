@@ -16,7 +16,7 @@ rxscene 1
 # Sheet's Transform y matches to stand the row on the floor. To add a material,
 # write the preset and add four lines here.
 #
-#   rx --scene runtime/scenes/material_sheet.rxscene --headless \
+#   rx --scene apps/shell/scenes/material_sheet.rxscene --headless \
 #      --shot sheet.png --shot-frames 20 --width 1440 --height 1080
 #
 # `rx --dump-materials` lists the palette with the values behind each name.

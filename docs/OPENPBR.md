@@ -9,7 +9,7 @@ with the model the spec prescribes.
   `importers::LoadUsdScene`
 - MaterialX: `importers::LoadMaterialX("thing.mtlx", &material)` on an
   `open_pbr_surface` node
-- Demo: `RX_MTLX=a.mtlx,b.mtlx ./build/linux/runtime/rx --demo mtlx`, one sphere
+- Demo: `RX_MTLX=a.mtlx,b.mtlx ./build/linux/apps/shell/rx --demo mtlx`, one sphere
   per file. `tools/get_openpbr_samples.sh` fetches the upstream examples.
 
 No new dependency. TinyUSDZ already parses the whole OpenPBR input set into

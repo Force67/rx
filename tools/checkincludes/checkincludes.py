@@ -28,7 +28,7 @@ ENTITY_WORLD = {"ecs", "scene", "script", "world", "edit", "devtools", "app"}
 EDITOR_ONLY = {"rxe/edit/selection.h", "rxe/edit/undo.h", "rxe/world/world_bake.h"}
 HEADER_EXTS = (".h", ".hpp", ".inl", ".def")
 SOURCE_EXTS = (".cc", ".cpp", ".c") + HEADER_EXTS
-CODE_DIRS = ("foundation", "rxe", "plugins", "runtime", "apps", "tools", "test", "examples")
+CODE_DIRS = ("foundation", "rxe", "plugins", "apps", "tools")
 
 
 def unwrap(item):

@@ -7,7 +7,7 @@ drives the ship through the same public physics/render APIs the water demo uses
 (`AddDynamicBox` + the buoyancy callback, `WaterDisturbance` wakes, additive demo
 particles) and touches no engine internals, water shaders, or `FrameGlobals`.
 
-All the code lives in `runtime/demo_ship.{h,cc}`. The registry wiring is three
+All the code lives in `apps/shell/demo_ship.{h,cc}`. The registry wiring is three
 lines: a `ship_` member on `DemoScenes`, a dispatch arm in `CreateDemoScene`, and
 one `ship_->Emit(...)` call in `EmitToView`.
 
@@ -61,7 +61,7 @@ crew were left out.
 
 ```
 DISPLAY=:10 RX_UI_SHOT=/tmp/shot.png RX_UI_SHOT_FRAMES=130 RX_FIXED_DT=0.0166667 \
-  nix develop -c vkrun stdbuf -oL ./build/linux/runtime/rx --demo ship
+  nix develop -c vkrun stdbuf -oL ./build/linux/apps/shell/rx --demo ship
 ```
 
 Broadsides fire at t≈2.5 s then every 5 s (frames 150, 450, …); the first fires

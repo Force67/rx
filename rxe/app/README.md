@@ -10,7 +10,7 @@ gather + motion-vector history).
 Game policy enters only through the `app::Application` callbacks
 (`OnInitialize` / `OnFixedStep` / `OnUpdate` / `OnBuildView` / `OnFrameEnd` /
 `OnShutdown`): a game implements that interface, hands it to a `Host`, and
-never forks the loop. `runtime/` (the rx viewer) is the reference consumer.
+never forks the loop. `apps/shell` (the rx viewer) is the reference consumer.
 
 Nothing below this layer links back to it; `app` is the only module allowed to
 know about every subsystem.

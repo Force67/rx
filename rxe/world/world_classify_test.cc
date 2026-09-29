@@ -183,7 +183,7 @@ void TestInstanceSetIsConfigurable() {
 // least informative way any of them could fail.
 void TestWorldNameForArchive() {
   CHECK(WorldNameForArchive("city.rxp") == "city");
-  CHECK(WorldNameForArchive("build/linux/runtime/worlds/streamworld.rxp") == "streamworld");
+  CHECK(WorldNameForArchive("build/linux/apps/shell/worlds/streamworld.rxp") == "streamworld");
   CHECK(WorldNameForArchive("C:\\games\\city.rxp") == "city");
   CHECK(WorldNameForArchive("city") == "city");
   // Only the last extension comes off. The editor bakes to <archive>.rxp before

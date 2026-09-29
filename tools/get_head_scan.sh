@@ -28,7 +28,7 @@
 #         (run --demo lookdev with no head asset present).
 #
 # Then:
-#   build/linux/runtime/rx --demo lookdev
+#   build/linux/apps/shell/rx --demo lookdev
 # (the lab picks up assets/head/head.glb on its own; RX_LOOKDEV_SUBJECT=<path>
 # overrides it).
 set -euo pipefail

@@ -147,7 +147,7 @@ int main(int argc, char** argv) {
                  "usage: rxdiff <a.png> <b.png> [--rmse <t>] [--hot <f>] [--hot-delta <d>]\n"
                  "               [--diff <out.png>] [--json]\n"
                  "  defaults: --rmse %g --hot %g --hot-delta %g, measured against this "
-                 "renderer's\n  own run-to-run noise (see the top of tools/rxdiff.cc)\n",
+                 "renderer's\n  own run-to-run noise (see the top of apps/rxdiff/main.cc)\n",
                  static_cast<double>(kDefaultRmse), static_cast<double>(kDefaultHot),
                  static_cast<double>(kDefaultHotDelta));
     return 2;

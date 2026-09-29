@@ -5,7 +5,7 @@
 # the values in the source documents.
 # Usage: tools/get_openpbr_samples.sh [tag]   (default: the pinned tag)
 # Then:  RX_MTLX=$(ls -d $PWD/assets/openpbr/open_pbr_{gold,carpaint,pearl,velvet,sand}.mtlx | paste -sd,) \
-#          ./build/linux/runtime/rx --demo mtlx
+#          ./build/linux/apps/shell/rx --demo mtlx
 set -euo pipefail
 
 REPO_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"

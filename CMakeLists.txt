@@ -439,11 +439,11 @@ foreach(module ${RX_MODULES})
 endforeach()
 
 if(RX_BUILD_EXAMPLES AND "anim" IN_LIST RX_MODULES)
-  add_subdirectory(examples)
+  add_subdirectory(apps/body_jiggle)
 endif()
 
 if(RX_BUILD_RUNTIME)
-  add_subdirectory(runtime)
+  add_subdirectory(apps/shell)
 endif()
 
 # The editor application: an app::Application whose entire UI is rx::ui.
@@ -454,9 +454,7 @@ endif()
 # Asset authoring tools. rxpack creates/lists/extracts/verifies .rxp game
 # archives (rxe/asset/pack.h).
 if(RX_BUILD_TOOLS)
-  add_executable(rxpack tools/rxpack.cc)
-  target_link_libraries(rxpack PRIVATE rx::asset rx::foundation)
-  rx_set_warnings(rxpack)
+  add_subdirectory(apps/rxpack)
 endif()
 
 # Packing an .rxp happens at build time, on the *host*, so a cross build cannot
@@ -483,9 +481,7 @@ endif()
 # (rxe/world/): a world index plus one payload per cell and domain, packed
 # into one .rxp the engine mounts like any other content.
 if(RX_BUILD_TOOLS AND "world" IN_LIST RX_MODULES)
-  add_executable(rxworld tools/rxworld.cc)
-  target_link_libraries(rxworld PRIVATE rx::world rx::edit rx::asset rx::ecs rx::foundation)
-  rx_set_warnings(rxworld)
+  add_subdirectory(apps/rxworld)
 endif()
 
 # Cooking a world happens at build time, on the *host*, so a cross build cannot
@@ -509,14 +505,14 @@ endif()
 # The baked world `rx --world` streams. Cooked at build time rather than checked
 # in as a binary: the .rxscene beside it is the authored source, and running the
 # real cook every build is also the only thing that would notice the tool and
-# the runtime drifting apart. Lives here rather than in runtime/CMakeLists.txt
+# the runtime drifting apart. Lives here rather than in apps/shell/CMakeLists.txt
 # because that is added before rxworld exists.
 if(TARGET rx AND RX_RXWORLD_COMMAND)
-  set(RX_STREAMWORLD_SCENE ${CMAKE_CURRENT_SOURCE_DIR}/runtime/scenes/streamworld.rxscene)
+  set(RX_STREAMWORLD_SCENE ${CMAKE_CURRENT_SOURCE_DIR}/apps/shell/scenes/streamworld.rxscene)
   # A plain path rather than $<TARGET_FILE_DIR:rx>: a generator expression in an
   # OUTPUT cannot name a target from another directory, and rx is added from
-  # runtime/.
-  set(RX_STREAMWORLD_DIR ${CMAKE_BINARY_DIR}/runtime/worlds)
+  # apps/shell/.
+  set(RX_STREAMWORLD_DIR ${CMAKE_BINARY_DIR}/apps/shell/worlds)
   # No --name: the cook takes the archive's filename stem, so the archive, the
   # world inside it, and a bare `rx --world` all agree without being told.
   set(RX_STREAMWORLD_ARCHIVE ${RX_STREAMWORLD_DIR}/streamworld.rxp)
@@ -539,9 +535,7 @@ endif()
 # tool rather than an rx flag: it needs no device, no window and no scene, so it
 # links stb and nothing else and starts instantly in a CI loop.
 if(RX_BUILD_TOOLS)
-  add_executable(rxdiff tools/rxdiff.cc)
-  target_link_libraries(rxdiff PRIVATE rx::stb_impl equilibrium::base)
-  rx_set_warnings(rxdiff)
+  add_subdirectory(apps/rxdiff)
 endif()
 
 # rxcall issues one command to a running engine's --authoring-endpoint socket.
@@ -549,9 +543,7 @@ endif()
 # engine can never disagree about the encoding. Unix sockets only, like the
 # endpoint itself.
 if(RX_BUILD_TOOLS AND NOT WIN32 AND "net/rpc" IN_LIST RX_MODULES)
-  add_executable(rxcall tools/rxcall.cc)
-  target_link_libraries(rxcall PRIVATE rx::rpc rx::foundation)
-  rx_set_warnings(rxcall)
+  add_subdirectory(apps/rxcall)
 endif()
 
 # Everything the engine ships, packed into one archive: rxe/resources (fonts/
