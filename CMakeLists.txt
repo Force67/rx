@@ -60,6 +60,14 @@ if(RX_SHARED)
       "-DRX_INSTALL=OFF (it defaults off for add_subdirectory consumers).")
   endif()
   set(RX_LIB_TYPE SHARED)
+  if(WIN32 AND RX_MIMALLOC)
+    # new_override.cc replaces operator new in the executable only. A DLL cannot
+    # see an executable's replacement on Windows, so a block allocated in a
+    # module would be freed through mimalloc. Component builds are for
+    # iteration, not benchmarks.
+    message(STATUS "RX_SHARED on Windows: mimalloc off")
+    set(RX_MIMALLOC OFF CACHE BOOL "" FORCE)
+  endif()
   # Third-party static archives (equilibrium::base, volk, VMA, Jolt, kinema, NRD,
   # FSR3) get linked into rx shared objects, so their objects must be PIC.
   set(CMAKE_POSITION_INDEPENDENT_CODE ON)
@@ -221,9 +229,16 @@ if(NOT SDL3_FOUND AND TARGET SDL3::SDL3)
 endif()
 if(NOT SDL3_FOUND AND RX_FETCH_SDL3)
   set(SDL_TEST_LIBRARY OFF)
-  # Static keeps the artifacts self contained, no SDL3.dll shipping.
-  set(SDL_SHARED OFF)
-  set(SDL_STATIC ON)
+  if(RX_SHARED AND WIN32)
+    # Every DLL that links a static SDL gets its own copy, with its own event
+    # queue and window list; one SDL3.dll keeps them one.
+    set(SDL_SHARED ON)
+    set(SDL_STATIC OFF)
+  else()
+    # Static keeps the artifacts self contained, no SDL3.dll shipping.
+    set(SDL_SHARED OFF)
+    set(SDL_STATIC ON)
+  endif()
   FetchContent_Declare(SDL3
     GIT_REPOSITORY https://github.com/libsdl-org/SDL.git
     GIT_TAG release-3.2.16
@@ -259,6 +274,12 @@ if(NOT TARGET equilibrium::base)
   # std::memory_order arguments) does not keep it from its cache.
   set(EQ_USE_STD_ATOMIC OFF CACHE BOOL "" FORCE)
   set(EQ_BUILD_TESTS OFF CACHE BOOL "" FORCE)
+  # PE gives each DLL its own copy of a static library's globals (the ELF build
+  # shares them through default visibility), so the Windows component build
+  # needs base as one DLL for one Option/Feature registry, log and allocator.
+  if(RX_SHARED AND WIN32)
+    set(EQ_BASE_SHARED ON CACHE BOOL "" FORCE)
+  endif()
   add_subdirectory(third_party/equilibrium equilibrium EXCLUDE_FROM_ALL)
   # base's std::formatter specializations exist for consumers that format base
   # strings with <format>; nothing here does, and they drag <format> into every

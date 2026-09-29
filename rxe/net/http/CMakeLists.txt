@@ -32,7 +32,8 @@ if(WIN32)
   target_link_libraries(rx_http PRIVATE ws2_32)
 endif()
 
-if(RX_BUILD_TESTS)
+# Not on Windows: the test's local server speaks POSIX sockets.
+if(RX_BUILD_TESTS AND NOT WIN32)
   # rx::http unit tests: url parsing, response-head parsing, chunked decoding and
   # the refusals that happen before a socket is opened. Nothing here touches the
   # network; the live fetch inside it only runs with RX_HTTP_LIVE set.

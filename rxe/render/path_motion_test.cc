@@ -3,16 +3,16 @@
 #include <stdlib.h>
 #include <string.h>
 
-#include "rxe/asset/mesh.h"
-#include "rxe/render/core/bindless.h"
-#include "rxe/render/gi/path_scene_history.h"
-#include "rxe/render/gi/skinned_rt.h"
-#include "rxe/gpu/rhi/device.h"
-#include "shaders/path_motion_recon_cs_hlsl.h"
-#ifdef RX_HAS_NRD
 #include "base/algorithm.h"
 #include "base/memory/mem_ops.h"
 #include "foundation/math/scalar.h"
+#include "rxe/asset/mesh.h"
+#include "rxe/gpu/rhi/device.h"
+#include "rxe/render/core/bindless.h"
+#include "rxe/render/gi/path_scene_history.h"
+#include "rxe/render/gi/skinned_rt.h"
+#include "shaders/path_motion_recon_cs_hlsl.h"
+#ifdef RX_HAS_NRD
 #include "shaders/path_motion_nrd_cs_hlsl.h"
 #endif
 

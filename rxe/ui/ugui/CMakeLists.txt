@@ -28,6 +28,11 @@ if(NOT TARGET ultragui)
   # No STL, no exceptions: ugui's containers are base's (ugui::String is
   # base::String), built against rx's own equilibrium::base.
   set(ULTRAGUI_USE_BASE       ON  CACHE BOOL "" FORCE)
+  # One ultragui for all of rx's DLLs on Windows (see ULTRAGUI_SHARED); ELF
+  # shares a static copy's globals already.
+  if(RX_SHARED AND WIN32)
+    set(ULTRAGUI_SHARED ON CACHE BOOL "" FORCE)
+  endif()
   set(ULTRAGUI_PLATFORM_SOURCE "${CMAKE_CURRENT_SOURCE_DIR}/ugui_platform.cc"
       CACHE FILEPATH "" FORCE)
   set(ULTRAGUI_RHI_SOURCE "${CMAKE_CURRENT_SOURCE_DIR}/ugui_rhi.cc"

@@ -326,6 +326,7 @@ out of scope.
 |---|---|---|
 | `linux-dev` (`build/linux-dev`) | ON | day-to-day work: one DSO per module |
 | `linux`, `windows`, `android`, ... | OFF | shipping, benchmarks, install/export |
+| mingw cross (`nix develop .#mingw`, toolchain file) | either | Windows builds on Linux, run under Wine |
 
 Benchmarks and captures keep running on the static presets, so the shared build
 never skews a performance number.
@@ -344,9 +345,16 @@ What has to exist once per process, and how the shared build keeps it so:
 - log sinks, the feature table, app identity and the memory tracker live in
   `rx_foundation` and are reached through exported functions; the allocator
   override is compiled into the executable only (`rx_enable_mimalloc`).
-- Windows: PE has no unique symbols, so a `windows-dev` preset first needs
-  equilibrium's base linked as a DLL and the shared CRT (`/MD`) everywhere. Not
-  done yet.
+- Windows: PE has no unique symbols, and every DLL that links a static library
+  gets its own copy of its globals. So what must be one per process is a DLL
+  there: equilibrium's base (`EQ_BASE_SHARED`, which also moves the
+  Option/Feature chain roots out of line), libultragui (`ULTRAGUI_SHARED`) and
+  SDL3. zetanet, kinema, stb and the imgui core stay static in each DLL that
+  links them: no state of theirs crosses modules (zetanet's packet pools fall
+  back to the one CRT heap, and only the executable calls imgui). mimalloc is
+  off, because an executable's `operator new` replacement does not reach a DLL.
+  Verified with the mingw cross build (`nix develop .#mingw`,
+  `cmake/toolchain-mingw-w64.cmake`) under Wine; not yet with MSVC.
 
 ## Violations to fix before moving files
 
