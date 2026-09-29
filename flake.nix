@@ -227,6 +227,31 @@
               fi
             '';
           };
+        } // pkgs.lib.optionalAttrs (pkgs.stdenv.hostPlatform.system == "x86_64-linux") {
+          # Windows cross build (cmake/toolchain-mingw-w64.cmake): the default
+          # shell's host tools plus a ucrt64 mingw gcc and Windows builds of the
+          # libraries rx links. UCRT, not msvcrt, because that
+          # is the CRT a real Windows build uses (msvcrt lacks _strtof_l).
+          mingw = let
+            w = pkgs.pkgsCross.ucrt64;
+            # freetype and harfbuzz are not here: libultragui builds them from
+            # source on Windows (their nixpkgs cross builds pull a broken python).
+            roots = [ w.windows.mcfgthreads w.openssl.dev w.openssl.out ];
+          in pkgs.mkShell {
+            inputsFrom = [ self.devShells.${pkgs.stdenv.hostPlatform.system}.default ];
+            # The cross gcc on PATH too: windres runs it as its preprocessor.
+            # No wine here: this nixpkgs' wine segfaults inside the dev shell's
+            # environment; run the PEs with the host's wine.
+            packages = [ w.buildPackages.gcc ];
+            RX_MINGW_CC = "${w.buildPackages.gcc}";
+            RX_MINGW_MCF = "${w.windows.mcfgthreads}";
+            RX_MINGW_MCF_DEV = "${w.windows.mcfgthreads.dev}";
+            RX_MINGW_ROOTS = pkgs.lib.concatStringsSep ";" (map toString roots);
+            # zetanet's find_package(OpenSSL): headers and import libs live in
+            # different outputs.
+            OPENSSL_ROOT_DIR = "${w.openssl.dev}:${w.openssl.out}";
+            shellHook = self.devShells.${pkgs.stdenv.hostPlatform.system}.default.shellHook;
+          };
         });
     };
 }
