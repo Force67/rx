@@ -218,17 +218,20 @@ class LooseFileProvider final : public FileProvider {
   explicit LooseFileProvider(base::String root) : root_(base::move(root)) {}
 
   bool Contains(base::StringRef normalized_path) const override {
-    return fs::IsRegularFile(fs::Join(root_, normalized_path));
+    return !OnDisk(normalized_path).empty();
   }
 
   base::Optional<base::Vector<u8>> Read(base::StringRef normalized_path) const override {
+    const base::String path = OnDisk(normalized_path);
     base::Vector<u8> data;
-    if (!fs::ReadFile(fs::Join(root_, normalized_path), &data)) return base::nullopt;
+    if (path.empty() || !fs::ReadFile(path, &data)) return base::nullopt;
     return data;
   }
 
   base::Optional<u64> Size(base::StringRef normalized_path) const override {
-    return fs::FileSize(fs::Join(root_, normalized_path));
+    const base::String path = OnDisk(normalized_path);
+    if (path.empty()) return base::nullopt;
+    return fs::FileSize(path);
   }
 
   void Enumerate(base::FunctionRef<void(base::StringRef)> fn) const override {
@@ -243,7 +246,33 @@ class LooseFileProvider final : public FileProvider {
   base::String name() const override { return root_; }
 
  private:
+  // The file a normalized (lowercased) path names, or empty. Paths arrive
+  // lowercased, so on a case-sensitive file system a file with capitals in
+  // its name (Roboto-Regular.ttf) is found through a case-folded index of the
+  // tree. The index is built once, on the first path that misses; Resolve
+  // probes every mount, so misses are common and must stay cheap. A file
+  // added after that is found only under its lowercase name.
+  base::String OnDisk(base::StringRef normalized_path) const {
+    base::String exact = fs::Join(root_, normalized_path);
+    if (fs::IsRegularFile(exact)) return exact;
+    base::LockGuard<base::Mutex> lock(index_mutex_);
+    if (!indexed_) {
+      base::Vector<fs::DirEntry> entries;
+      fs::ListDirectory(root_, &entries, /*recursive=*/true);
+      for (const fs::DirEntry& entry : entries) {
+        if (!entry.is_regular) continue;
+        index_[NormalizePath(fs::GenericString(fs::Relative(entry.path, root_)))] = entry.path;
+      }
+      indexed_ = true;
+    }
+    const base::String* found = index_.find(base::String(normalized_path));
+    return found && fs::IsRegularFile(*found) ? *found : base::String();
+  }
+
   base::String root_;
+  mutable base::Mutex index_mutex_;
+  mutable base::UnorderedMap<base::String, base::String> index_;
+  mutable bool indexed_ = false;
 };
 
 }  // namespace
