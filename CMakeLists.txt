@@ -25,6 +25,7 @@ option(RX_SPIRV_1_4 "Emit SPIR-V 1.4 modules (loadable on Vulkan 1.1)" OFF)
 option(RX_BUILD_TESTS "Build library test suites" ON)
 option(RX_BUILD_RUNTIME "Build the rx viewer executable" ON)
 option(RX_BUILD_EDITOR "Build the rx editor application (apps/editor)" OFF)
+option(RX_BUILD_RXC "Build librxc, the C ABI for games in other languages (apps/rxc)" OFF)
 option(RX_BUILD_TOOLS "Build the asset authoring tools (rxpack)" ON)
 option(RX_BUILD_EXAMPLES "Build small standalone engine examples" OFF)
 option(RX_AUDIO_FFMPEG "Decode compressed audio via FFmpeg (libav*)" OFF)
@@ -75,6 +76,10 @@ if(RX_SHARED)
   # InitChain carries default visibility (base/containers/init_chain.h).
 else()
   set(RX_LIB_TYPE STATIC)
+  # librxc links every static module into one shared object.
+  if(RX_BUILD_RXC)
+    set(CMAKE_POSITION_INDEPENDENT_CODE ON)
+  endif()
 endif()
 
 # Android is a first-class target, but several desktop backends do not apply:
@@ -470,6 +475,10 @@ endif()
 # The editor application: an app::Application whose entire UI is rx::ui.
 if(RX_BUILD_EDITOR)
   add_subdirectory(apps/editor)
+endif()
+
+if(RX_BUILD_RXC)
+  add_subdirectory(apps/rxc)
 endif()
 
 # Asset authoring tools. rxpack creates/lists/extracts/verifies .rxp game
